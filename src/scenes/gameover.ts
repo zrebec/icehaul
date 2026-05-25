@@ -11,6 +11,7 @@ export function createGameOverScene(stats: {
   distance: number
   elapsedMs: number
   reason: 'fuel' | 'offroad'
+  score: number
 }): Scene {
   let ready = false
   let readyTimer = 0
@@ -43,6 +44,10 @@ export function createGameOverScene(stats: {
       const mm = Math.floor(sec / 60).toString().padStart(2, '0')
       const ss = (sec % 60).toString().padStart(2, '0')
       drawTextCentered(ctx, `TIME: ${mm}:${ss}`, 104, COLS, C.B_WHITE)
+
+      if (stats.score > 0) {
+        drawTextCentered(ctx, `SCORE: ${stats.score}`, 120, COLS, C.B_YELLOW)
+      }
 
       if (ready) {
         drawTextCentered(ctx, 'PRESS ANY KEY', 140, COLS, C.B_CYAN)

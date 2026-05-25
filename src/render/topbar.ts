@@ -6,11 +6,7 @@ function fmtKm(distM: number): string {
 }
 
 const SURFACE_WARN_LABEL: Record<Surface, string> = {
-  asphalt: '',
-  snow:    'SNOW AHEAD',
-  ice:     'ICE AHEAD',
-  sand:    'SAND AHEAD',
-  mud:     'MUD AHEAD',
+  asphalt: '', snow: 'SNOW AHEAD', ice: 'ICE AHEAD', sand: 'SAND AHEAD', mud: 'MUD AHEAD',
 }
 
 export function drawTopBar(
@@ -21,6 +17,8 @@ export function drawTopBar(
     elapsedMs: number
     dangerAhead: Surface | null
     iceAheadBlink: boolean
+    lowFuel?: boolean
+    lowFuelBlink?: boolean
   },
 ): void {
   const barH = STATUS_BAR_ROWS * CELL
@@ -38,7 +36,10 @@ export function drawTopBar(
   const ss = (totalSec % 60).toString().padStart(2, '0')
   drawText(ctx, `TIME ${mm}:${ss}`, 0, CELL, C.B_WHITE, C.BLACK)
 
-  if (state.dangerAhead && state.iceAheadBlink) {
+  // Right side of row 2: danger ahead OR low fuel warning
+  if (state.lowFuel && state.lowFuelBlink) {
+    drawTextCentered(ctx, 'LOW FUEL', CELL, COLS, C.B_RED, C.BLACK)
+  } else if (state.dangerAhead && state.iceAheadBlink) {
     const label = SURFACE_WARN_LABEL[state.dangerAhead]
     if (label) drawTextCentered(ctx, label, CELL, COLS, C.B_RED, C.B_YELLOW)
   }

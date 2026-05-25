@@ -199,11 +199,42 @@ export const KERB_WIDTH_TOP = 1
 
 // ── Audio ───────────────────────────────────────────────────────────────────
 
-export const ENGINE_IDLE_HZ = 40
-export const ENGINE_TOP_HZ = 235
 export const ENGINE_GAIN = 0.06
 export const SCREECH_COOLDOWN_S = 0.35
 export const OFFROAD_BEEP_COOLDOWN_S = 0.25
+
+/**
+ * Per-surface engine sound: [oscillator type, idle Hz, top Hz].
+ * Asphalt: clean square. Snow: muffled triangle. Ice: sharp sawtooth.
+ * Sand: deep square. Mud: modulated triangle.
+ */
+export const SURFACE_ENGINE_SOUND: Record<Surface, readonly [OscillatorType, number, number]> = {
+  asphalt: ['square',   40, 235],
+  snow:    ['triangle', 35, 180],
+  ice:     ['sawtooth', 50, 280],
+  sand:    ['square',   25, 140],
+  mud:     ['triangle', 30, 160],
+}
+
+/** Low-fuel warning threshold (fraction 0–1). Below this: blink + beep. */
+export const LOW_FUEL_WARN = 0.20
+/** Critical fuel threshold. Below this: faster blink + urgent beep. */
+export const LOW_FUEL_CRITICAL = 0.10
+/** Low-fuel warning beep cooldown (seconds). */
+export const LOW_FUEL_BEEP_COOLDOWN_S = 0.8
+/** Critical fuel beep cooldown (faster). */
+export const LOW_FUEL_CRIT_BEEP_COOLDOWN_S = 0.4
+
+// ── Mission / delivery ──────────────────────────────────────────────────────
+
+/** Distance of the first delivery target from start (metres). */
+export const FIRST_TARGET_DIST_M = 5000
+/** Range for subsequent targets [min, max] metres beyond current position. */
+export const NEXT_TARGET_RANGE: readonly [number, number] = [15000, 25000]
+/** Fuel refill fraction awarded on successful delivery (0–1). */
+export const DELIVERY_FUEL_REFILL = 0.50
+/** Score points awarded per delivery. */
+export const DELIVERY_SCORE = 500
 
 // ── UI timing ───────────────────────────────────────────────────────────────
 
