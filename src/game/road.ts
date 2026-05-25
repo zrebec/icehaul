@@ -1,8 +1,8 @@
 import {
   type Surface,
-  SURFACE_GRIP, SURFACE_ACCEL, SURFACE_PROBABILITY,
+  SURFACE_GRIP, SURFACE_ACCEL, SURFACE_PROBABILITY, SURFACE_LENGTH_RANGE,
   SEGMENT_LENGTH_M, CURVATURE_RANGE, STRAIGHT_SEGMENT_PCT,
-  ICE_AHEAD_LOOK_M,
+  ICE_AHEAD_LOOK_M, START_ASPHALT_M,
 } from '../config.ts'
 
 export type { Surface }
@@ -15,9 +15,16 @@ function hash(n: number): number {
   return (x >>> 0) / 0x100000000
 }
 
+// ── Variable-length road segments ───────────────────────────────────────────
+
+interface RoadSegment {
+  start: number
+  end: number
+  surface: Surface
+}
+
 const SURFACE_ORDER: Surface[] = ['asphalt', 'snow', 'ice', 'sand', 'mud']
 
-/** Pick a surface from the weighted probability table. */
 function pickSurface(h: number): Surface {
   let acc = 0
   for (const s of SURFACE_ORDER) {
@@ -27,9 +34,33 @@ function pickSurface(h: number): Surface {
   return 'asphalt'
 }
 
-export function getSurfaceAt(distanceMeters: number, seed = 0): Surface {
-  const segIdx = Math.floor(distanceMeters / SEGMENT_LENGTH_M)
-  return pickSurface(hash(segIdx + seed * 1009))
+const _segments: RoadSegment[] = []
+let _generatedUpTo = 0
+
+function ensureGenerated(upToDist: number): void {
+  while (_generatedUpTo < upToDist + 500) {
+    if (_segments.length === 0) {
+      _segments.push({ start: 0, end: START_ASPHALT_M, surface: 'asphalt' })
+      _generatedUpTo = START_ASPHALT_M
+    } else {
+      const idx = _segments.length
+      const surface = pickSurface(hash(idx * 17 + 3))
+      const [minLen, maxLen] = SURFACE_LENGTH_RANGE[surface]
+      const length = minLen + (maxLen - minLen) * hash(idx * 31 + 11)
+      _segments.push({ start: _generatedUpTo, end: _generatedUpTo + length, surface })
+      _generatedUpTo += length
+    }
+  }
+}
+
+export function getSurfaceAt(distanceMeters: number, _seed = 0): Surface {
+  if (distanceMeters < 0) return 'asphalt'
+  ensureGenerated(distanceMeters)
+  for (let i = _segments.length - 1; i >= 0; i--) {
+    const seg = _segments[i]!
+    if (distanceMeters >= seg.start) return seg.surface
+  }
+  return 'asphalt'
 }
 
 export function gripFor(surface: Surface): number {
@@ -40,16 +71,16 @@ export function accelFor(surface: Surface): number {
   return SURFACE_ACCEL[surface]
 }
 
-/**
- * Returns true when current surface is safe but a dangerous surface
- * (ice, sand, mud) is approaching within look-ahead distance.
- */
 export function isDangerAhead(currentDist: number): Surface | null {
   const current = getSurfaceAt(currentDist)
-  if (current !== 'asphalt') return null
-  const ahead = getSurfaceAt(currentDist + ICE_AHEAD_LOOK_M)
-  return ahead !== 'asphalt' ? ahead : null
+  if (current === 'asphalt') {
+    const ahead = getSurfaceAt(currentDist + ICE_AHEAD_LOOK_M)
+    return ahead !== 'asphalt' ? ahead : null
+  }
+  return null
 }
+
+// ── Curvature (fixed grid, independent of surface segments) ─────────────────
 
 function segmentCurvature(segIdx: number): number {
   const h = hash(segIdx * 3 + 7)

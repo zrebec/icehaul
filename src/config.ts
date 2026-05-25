@@ -126,8 +126,24 @@ export const FUEL_IDLE_THRESHOLD = 5
 
 // ── Road generation ─────────────────────────────────────────────────────────
 
-/** Length of one road segment in metres. */
+/** Fixed grid size for curvature generation (metres). Surface uses variable lengths. */
 export const SEGMENT_LENGTH_M = 180
+
+/** First segment is always asphalt, at least this many metres. */
+export const START_ASPHALT_M = 1000
+
+/**
+ * Per-surface segment length range [min, max] in metres.
+ * Each surface gets a random length within its range.
+ * Ice is short (0.1–0.3 km) to keep encounters intense but brief.
+ */
+export const SURFACE_LENGTH_RANGE: Record<Surface, readonly [number, number]> = {
+  asphalt: [200, 800],
+  snow:    [100, 800],
+  ice:     [100, 300],
+  sand:    [100, 800],
+  mud:     [100, 800],
+}
 
 // ── Curvature ───────────────────────────────────────────────────────────────
 
