@@ -101,6 +101,18 @@ export const SURFACE_STEER_DAMP_MULT: Record<Surface, number> = {
   mud:     1.5,
 }
 
+/**
+ * Per-surface fuel consumption multiplier.
+ * Sand/mud burn more (engine works harder). Ice burns slightly less (low resistance).
+ */
+export const SURFACE_FUEL_MULT: Record<Surface, number> = {
+  asphalt: 1.0,
+  snow:    1.3,
+  ice:     0.9,
+  sand:    2.0,
+  mud:     1.6,
+}
+
 /** Per-surface tire wear rate multiplier (future mechanic). */
 export const SURFACE_WEAR: Record<Surface, number> = {
   asphalt: 1.0,
@@ -219,7 +231,7 @@ export const SURFACE_ENGINE_SOUND: Record<Surface, readonly [OscillatorType, num
 // ── Fuel canisters ──────────────────────────────────────────────────────────
 
 /** Average spacing between fuel canisters on the road (metres). */
-export const CANISTER_SPACING_M = 600
+export const CANISTER_SPACING_M = 900
 /** Random variation on canister spacing: actual = spacing × (1 ± this). */
 export const CANISTER_SPACING_JITTER = 0.4
 /** Lateral position range for canisters: 0 = centre, 1.0 = road edge. */

@@ -7,6 +7,7 @@ import {
   FUEL_BURN_RATE, FUEL_IDLE_THRESHOLD,
   SURFACE_DRAG, SURFACE_BRAKE_MULT,
   SURFACE_SKID_ENABLED, SURFACE_STEER_DAMP_MULT,
+  SURFACE_FUEL_MULT,
   type Surface,
 } from '../config.ts'
 
@@ -92,7 +93,13 @@ export function tickVehicle(
 
   v.distance += (v.speed / 3.6) * dt
 
+  // Fuel burn — per-surface multiplier (sand/mud burn more, ice less)
   if (v.speed > FUEL_IDLE_THRESHOLD && v.fuel > 0) {
-    v.fuel = Math.max(0, v.fuel - v.speed * FUEL_BURN_RATE * dt)
+    v.fuel = Math.max(0, v.fuel - v.speed * FUEL_BURN_RATE * SURFACE_FUEL_MULT[surface] * dt)
+  }
+
+  // Empty tank: engine dies, truck coasts to a stop
+  if (v.fuel <= 0 && v.speed > 0) {
+    v.speed = Math.max(0, v.speed - 8 * dt)
   }
 }

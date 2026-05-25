@@ -53,9 +53,12 @@ export function checkCanisterPickup(truckDist: number, truckX: number): number {
   for (const c of _canisters) {
     if (c.collected) continue
     if (c.distM < truckDist - 50) { c.collected = true; continue } // passed, gone
-    const dz = Math.abs(c.distM - truckDist)
+    // Pickup only when truck has REACHED or PASSED the canister (not before it)
+    const ahead = c.distM - truckDist
+    if (ahead > CANISTER_PICKUP_DEPTH_M) continue  // still ahead, too far
+    if (ahead < -CANISTER_PICKUP_DEPTH_M) continue  // too far behind
     const dx = Math.abs(c.x - truckX)
-    if (dz < CANISTER_PICKUP_DEPTH_M && dx < CANISTER_PICKUP_RADIUS) {
+    if (ahead <= 0 && dx < CANISTER_PICKUP_RADIUS) {
       c.collected = true
       fuelGained += CANISTER_FUEL
     }
