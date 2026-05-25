@@ -107,10 +107,10 @@ export const SURFACE_STEER_DAMP_MULT: Record<Surface, number> = {
  */
 export const SURFACE_FUEL_MULT: Record<Surface, number> = {
   asphalt: 1.0,
-  snow:    1.3,
+  snow:    1.2,
   ice:     0.9,
-  sand:    2.0,
-  mud:     1.6,
+  sand:    1.5,
+  mud:     1.3,
 }
 
 /** Per-surface tire wear rate multiplier (future mechanic). */
@@ -231,13 +231,13 @@ export const SURFACE_ENGINE_SOUND: Record<Surface, readonly [OscillatorType, num
 // ── Fuel canisters ──────────────────────────────────────────────────────────
 
 /** Average spacing between fuel canisters on the road (metres). */
-export const CANISTER_SPACING_M = 900
+export const CANISTER_SPACING_M = 700
 /** Random variation on canister spacing: actual = spacing × (1 ± this). */
 export const CANISTER_SPACING_JITTER = 0.4
 /** Lateral position range for canisters: 0 = centre, 1.0 = road edge. */
 export const CANISTER_X_RANGE = 0.9
-/** Fuel added per canister pickup (fraction of full tank). 1 segment = 1/6. */
-export const CANISTER_FUEL = 1 / 6
+/** Fuel added per canister pickup (fraction of full tank). 1 segment = 1/5. */
+export const CANISTER_FUEL = 1 / 5
 /** Pickup distance threshold in player.x units (how close you must be). */
 export const CANISTER_PICKUP_RADIUS = 0.25
 /** World-distance tolerance for pickup (metres ahead/behind truck). */

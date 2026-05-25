@@ -93,9 +93,12 @@ export function tickVehicle(
 
   v.distance += (v.speed / 3.6) * dt
 
-  // Fuel burn — per-surface multiplier (sand/mud burn more, ice less)
+  // Fuel burn — quadratic: going faster burns MORE per km (not just per second).
+  // This makes slowing down on sand a real survival strategy.
+  // Formula: speed × (speed / MAX_SPEED) × BURN_RATE × SURFACE_MULT
   if (v.speed > FUEL_IDLE_THRESHOLD && v.fuel > 0) {
-    v.fuel = Math.max(0, v.fuel - v.speed * FUEL_BURN_RATE * SURFACE_FUEL_MULT[surface] * dt)
+    const speedFactor = v.speed * (v.speed / MAX_SPEED)
+    v.fuel = Math.max(0, v.fuel - speedFactor * FUEL_BURN_RATE * SURFACE_FUEL_MULT[surface] * dt)
   }
 
   // Empty tank: engine dies, truck coasts to a stop
