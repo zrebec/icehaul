@@ -61,7 +61,7 @@ export function createDriveScene(
       const grip = gripFor(surface)
       const accel = accelFor(surface)
       const curvature = getCurvatureAt(v.distance)
-      tickVehicle(v, input, grip, accel, dt, curvature)
+      tickVehicle(v, input, surface, grip, accel, dt, curvature)
 
       if (engineStarted) setEngineRPM(v.speed, MAX_SPEED)
 

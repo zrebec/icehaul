@@ -5,6 +5,9 @@ import {
   ROAD_EDGE, OFF_ROAD_DRAG, OFF_ROAD_RETURN,
   SKID_THRESHOLD, SKID_AMPLIFY,
   FUEL_BURN_RATE, FUEL_IDLE_THRESHOLD,
+  SURFACE_DRAG, SURFACE_BRAKE_MULT,
+  SURFACE_SKID_ENABLED, SURFACE_STEER_DAMP_MULT,
+  type Surface,
 } from '../config.ts'
 
 export { MAX_SPEED }
@@ -14,7 +17,6 @@ export interface Vehicle {
   vx: number
   speed: number
   distance: number
-  /** Fuel level 0..1. Drains with speed. 0 = empty → game over. */
   fuel: number
 }
 
@@ -36,6 +38,7 @@ export function offRoadAmount(v: Vehicle): number {
 export function tickVehicle(
   v: Vehicle,
   input: VehicleInput,
+  surface: Surface,
   grip: number,
   accelMult: number,
   dtMs: number,
@@ -43,9 +46,16 @@ export function tickVehicle(
 ): void {
   const dt = dtMs / 1000
 
-  // Forward — accelMult varies by surface (ice=fast, sand=very slow)
+  // Forward — accelMult varies by surface
   if (input.throttle && v.fuel > 0) v.speed = Math.min(MAX_SPEED, v.speed + ACCEL * accelMult * dt)
-  if (input.brake) v.speed = Math.max(0, v.speed - BRAKE_DECEL * dt)
+  // Brake — effectiveness varies by surface (ice: weak brakes)
+  if (input.brake) v.speed = Math.max(0, v.speed - BRAKE_DECEL * SURFACE_BRAKE_MULT[surface] * dt)
+
+  // Passive surface drag (sand digs in, mud resists, snow mild, asphalt/ice: none)
+  const drag = SURFACE_DRAG[surface]
+  if (drag > 0 && v.speed > 0) {
+    v.speed = Math.max(0, v.speed - drag * dt)
+  }
 
   // Off-road penalty
   const offRoad = offRoadAmount(v)
@@ -59,20 +69,18 @@ export function tickVehicle(
     v.vx += -curvature * v.speed * CURVE_DRIFT * (1 - grip * 0.7) * dt
   }
 
-  // Steering
+  // Steering — with per-surface damping multiplier (sand: extra heavy)
   if (input.steerLeft)  v.vx -= STEER_ACCEL * grip * dt
   if (input.steerRight) v.vx += STEER_ACCEL * grip * dt
   if (!input.steerLeft && !input.steerRight) {
-    v.vx *= 1 - Math.min(1, STEER_DAMP * grip * dt)
+    const dampMult = SURFACE_STEER_DAMP_MULT[surface]
+    v.vx *= 1 - Math.min(1, STEER_DAMP * grip * dampMult * dt)
   }
 
-  // Skid: on low-grip surfaces, once |vx| exceeds threshold, drift amplifies itself.
-  // This makes HOLDING the steering key on ice → oversteer → skid → crash.
-  // TAPPING keeps vx below threshold → controlled corrections.
-  if (grip < 1 && Math.abs(v.vx) > SKID_THRESHOLD) {
+  // Skid: only on surfaces where skid is enabled (not sand — sand is resistance, not slip)
+  if (SURFACE_SKID_ENABLED[surface] && Math.abs(v.vx) > SKID_THRESHOLD) {
     const excess = Math.abs(v.vx) - SKID_THRESHOLD
-    const amplify = excess * SKID_AMPLIFY * (1 - grip)
-    v.vx += Math.sign(v.vx) * amplify * dt
+    v.vx += Math.sign(v.vx) * excess * SKID_AMPLIFY * (1 - grip) * dt
   }
 
   v.vx = Math.max(-MAX_LATERAL_V, Math.min(MAX_LATERAL_V, v.vx))
@@ -82,7 +90,6 @@ export function tickVehicle(
 
   v.distance += (v.speed / 3.6) * dt
 
-  // Fuel burn — proportional to speed
   if (v.speed > FUEL_IDLE_THRESHOLD && v.fuel > 0) {
     v.fuel = Math.max(0, v.fuel - v.speed * FUEL_BURN_RATE * dt)
   }
