@@ -5,20 +5,25 @@ import {
 import {
   GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP,
   BLINK_MS, SCREECH_COOLDOWN_S, OFFROAD_BEEP_COOLDOWN_S,
-  EDGE_WARN_THRESHOLD, ROAD_EDGE,
+  EDGE_WARN_THRESHOLD,
 } from '../config.ts'
 import {
   createVehicle, tickVehicle, offRoadAmount, MAX_SPEED,
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
-import { getSurfaceAt, gripFor, isIceAhead, getCurvatureAt, type Surface } from '../game/road.ts'
+import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, type Surface } from '../game/road.ts'
 import { drawRoad, drawStarField } from '../render/road3d.ts'
 import { drawTruck } from '../render/truck.ts'
 import { drawHUD } from '../render/hud.ts'
 import { drawTopBar } from '../render/topbar.ts'
-import { startEngine, setEngineRPM } from '../audio/engine.ts'
+import { startEngine, setEngineRPM, stopEngine } from '../audio/engine.ts'
 
-export function createDriveScene(): Scene {
+/** Seconds of continuous off-road before forced game over. */
+const OFFROAD_TIMEOUT_S = 3.0
+
+export function createDriveScene(
+  onGameOver: (stats: { distance: number; elapsedMs: number; reason: 'fuel' | 'offroad' }) => void,
+): Scene {
   const v: Vehicle = createVehicle()
   let elapsedMs = 0
   let blinkPhase = true
@@ -27,11 +32,14 @@ export function createDriveScene(): Scene {
   let lastScreechAtS = -1
   let lastOffroadBeepS = -1
   let wasOffRoad = false
+  let offroadAccumS = 0
+  let gameOverFired = false
 
   return {
     name: 'drive',
 
     update(dt) {
+      if (gameOverFired) return
       elapsedMs += dt
 
       if (!engineStarted && getAudioContext() != null) {
@@ -51,13 +59,15 @@ export function createDriveScene(): Scene {
 
       const surface: Surface = getSurfaceAt(v.distance)
       const grip = gripFor(surface)
+      const accel = accelFor(surface)
       const curvature = getCurvatureAt(v.distance)
-      tickVehicle(v, input, grip, dt, curvature)
+      tickVehicle(v, input, grip, accel, dt, curvature)
 
       if (engineStarted) setEngineRPM(v.speed, MAX_SPEED)
 
-      // Tire screech on ice
       const ctxAudio = getAudioContext()
+
+      // Tire screech on ice
       if (ctxAudio && surface === 'ice' && v.speed > 45 && (input.steerLeft || input.steerRight)) {
         const now = ctxAudio.currentTime
         if (now - lastScreechAtS > SCREECH_COOLDOWN_S) {
@@ -69,6 +79,12 @@ export function createDriveScene(): Scene {
       // Off-road + edge warning
       const offRoad = offRoadAmount(v)
       const atEdge = Math.abs(v.x) > EDGE_WARN_THRESHOLD && offRoad === 0
+
+      if (offRoad > 0) {
+        offroadAccumS += dt / 1000
+      } else {
+        offroadAccumS = 0
+      }
 
       if (ctxAudio && v.speed > 10) {
         const now = ctxAudio.currentTime
@@ -86,6 +102,19 @@ export function createDriveScene(): Scene {
         }
       }
       wasOffRoad = offRoad > 0
+
+      // Game over conditions
+      if (v.fuel <= 0 && v.speed < 1) {
+        triggerGameOver('fuel')
+      } else if (offroadAccumS > OFFROAD_TIMEOUT_S) {
+        triggerGameOver('offroad')
+      }
+
+      function triggerGameOver(reason: 'fuel' | 'offroad') {
+        gameOverFired = true
+        stopEngine()
+        onGameOver({ distance: v.distance, elapsedMs, reason })
+      }
     },
 
     render(ctx) {
@@ -94,18 +123,22 @@ export function createDriveScene(): Scene {
 
       drawTopBar(ctx, {
         distance: v.distance, score: 0, elapsedMs,
-        iceAhead: isIceAhead(v.distance), iceAheadBlink: blinkPhase,
+        dangerAhead: isDangerAhead(v.distance), iceAheadBlink: blinkPhase,
       })
 
       drawStarField(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM)
       drawRoad(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x,
         (d) => getSurfaceAt(d), (d) => getCurvatureAt(d))
 
-      // Player truck — fixed near bottom of viewport, shifts with player.x
       const truckX = GAME_WIDTH / 2 + v.x * 50
       drawTruck(ctx, truckX, VIEWPORT_BOTTOM - 2, -v.vx * 1.5)
 
-      drawHUD(ctx, { speed: v.speed })
+      const currentGrip = gripFor(getSurfaceAt(v.distance))
+      drawHUD(ctx, {
+        speed: v.speed,
+        fuelPct: v.fuel,
+        gripPct: currentGrip,
+      })
     },
   }
 }

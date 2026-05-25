@@ -1,11 +1,11 @@
 import { C, type SpectrumColor } from 'zx-kit'
 import {
+  type Surface,
   GAME_WIDTH, HORIZON_PCT,
   LATERAL_SHIFT, CURVE_STRENGTH, PERSPECTIVE_K,
   ROAD_HALF_TOP, ROAD_HALF_BOTTOM,
   KERB_STRIPE_M, KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
 } from '../config.ts'
-import type { Surface } from '../game/road.ts'
 
 // ── Star field ──────────────────────────────────────────────────────────────
 
@@ -77,20 +77,7 @@ export function drawRoad(
     const leftX = Math.round(centerX - half)
     const rightX = Math.round(centerX + half)
 
-    if (surface === 'ice') {
-      const phaseShift = Math.floor(absDist * 2)
-      ctx.fillStyle = (y + phaseShift) % 4 < 2 ? C.B_CYAN : C.CYAN
-      ctx.fillRect(left(leftX), y, clampW(leftX, rightX), 1)
-      if (y % 5 === 0) {
-        ctx.fillStyle = C.B_WHITE
-        for (let x = leftX + 6; x < rightX - 6; x += 14) {
-          if (x >= 0 && x < GAME_WIDTH) ctx.fillRect(x, y, 1, 1)
-        }
-      }
-    } else {
-      ctx.fillStyle = C.BLUE
-      ctx.fillRect(left(leftX), y, clampW(leftX, rightX), 1)
-    }
+    drawSurfaceScanline(ctx, surface, left(leftX), clampW(leftX, rightX), y, absDist)
 
     // Kerb stripes
     const stripeIdx = Math.floor(absDist / KERB_STRIPE_M)
@@ -110,6 +97,50 @@ export function drawRoad(
         ctx.fillRect(cx, y, 1, 1)
       }
     }
+  }
+}
+
+// ── Surface scanline renderers ──────────────────────────────────────────────
+
+function drawSurfaceScanline(
+  ctx: CanvasRenderingContext2D,
+  surface: Surface,
+  x: number, w: number, y: number,
+  absDist: number,
+): void {
+  if (w <= 0) return
+  const phase = Math.floor(absDist * 2)
+
+  switch (surface) {
+    case 'asphalt':
+      ctx.fillStyle = C.BLUE
+      ctx.fillRect(x, y, w, 1)
+      break
+
+    case 'ice':
+      ctx.fillStyle = (y + phase) % 4 < 2 ? C.B_CYAN : C.CYAN
+      ctx.fillRect(x, y, w, 1)
+      if (y % 5 === 0) {
+        ctx.fillStyle = C.B_WHITE
+        for (let px = x + 6; px < x + w - 6; px += 14) ctx.fillRect(px, y, 1, 1)
+      }
+      break
+
+    case 'snow':
+      ctx.fillStyle = (y + phase) % 3 === 0 ? C.WHITE : C.B_WHITE
+      ctx.fillRect(x, y, w, 1)
+      break
+
+    case 'sand':
+      ctx.fillStyle = (y + phase) % 3 === 0 ? C.YELLOW : C.B_YELLOW
+      ctx.fillRect(x, y, w, 1)
+      break
+
+    case 'mud':
+      // Dithered RED + YELLOW → ZX colour-clash "brown"
+      ctx.fillStyle = (y + phase) % 2 === 0 ? C.RED : C.YELLOW
+      ctx.fillRect(x, y, w, 1)
+      break
   }
 }
 

@@ -120,10 +120,10 @@ function drawSpeedPanel(
   })
 
   drawText(ctx, '0',   cx - radius - 4,  cy + radius - 2, C.B_WHITE, C.BLACK)
-  drawText(ctx, '40',  cx - radius - 8,  cy - radius / 2, C.B_WHITE, C.BLACK)
-  drawText(ctx, '80',  cx - 8,           cy - radius - 6, C.B_WHITE, C.BLACK)
-  drawText(ctx, '120', cx + radius - 4,  cy - radius / 2, C.B_WHITE, C.BLACK)
-  drawText(ctx, '160', cx + radius - 10, cy + radius - 2, C.B_WHITE, C.BLACK)
+  drawText(ctx, '30',  cx - radius - 8,  cy - radius / 2, C.B_WHITE, C.BLACK)
+  drawText(ctx, '60',  cx - 8,           cy - radius - 6, C.B_WHITE, C.BLACK)
+  drawText(ctx, '90',  cx + radius - 4,  cy - radius / 2, C.B_WHITE, C.BLACK)
+  drawText(ctx, '120', cx + radius - 10, cy + radius - 2, C.B_WHITE, C.BLACK)
 
   drawText(ctx, 'km/h', cx - 16, cy + 6, C.B_WHITE, C.BLACK)
 }

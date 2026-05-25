@@ -21,139 +21,167 @@ export const STATUS_BAR_ROWS = 2
 /** Bottom HUD instrument panel height in cell rows. */
 export const HUD_ROWS = 9
 /** First pixel row of the driving viewport (below status bar). */
-export const VIEWPORT_TOP = STATUS_BAR_ROWS * 8            // 32
+export const VIEWPORT_TOP = STATUS_BAR_ROWS * 8            // 16
 /** Last+1 pixel row of the driving viewport (above HUD). */
 export const VIEWPORT_BOTTOM = GAME_HEIGHT - HUD_ROWS * 8  // 120
 /** Driving viewport height in pixels. */
-export const VIEWPORT_HEIGHT = VIEWPORT_BOTTOM - VIEWPORT_TOP  // 88
+export const VIEWPORT_HEIGHT = VIEWPORT_BOTTOM - VIEWPORT_TOP  // 104
 
 /**
  * Horizon position as a fraction of viewport height from the top.
- * 0.25 = compact sky (25% sky, 75% road). Lower = more road visible.
+ * 0.15 = very compact sky, mostly road.
  */
 export const HORIZON_PCT = 0.15
 
+// ── Surface types & per-surface physics ─────────────────────────────────────
+
+export type Surface = 'asphalt' | 'snow' | 'ice' | 'sand' | 'mud'
+
+/**
+ * Per-surface acceleration multiplier. Applied to base ACCEL.
+ * >1 = easier to accelerate (e.g. ice — wheels spin freely).
+ * <1 = harder (e.g. sand — wheels dig in).
+ */
+export const SURFACE_ACCEL: Record<Surface, number> = {
+  asphalt: 1.0,
+  snow:    0.55,
+  ice:     1.8,
+  sand:    0.2,
+  mud:     0.35,
+}
+
+/**
+ * Per-surface grip (0–1). Affects steering responsiveness, lateral damping,
+ * skid threshold behaviour, and centrifugal curve drift.
+ * 1.0 = full grip (asphalt). Lower = less control.
+ */
+export const SURFACE_GRIP: Record<Surface, number> = {
+  asphalt: 1.0,
+  snow:    0.55,
+  ice:     0.25,
+  sand:    0.35,
+  mud:     0.45,
+}
+
+/**
+ * Per-surface tire wear rate multiplier. Applied to a future tire-wear
+ * mechanic. Higher = tires degrade faster on this surface.
+ */
+export const SURFACE_WEAR: Record<Surface, number> = {
+  asphalt: 1.0,
+  snow:    1.6,
+  ice:     2.5,
+  sand:    1.8,
+  mud:     1.4,
+}
+
+/**
+ * Probability weights for surface generation (must sum to ~1.0).
+ * The generator picks a surface based on cumulative probability bands.
+ */
+export const SURFACE_PROBABILITY: Record<Surface, number> = {
+  asphalt: 0.30,
+  snow:    0.22,
+  ice:     0.22,
+  sand:    0.10,
+  mud:     0.16,
+}
+
 // ── Vehicle physics ─────────────────────────────────────────────────────────
 
-/** Maximum forward speed in km/h. Matches the speed dial range. */
-export const MAX_SPEED = 160
-/** Throttle acceleration in km/h gained per second. */
+/** Maximum forward speed in km/h. Matches the speed dial range (0–120). */
+export const MAX_SPEED = 120
+/** Base throttle acceleration in km/h gained per second (on asphalt). */
 export const ACCEL = 25
 /** Brake deceleration in km/h lost per second. */
 export const BRAKE_DECEL = 90
 /** Steering lateral acceleration in normalised x-units per second² at grip=1. */
 export const STEER_ACCEL = 3.2
-/** Lateral velocity damping per second at grip=1 when not steering. Higher = snappier return to centre. */
+/** Lateral velocity damping per second at grip=1 when not steering. */
 export const STEER_DAMP = 5.0
-/** Maximum lateral velocity (clamp). Prevents infinite drift accumulation. */
+/** Maximum lateral velocity (clamp). */
 export const MAX_LATERAL_V = 2.5
 
-// ── Surface & grip ──────────────────────────────────────────────────────────
+/**
+ * Lateral velocity threshold at which oversteer kicks in on low-grip surfaces.
+ * Below: controlled. Above: drift amplifies → skid.
+ * Tapping keeps vx below threshold. Holding → skid.
+ */
+export const SKID_THRESHOLD = 0.4
+/**
+ * How aggressively skid self-amplifies past SKID_THRESHOLD.
+ * Force = (|vx| - threshold) × SKID_AMPLIFY × (1 - grip).
+ */
+export const SKID_AMPLIFY = 3.0
+
+// ── Fuel ────────────────────────────────────────────────────────────────────
 
 /**
- * Ice grip multiplier (0–1). Affects steering response AND lateral damping.
- * At 0.15, steering acceleration drops to 15% and drift persists ~6× longer.
- * Asphalt is always 1.0.
+ * Fuel burn rate: fraction consumed per km/h per second.
+ * At 80 km/h: ~0.0096/s → full tank lasts ~104 s.
  */
-export const ICE_GRIP = 0.25
+export const FUEL_BURN_RATE = 0.00012
+/** Min speed below which no fuel is consumed. */
+export const FUEL_IDLE_THRESHOLD = 5
 
 // ── Road generation ─────────────────────────────────────────────────────────
 
-/** Length of one road segment in metres. Surface and curvature change at segment boundaries. */
+/** Length of one road segment in metres. */
 export const SEGMENT_LENGTH_M = 180
-/** Probability (0–1) that any given segment is ice. Rest is asphalt. */
-export const ICE_PROBABILITY = 0.40
 
 // ── Curvature ───────────────────────────────────────────────────────────────
 
-/**
- * Centrifugal drift force from road curvature.
- * Formula: `curvature × speed × CURVE_DRIFT × (1 − grip×0.7)`.
- * At 40 km/h on ice (grip=0.25), curvature 1.0: drift ≈ 1.16 /s².
- * Counter-steer on ice = 0.8 /s² → tight but doable at low speed.
- * At 80 km/h same conditions: drift ≈ 2.31 → must brake.
- * Asphalt at 80 km/h curvature 1.5: drift ≈ 1.26 → comfortable.
- */
+/** Centrifugal drift force from road curvature. */
 export const CURVE_DRIFT = 0.035
-/** Maximum curvature range multiplier for segment generation. Higher = sharper possible bends. */
-export const CURVATURE_RANGE = 3.6
-/** Fraction of segments that are perfectly straight (0–1). */
+/** Max curvature range for segment generation. */
+export const CURVATURE_RANGE = 4.2
+/** Fraction of straight segments. */
 export const STRAIGHT_SEGMENT_PCT = 0.12
 
 // ── Off-road penalties ──────────────────────────────────────────────────────
 
-/**
- * Player.x threshold where the road ends. Values beyond ±ROAD_EDGE are off-road.
- * The road renders from −halfBottom to +halfBottom in pixels; ROAD_EDGE maps to the
- * visual edge. 1.0 = exactly at the kerb. 1.3 = small shoulder before penalty.
- */
+/** Player.x beyond ±ROAD_EDGE triggers off-road penalty. */
 export const ROAD_EDGE = 1.1
-/**
- * Player.x threshold where the edge-warning beep starts.
- * Must be LESS than ROAD_EDGE to give an audible cue BEFORE full penalty.
- */
+/** Edge-warning beep threshold (must be < ROAD_EDGE). */
 export const EDGE_WARN_THRESHOLD = 0.9
-/** Speed drag when off-road: km/h lost per second per unit of overshoot beyond ROAD_EDGE. */
+/** Off-road speed drag: km/h lost per second per unit overshoot. */
 export const OFF_ROAD_DRAG = 55
-/** Lateral push-back force toward road centre when off-road (units/s² per unit overshoot). */
+/** Off-road lateral push-back toward centre. */
 export const OFF_ROAD_RETURN = 1.8
 
 // ── Road rendering ──────────────────────────────────────────────────────────
 
-/**
- * Lateral pixel shift of the vanishing point per unit of player.x.
- * When player drifts right (x>0), the vanishing point shifts LEFT by this many pixels.
- * Gives the driver visual feedback of their lateral position.
- */
+/** Lateral pixel shift of vanishing point per unit of player.x. */
 export const LATERAL_SHIFT = 22
-/**
- * Visual strength of road curvature accumulation per scanline.
- * Higher = sharper visible bends. Weighted by distance-from-bottom so the
- * road stays flat under the driver and curves appear only in the distance.
- */
-export const CURVE_STRENGTH = 0.8
-/** Perspective depth constant: world-metres at the horizon's first scanline. */
+/** Visual road curvature strength per scanline. */
+export const CURVE_STRENGTH = 1.0
+/** Perspective depth constant. */
 export const PERSPECTIVE_K = 90
-/** Road half-width at the horizon in game pixels. */
+/** Road half-width at horizon (px). */
 export const ROAD_HALF_TOP = 14
-/** Road half-width at the bottom of the viewport in game pixels. */
+/** Road half-width at viewport bottom (px). */
 export const ROAD_HALF_BOTTOM = 120
-/** Kerb stripe length in world-metres. Controls the alternation speed. */
+/** Kerb stripe world-length in metres. */
 export const KERB_STRIPE_M = 3.0
-/** Kerb width in pixels at the bottom of the viewport. */
+/** Kerb width at viewport bottom (px). */
 export const KERB_WIDTH_BOTTOM = 4
-/** Kerb width in pixels at the horizon. */
+/** Kerb width at horizon (px). */
 export const KERB_WIDTH_TOP = 1
 
 // ── Audio ───────────────────────────────────────────────────────────────────
 
-/** Engine drone frequency at idle (0 km/h). Hz. */
 export const ENGINE_IDLE_HZ = 40
-/** Engine drone frequency at MAX_SPEED. Hz. */
 export const ENGINE_TOP_HZ = 235
-/** Engine drone gain (0–1). Keep subtle so beeper SFX remain audible. */
 export const ENGINE_GAIN = 0.06
-/** Ice tire-screech minimum cooldown in seconds. */
 export const SCREECH_COOLDOWN_S = 0.35
-/** Off-road rumble beep cooldown in seconds. */
 export const OFFROAD_BEEP_COOLDOWN_S = 0.25
 
 // ── UI timing ───────────────────────────────────────────────────────────────
 
-/** ICE AHEAD blink toggle interval in milliseconds. */
 export const BLINK_MS = 400
-/** Look-ahead distance for the ICE AHEAD warning in metres. */
 export const ICE_AHEAD_LOOK_M = 120
 
 // ── CRT effect ─────────────────────────────────────────────────────────────
 
-/**
- * Scanline overlay opacity (0–1). Drawn every frame after all game rendering.
- * 0 = disabled, 0.25 = subtle, 0.7 = strong authentic CRT look.
- */
 export const SCANLINE_ALPHA = 0.7
-/**
- * CRT display curvature intensity (0–1). Applied once at startup via CSS.
- * 0 = flat screen, 1 = full barrel distortion + vignette.
- */
 export const CRT_CURVE_INTENSITY = 0.6
