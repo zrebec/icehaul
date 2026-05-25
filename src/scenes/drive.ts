@@ -16,12 +16,13 @@ import {
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
 import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, type Surface } from '../game/road.ts'
-import { drawRoad, drawStarField, drawCanisters } from '../render/road3d.ts'
+import { drawRoad, drawStarField, drawCanisters, drawRoadsideObjects } from '../render/road3d.ts'
 import { drawTruck } from '../render/truck.ts'
 import { drawHUD } from '../render/hud.ts'
 import { drawTopBar } from '../render/topbar.ts'
 import { startEngine, updateEngine, stopEngine } from '../audio/engine.ts'
 import { checkCanisterPickup, getVisibleCanisters } from '../game/canisters.ts'
+import { getRoadsideObjects } from '../game/roadside.ts'
 
 const OFFROAD_TIMEOUT_S = 3.0
 
@@ -189,6 +190,11 @@ export function createDriveScene(
       drawStarField(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM)
       drawRoad(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x,
         (d) => getSurfaceAt(d), (d) => getCurvatureAt(d))
+
+      // Roadside objects (trees, lamps, signs)
+      const roadside = getRoadsideObjects(v.distance - 10, v.distance + PERSPECTIVE_K)
+      drawRoadsideObjects(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, roadside,
+        (d) => getCurvatureAt(d))
 
       // Fuel canisters (draw before truck so truck renders on top)
       const visible = getVisibleCanisters(v.distance, PERSPECTIVE_K)

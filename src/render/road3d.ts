@@ -147,6 +147,7 @@ function drawSurfaceScanline(
 // ── Fuel canister rendering ──────────────────────────────────────────────────
 
 import type { Canister } from '../game/canisters.ts'
+import type { RoadsideObject } from '../game/roadside.ts'
 
 /**
  * Draws fuel canisters on the road in perspective. Call AFTER drawRoad.
@@ -204,6 +205,109 @@ export function drawCanisters(
     ctx.fillStyle = C.B_YELLOW
     ctx.fillRect(screenX - size, y - size * 2 - 1, size * 2, 1)
   }
+}
+
+// ── Roadside objects rendering ───────────────────────────────────────────────
+
+/**
+ * Draw roadside decorations (trees, lampposts, signs) in perspective.
+ * Call AFTER drawRoad, BEFORE drawCanisters/drawTruck.
+ */
+export function drawRoadsideObjects(
+  ctx: CanvasRenderingContext2D,
+  viewportTop: number,
+  viewportBottom: number,
+  cameraDistance: number,
+  playerX: number,
+  objects: readonly RoadsideObject[],
+  getCurvature: (distM: number) => number,
+): void {
+  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
+  const roadHeight = viewportBottom - horizonY
+  const scanlines = roadHeight - 1
+  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
+
+  // Curve offsets (same accumulation as drawRoad)
+  const curveOffset = new Float32Array(scanlines)
+  let acc = 0
+  for (let i = scanlines - 1; i >= 0; i--) {
+    const distFromBottom = (scanlines - 1 - i) / scanlines
+    const dy = i + 1
+    acc += getCurvature(cameraDistance + PERSPECTIVE_K / dy) * CURVE_STRENGTH * distFromBottom
+    curveOffset[i] = acc
+  }
+
+  for (const obj of objects) {
+    const worldZ = obj.distM - cameraDistance
+    if (worldZ < 3 || worldZ > PERSPECTIVE_K) continue
+
+    const dy = PERSPECTIVE_K / worldZ
+    const i = Math.round(dy) - 1
+    if (i < 0 || i >= scanlines) continue
+
+    const y = horizonY + i + 1
+    const t = (i + 1) / roadHeight
+    const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
+    const centerX = baseVanX + (curveOffset[i] ?? 0)
+
+    // Position outside the road edge
+    const edgeX = obj.side === -1
+      ? centerX - half - obj.offset * half
+      : centerX + half + obj.offset * half
+    const screenX = Math.round(edgeX)
+
+    if (screenX < -10 || screenX > GAME_WIDTH + 10) continue
+
+    // Scale factor: 0 at horizon → 1 at bottom
+    const scale = Math.max(0.3, t)
+
+    switch (obj.type) {
+      case 'tree':   drawTree(ctx, screenX, y, scale); break
+      case 'lamp':   drawLamp(ctx, screenX, y, scale); break
+      case 'sign':   drawSign(ctx, screenX, y, scale); break
+    }
+  }
+}
+
+function drawTree(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number): void {
+  const h = Math.round(8 * scale)
+  const w = Math.round(5 * scale)
+  // Trunk
+  ctx.fillStyle = C.RED
+  ctx.fillRect(x, baseY - Math.round(2 * scale), Math.max(1, Math.round(scale)), Math.round(2 * scale))
+  // Canopy — triangle approximation (3 horizontal strips)
+  ctx.fillStyle = C.B_GREEN
+  for (let row = 0; row < h; row++) {
+    const rowW = Math.max(1, Math.round(w * (1 - row / h)))
+    ctx.fillRect(x - Math.floor(rowW / 2), baseY - Math.round(2 * scale) - row, rowW, 1)
+  }
+}
+
+function drawLamp(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number): void {
+  const h = Math.round(12 * scale)
+  // Pole
+  ctx.fillStyle = C.WHITE
+  ctx.fillRect(x, baseY - h, 1, h)
+  // Light
+  ctx.fillStyle = C.B_YELLOW
+  const lightW = Math.max(1, Math.round(2 * scale))
+  ctx.fillRect(x - Math.floor(lightW / 2), baseY - h - 1, lightW, 1)
+  // Glow pixel
+  if (scale > 0.5) {
+    ctx.fillRect(x - Math.floor(lightW / 2), baseY - h - 2, lightW, 1)
+  }
+}
+
+function drawSign(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number): void {
+  const poleH = Math.round(8 * scale)
+  const signW = Math.max(2, Math.round(5 * scale))
+  const signH = Math.max(2, Math.round(3 * scale))
+  // Pole
+  ctx.fillStyle = C.B_WHITE
+  ctx.fillRect(x, baseY - poleH, 1, poleH)
+  // Sign plate
+  ctx.fillStyle = C.B_YELLOW
+  ctx.fillRect(x - Math.floor(signW / 2), baseY - poleH - signH, signW, signH)
 }
 
 function left(x: number): number { return Math.max(0, x) }
