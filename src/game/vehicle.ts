@@ -51,10 +51,12 @@ export function tickVehicle(
   // Brake — effectiveness varies by surface (ice: weak brakes)
   if (input.brake) v.speed = Math.max(0, v.speed - BRAKE_DECEL * SURFACE_BRAKE_MULT[surface] * dt)
 
-  // Passive surface drag (sand digs in, mud resists, snow mild, asphalt/ice: none)
+  // Passive surface drag — proportional to speed so you can always start moving.
+  // At 0 km/h drag is 0; at MAX_SPEED drag reaches full SURFACE_DRAG value.
+  // Creates a natural equilibrium speed per surface (sand ≈ 50 km/h, mud ≈ higher).
   const drag = SURFACE_DRAG[surface]
   if (drag > 0 && v.speed > 0) {
-    v.speed = Math.max(0, v.speed - drag * dt)
+    v.speed = Math.max(0, v.speed - drag * (v.speed / MAX_SPEED) * dt)
   }
 
   // Off-road penalty
