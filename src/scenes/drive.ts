@@ -3,7 +3,7 @@ import {
 } from 'zx-kit'
 
 import {
-  GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP,
+  GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP, PERSPECTIVE_K,
   BLINK_MS, SCREECH_COOLDOWN_S, OFFROAD_BEEP_COOLDOWN_S,
   EDGE_WARN_THRESHOLD,
   LOW_FUEL_WARN, LOW_FUEL_CRITICAL,
@@ -16,11 +16,12 @@ import {
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
 import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, type Surface } from '../game/road.ts'
-import { drawRoad, drawStarField } from '../render/road3d.ts'
+import { drawRoad, drawStarField, drawCanisters } from '../render/road3d.ts'
 import { drawTruck } from '../render/truck.ts'
 import { drawHUD } from '../render/hud.ts'
 import { drawTopBar } from '../render/topbar.ts'
 import { startEngine, updateEngine, stopEngine } from '../audio/engine.ts'
+import { checkCanisterPickup, getVisibleCanisters } from '../game/canisters.ts'
 
 const OFFROAD_TIMEOUT_S = 3.0
 
@@ -133,6 +134,14 @@ export function createDriveScene(
         }
       }
 
+      // Fuel canister pickup
+      const fuelGained = checkCanisterPickup(v.distance, v.x)
+      if (fuelGained > 0) {
+        v.fuel = Math.min(1, v.fuel + fuelGained)
+        if (ctxAudio) beep(880, 40, ctxAudio.currentTime)
+        flashBorder(C.B_YELLOW, 1, 100)
+      }
+
       // Delivery check
       if (v.distance >= targetDist) {
         deliveryCount++
@@ -180,6 +189,11 @@ export function createDriveScene(
       drawStarField(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM)
       drawRoad(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x,
         (d) => getSurfaceAt(d), (d) => getCurvatureAt(d))
+
+      // Fuel canisters (draw before truck so truck renders on top)
+      const visible = getVisibleCanisters(v.distance, PERSPECTIVE_K)
+      drawCanisters(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, visible,
+        (d) => getCurvatureAt(d))
 
       const truckX = GAME_WIDTH / 2 + v.x * 50
       drawTruck(ctx, truckX, VIEWPORT_BOTTOM - 2, -v.vx * 1.5)

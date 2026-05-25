@@ -144,6 +144,68 @@ function drawSurfaceScanline(
   }
 }
 
+// ── Fuel canister rendering ──────────────────────────────────────────────────
+
+import type { Canister } from '../game/canisters.ts'
+
+/**
+ * Draws fuel canisters on the road in perspective. Call AFTER drawRoad.
+ * Each canister: small red rectangle with yellow cap — visible from afar.
+ */
+export function drawCanisters(
+  ctx: CanvasRenderingContext2D,
+  viewportTop: number,
+  viewportBottom: number,
+  cameraDistance: number,
+  playerX: number,
+  canisters: readonly Canister[],
+  getCurvature: (distM: number) => number,
+): void {
+  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
+  const roadHeight = viewportBottom - horizonY
+  const scanlines = roadHeight - 1
+  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
+
+  // Re-compute curve offsets (same as drawRoad — needed for correct x placement)
+  const curveOffset = new Float32Array(scanlines)
+  let acc = 0
+  for (let i = scanlines - 1; i >= 0; i--) {
+    const distFromBottom = (scanlines - 1 - i) / scanlines
+    const dy = i + 1
+    const worldZ = PERSPECTIVE_K / dy
+    acc += getCurvature(cameraDistance + worldZ) * CURVE_STRENGTH * distFromBottom
+    curveOffset[i] = acc
+  }
+
+  for (const can of canisters) {
+    const worldZ = can.distM - cameraDistance
+    if (worldZ < 2 || worldZ > PERSPECTIVE_K) continue
+
+    // Inverse perspective: which scanline does this world-Z map to?
+    const dy = PERSPECTIVE_K / worldZ
+    const i = Math.round(dy) - 1
+    if (i < 0 || i >= scanlines) continue
+
+    const y = horizonY + i + 1
+    const t = (i + 1) / roadHeight
+    const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
+    const centerX = baseVanX + (curveOffset[i] ?? 0)
+
+    // Canister x position on the road
+    const screenX = Math.round(centerX + can.x * half)
+    if (screenX < 0 || screenX >= GAME_WIDTH) continue
+
+    // Size scales with perspective
+    const size = Math.max(1, Math.round(3 * t))
+
+    // Red body + yellow cap
+    ctx.fillStyle = C.B_RED
+    ctx.fillRect(screenX - size, y - size * 2, size * 2, size * 2)
+    ctx.fillStyle = C.B_YELLOW
+    ctx.fillRect(screenX - size, y - size * 2 - 1, size * 2, 1)
+  }
+}
+
 function left(x: number): number { return Math.max(0, x) }
 function clampW(l: number, r: number): number {
   const cl = Math.max(0, l)

@@ -216,6 +216,21 @@ export const SURFACE_ENGINE_SOUND: Record<Surface, readonly [OscillatorType, num
   mud:     ['triangle', 30, 160],
 }
 
+// ── Fuel canisters ──────────────────────────────────────────────────────────
+
+/** Average spacing between fuel canisters on the road (metres). */
+export const CANISTER_SPACING_M = 600
+/** Random variation on canister spacing: actual = spacing × (1 ± this). */
+export const CANISTER_SPACING_JITTER = 0.4
+/** Lateral position range for canisters: 0 = centre, 1.0 = road edge. */
+export const CANISTER_X_RANGE = 0.9
+/** Fuel added per canister pickup (fraction of full tank). 1 segment = 1/6. */
+export const CANISTER_FUEL = 1 / 6
+/** Pickup distance threshold in player.x units (how close you must be). */
+export const CANISTER_PICKUP_RADIUS = 0.25
+/** World-distance tolerance for pickup (metres ahead/behind truck). */
+export const CANISTER_PICKUP_DEPTH_M = 15
+
 /** Low-fuel warning threshold (fraction 0–1). Below this: blink + beep. */
 export const LOW_FUEL_WARN = 0.20
 /** Critical fuel threshold. Below this: faster blink + urgent beep. */
