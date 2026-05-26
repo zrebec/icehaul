@@ -105,8 +105,7 @@ function ensureCurvesGenerated(upToDist: number): void {
     const idx = _curves.length
 
     if (idx === 0) {
-      // Start with a nice long straight
-      const len = 500
+      const len = 200
       _curves.push({ start: 0, end: len, curvature: 0, type: 'straight' })
       _curvesUpTo = len
       continue

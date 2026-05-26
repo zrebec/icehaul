@@ -26,7 +26,7 @@
 import {
   MAX_SPEED, ACCEL, BRAKE_DECEL,
   AERO_DRAG, ROLLING_RESISTANCE, ENGINE_BRAKE,
-  CURVE_DRIFT,
+  SPEED_BRAKE_PENALTY, CURVE_DRIFT,
   STEER_ACCEL, STEER_DAMP, MAX_LATERAL_V,
   SPEED_STEER_PENALTY, BRAKE_GRIP_LOSS,
   ROAD_EDGE, OFF_ROAD_DRAG, OFF_ROAD_RETURN,
@@ -91,9 +91,10 @@ export function tickVehicle(
     v.speed = Math.min(MAX_SPEED, v.speed + ACCEL * accelMult * dt)
   }
 
-  // Manual brake (surface-dependent effectiveness)
+  // Manual brake — harder to stop at high speed (kinetic energy ∝ v²)
   if (input.brake) {
-    v.speed = Math.max(0, v.speed - BRAKE_DECEL * SURFACE_BRAKE_MULT[surface] * dt)
+    const brakePenalty = 1 - speedRatio * SPEED_BRAKE_PENALTY
+    v.speed = Math.max(0, v.speed - BRAKE_DECEL * SURFACE_BRAKE_MULT[surface] * brakePenalty * dt)
   }
 
   // Engine braking (throttle released, engine compression resists motion)

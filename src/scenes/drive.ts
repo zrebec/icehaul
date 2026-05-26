@@ -139,11 +139,23 @@ export function createDriveScene(
         return
       }
 
-      // Tire screech
+      // Tire screech — steering on slippery surfaces
       if (ctxAudio && (surface === 'ice' || surface === 'snow') && v.speed > 45 && (input.steerLeft || input.steerRight)) {
         const now = ctxAudio.currentTime
         if (now - lastScreechAtS > SCREECH_COOLDOWN_S) {
           beep(160 + Math.random() * 60, 60, now)
+          lastScreechAtS = now
+        }
+      }
+
+      // Brake screech — only on hard surfaces (asphalt: rubber screech, ice: metal scrape)
+      if (ctxAudio && input.brake && v.speed > 25 && (surface === 'asphalt' || surface === 'ice')) {
+        const now = ctxAudio.currentTime
+        if (now - lastScreechAtS > 0.3) {
+          const freq = surface === 'asphalt'
+            ? 400 + Math.random() * 200   // rubber on tarmac: higher pitched
+            : 120 + Math.random() * 80    // metal on ice: low grinding
+          beep(freq, 50, now)
           lastScreechAtS = now
         }
       }

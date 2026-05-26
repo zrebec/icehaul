@@ -209,11 +209,18 @@ export const CURVE_DRIFT = 0.035
 /** Curvature intensity range for turns (0 = straight, higher = sharper). */
 export const CURVE_INTENSITY_RANGE: readonly [number, number] = [0.4, 2.0]
 /** Length of straight sections between turns [min, max] metres. */
-export const STRAIGHT_LENGTH_RANGE: readonly [number, number] = [200, 600]
+export const STRAIGHT_LENGTH_RANGE: readonly [number, number] = [80, 250]
 /** Length of the full-curvature portion of a turn [min, max] metres. */
-export const TURN_LENGTH_RANGE: readonly [number, number] = [100, 400]
+export const TURN_LENGTH_RANGE: readonly [number, number] = [120, 450]
 /** Length of the smooth ramp into/out of a turn (metres). */
-export const TURN_RAMP_M = 80
+export const TURN_RAMP_M = 60
+
+/**
+ * Speed-dependent braking penalty (0–1).
+ * At 0.35: braking at MAX_SPEED is 65% as effective as at standstill.
+ * Simulates: kinetic energy ∝ v², so higher speed = harder to stop.
+ */
+export const SPEED_BRAKE_PENALTY = 0.35
 
 // ── Off-road penalties ──────────────────────────────────────────────────────
 
