@@ -262,6 +262,7 @@ export function createDriveScene(
         missionText: 'DELIVER',
         missionDist: Math.max(0, (targetDist - v.distance) / 1000),
         missionTimeLeft: `${tlMin}:${tlSec}`,
+        buildNumber: __BUILD_NUMBER__,
       })
 
       // ── Overlays ──

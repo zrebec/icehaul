@@ -20,6 +20,7 @@ export function drawHUD(
     missionText?: string
     missionDist?: number
     missionTimeLeft?: string
+    buildNumber?: string
   },
 ): void {
   const hudY = GAME_HEIGHT - HUD_ROWS * CELL
@@ -134,7 +135,7 @@ function drawSpeedPanel(
 function drawMissionPanel(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
-  state: { missionText?: string; missionDist?: number; missionTimeLeft?: string },
+  state: { missionText?: string; missionDist?: number; missionTimeLeft?: string; buildNumber?: string },
 ): void {
   const text = state.missionText ?? 'DELIVER'
   const dist = state.missionDist
@@ -155,5 +156,11 @@ function drawMissionPanel(
   if (timeLeft) {
     const timeX = x + Math.floor((w - timeLeft.length * CELL) / 2)
     drawText(ctx, timeLeft, timeX, y + 40, C.B_WHITE, C.BLACK)
+  }
+
+  // Build number — bottom right corner
+  if (state.buildNumber) {
+    const bld = `B${state.buildNumber}`
+    drawText(ctx, bld, x + w - bld.length * CELL - 1, y + h - 9, C.WHITE, C.BLACK)
   }
 }
