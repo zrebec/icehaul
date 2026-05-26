@@ -1,5 +1,5 @@
 import {
-  C, beep, flashBorder, isHeld, getAudioContext, consumeAnyKey, consumePause,
+  C, beep, flashBorder, isHeld, getAudioContext, consumePause,
   playPattern, drawTextCentered, type Scene,
 } from 'zx-kit'
 
@@ -53,6 +53,16 @@ export function createDriveScene(
   let offroadAccumS = 0
   let gameOverFired = false
   let driveState: DriveState = 'waiting'
+  let startKeyPending = false
+
+  // Only Enter or S starts the game — not Command, not any random key
+  window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (driveState === 'waiting') {
+      if (e.key === 'Enter' || e.key === 's' || e.key === 'S') {
+        startKeyPending = true
+      }
+    }
+  })
 
   let targetDist = FIRST_TARGET_DIST_M
   let deliveryCount = 0
@@ -66,9 +76,10 @@ export function createDriveScene(
       blinkAccum += dt
       while (blinkAccum >= BLINK_MS) { blinkAccum -= BLINK_MS; blinkPhase = !blinkPhase }
 
-      // ── Waiting state: nothing moves until ENTER ──
+      // ── Waiting state: only Enter / S starts the game ──
       if (driveState === 'waiting') {
-        if (consumeAnyKey()) {
+        if (startKeyPending) {
+          startKeyPending = false
           driveState = 'playing'
           if (!engineStarted && getAudioContext() != null) {
             startEngine()

@@ -268,8 +268,8 @@ function drawSameDirVehicle(
   ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, type: VehicleType,
 ): void {
   const isTruck = type === 'truck'
-  const w = Math.max(2, Math.round((isTruck ? 10 : 7) * scale))
-  const h = Math.max(3, Math.round((isTruck ? 14 : 8) * scale))
+  const w = Math.max(3, Math.round((isTruck ? 16 : 12) * scale))
+  const h = Math.max(4, Math.round((isTruck ? 22 : 14) * scale))
 
   // Body
   ctx.fillStyle = isTruck ? C.B_YELLOW : C.B_GREEN
@@ -292,8 +292,8 @@ function drawOncomingVehicle(
   ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, type: VehicleType,
 ): void {
   const isTruck = type === 'truck'
-  const w = Math.max(2, Math.round((isTruck ? 10 : 7) * scale))
-  const h = Math.max(3, Math.round((isTruck ? 14 : 8) * scale))
+  const w = Math.max(3, Math.round((isTruck ? 16 : 12) * scale))
+  const h = Math.max(4, Math.round((isTruck ? 22 : 14) * scale))
 
   // Body (darker — seen from front)
   ctx.fillStyle = C.WHITE
