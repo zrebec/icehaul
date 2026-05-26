@@ -152,25 +152,28 @@ export const MAX_LATERAL_V = 2.5
  * Ensures speed always decays without throttle, even on asphalt.
  */
 export const AERO_DRAG = 3.5
-
-/**
- * How much speed reduces steering effectiveness (0–1).
- * At 0: speed has no effect. At 0.6: steering at MAX_SPEED is 40% of standstill.
- * Simulates: higher speed → more inertia → harder to turn.
- */
+/** Rolling resistance: km/h lost per (km/h of speed) per second. Linear. C_rr ≈ 30×C_drag. */
+export const ROLLING_RESISTANCE = 0.008
+/** Engine braking when throttle released (km/h/s at MAX_SPEED, scales with speed). */
+export const ENGINE_BRAKE = 6.0
+/** Speed reduces steering (0–1). At 0.6: steering at MAX is 40% of standstill. */
 export const SPEED_STEER_PENALTY = 0.6
 
 /**
- * How much speed lowers the skid threshold (0–1).
- * At 0.5: threshold at MAX_SPEED is 50% of standstill value.
- * Simulates: higher speed → easier to lose traction.
+ * Per-surface slip peak: lateral velocity where grip is maximum.
+ * Below peak: full grip. Above peak: grip drops with 1/x² (oversteer).
+ * Low = slippery (ice 0.20). High = stable (asphalt 0.90).
+ * Replaces binary SKID_THRESHOLD with a realistic tire grip curve.
  */
-export const SPEED_SKID_PENALTY = 0.5
-
-/** Lateral vx threshold for oversteer on slippery surfaces (at standstill). */
-export const SKID_THRESHOLD = 0.4
-/** Skid self-amplification strength. */
-export const SKID_AMPLIFY = 3.0
+export const SURFACE_SLIP_PEAK: Record<Surface, number> = {
+  asphalt: 0.90,
+  snow:    0.35,
+  ice:     0.20,
+  sand:    0.50,
+  mud:     0.30,
+}
+/** Braking on low-grip surfaces reduces lateral grip further (0–1 multiplier). */
+export const BRAKE_GRIP_LOSS = 0.7
 
 // ── Fuel ────────────────────────────────────────────────────────────────────
 

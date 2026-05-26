@@ -1,14 +1,39 @@
+/**
+ * Vehicle physics — based on Marco Monster's "Car Physics for Games" model,
+ * adapted for pseudo-3D (1 axis lateral + forward speed).
+ *
+ * Key forces (longitudinal):
+ *   F_engine    = ACCEL × surface_mult          (throttle)
+ *   F_brake     = BRAKE_DECEL × surface_mult    (manual brake)
+ *   F_aero      = AERO_DRAG × (v/MAX)²          (quadratic, dominates at high speed)
+ *   F_rolling   = ROLLING_RESISTANCE × v         (linear, dominates at low speed)
+ *   F_engine_br = ENGINE_BRAKE × (v/MAX)         (throttle released = engine compression)
+ *   F_surface   = SURFACE_DRAG × (v/MAX)         (sand/mud/snow resistance)
+ *
+ * Key forces (lateral):
+ *   Steering    = STEER_ACCEL × grip × gripMult × speedFactor
+ *   Damping     = STEER_DAMP × grip × gripMult × dampMult
+ *   Centrifugal = curvature × speed × CURVE_DRIFT × (1 - grip×0.7)
+ *
+ * Grip curve (slip angle approximation):
+ *   gripMult = 1.0                      if |vx| ≤ SLIP_PEAK  (linear zone)
+ *   gripMult = (SLIP_PEAK / |vx|)²      if |vx| > SLIP_PEAK  (drop-off zone)
+ *   Minimum 5% residual grip to prevent infinite slides.
+ *
+ * This naturally produces understeer/oversteer without explicit thresholds.
+ */
+
 import {
   MAX_SPEED, ACCEL, BRAKE_DECEL,
-  AERO_DRAG, CURVE_DRIFT,
+  AERO_DRAG, ROLLING_RESISTANCE, ENGINE_BRAKE,
+  CURVE_DRIFT,
   STEER_ACCEL, STEER_DAMP, MAX_LATERAL_V,
-  SPEED_STEER_PENALTY, SPEED_SKID_PENALTY,
+  SPEED_STEER_PENALTY, BRAKE_GRIP_LOSS,
   ROAD_EDGE, OFF_ROAD_DRAG, OFF_ROAD_RETURN,
-  SKID_THRESHOLD, SKID_AMPLIFY,
   FUEL_BURN_RATE, FUEL_IDLE_THRESHOLD,
   SURFACE_DRAG, SURFACE_BRAKE_MULT,
-  SURFACE_SKID_ENABLED, SURFACE_STEER_DAMP_MULT,
-  SURFACE_FUEL_MULT,
+  SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT,
+  SURFACE_SLIP_PEAK,
   type Surface,
 } from '../config.ts'
 
@@ -37,6 +62,16 @@ export function offRoadAmount(v: Vehicle): number {
   return Math.max(0, Math.abs(v.x) - ROAD_EDGE)
 }
 
+/**
+ * Slip angle grip curve. Returns 1.0 in the linear zone,
+ * drops off as 1/x² beyond the peak. Minimum 5% residual grip.
+ */
+function slipGripMult(vx: number, slipPeak: number): number {
+  const ratio = Math.abs(vx) / slipPeak
+  if (ratio <= 1) return 1.0
+  return Math.max(0.05, 1 / (ratio * ratio))
+}
+
 export function tickVehicle(
   v: Vehicle,
   input: VehicleInput,
@@ -47,59 +82,79 @@ export function tickVehicle(
   curvature = 0,
 ): void {
   const dt = dtMs / 1000
-  const speedRatio = v.speed / MAX_SPEED  // 0..1
+  const speedRatio = v.speed / MAX_SPEED
 
-  // ── Forward speed ──────────────────────────────────────────────────────
-  if (input.throttle && v.fuel > 0) v.speed = Math.min(MAX_SPEED, v.speed + ACCEL * accelMult * dt)
-  if (input.brake) v.speed = Math.max(0, v.speed - BRAKE_DECEL * SURFACE_BRAKE_MULT[surface] * dt)
+  // ── Longitudinal forces ────────────────────────────────────────────────
 
-  // Surface drag (proportional to speed — sand/mud/snow)
+  // Engine force (throttle)
+  if (input.throttle && v.fuel > 0) {
+    v.speed = Math.min(MAX_SPEED, v.speed + ACCEL * accelMult * dt)
+  }
+
+  // Manual brake (surface-dependent effectiveness)
+  if (input.brake) {
+    v.speed = Math.max(0, v.speed - BRAKE_DECEL * SURFACE_BRAKE_MULT[surface] * dt)
+  }
+
+  // Engine braking (throttle released, engine compression resists motion)
+  if (!input.throttle && !input.brake && v.fuel > 0 && v.speed > 0) {
+    v.speed = Math.max(0, v.speed - ENGINE_BRAKE * speedRatio * dt)
+  }
+
+  // Rolling resistance (linear with speed, all surfaces)
+  if (v.speed > 0) {
+    v.speed = Math.max(0, v.speed - ROLLING_RESISTANCE * v.speed * dt)
+  }
+
+  // Aerodynamic drag (quadratic with speed, all surfaces)
+  if (v.speed > 0) {
+    v.speed = Math.max(0, v.speed - AERO_DRAG * speedRatio * speedRatio * dt)
+  }
+
+  // Surface drag (sand/mud/snow specific, proportional to speed)
   const surfDrag = SURFACE_DRAG[surface]
   if (surfDrag > 0 && v.speed > 0) {
     v.speed = Math.max(0, v.speed - surfDrag * speedRatio * dt)
   }
 
-  // Aerodynamic drag (ALL surfaces, proportional to speed²)
-  // At 80 km/h: 3.5 × (80/120)² ≈ 1.56 km/h/s
-  if (v.speed > 0) {
-    v.speed = Math.max(0, v.speed - AERO_DRAG * speedRatio * speedRatio * dt)
-  }
-
-  // Empty tank coast-down
+  // Empty tank coast-down (engine dead)
   if (v.fuel <= 0 && v.speed > 0) {
     v.speed = Math.max(0, v.speed - 8 * dt)
   }
 
-  // Off-road penalty
+  // Off-road drag
   const offRoad = offRoadAmount(v)
   if (offRoad > 0) {
     v.speed = Math.max(0, v.speed - OFF_ROAD_DRAG * offRoad * dt)
     v.vx += (v.x > 0 ? -1 : 1) * OFF_ROAD_RETURN * offRoad * dt
   }
 
-  // ── Lateral physics ────────────────────────────────────────────────────
+  // ── Lateral forces (slip angle model) ──────────────────────────────────
 
-  // Centrifugal drift from curvature
+  // Grip multiplier from slip curve (replaces binary skid threshold)
+  const slipPeak = SURFACE_SLIP_PEAK[surface]
+  const gripMult = slipGripMult(v.vx, slipPeak)
+
+  // Effective grip — further reduced when braking (locked wheels = less lateral control)
+  let effectiveGrip = grip * gripMult
+  if (input.brake && grip < 1) {
+    effectiveGrip *= BRAKE_GRIP_LOSS
+  }
+
+  // Centrifugal drift from road curvature
   if (curvature !== 0 && v.speed > 5) {
     v.vx += -curvature * v.speed * CURVE_DRIFT * (1 - grip * 0.7) * dt
   }
 
-  // Steering — effectiveness DECREASES with speed (more inertia at high speed)
+  // Steering — weakens with speed AND with slip (past peak = less control)
   const speedSteerFactor = 1 - speedRatio * SPEED_STEER_PENALTY
-  if (input.steerLeft)  v.vx -= STEER_ACCEL * grip * speedSteerFactor * dt
-  if (input.steerRight) v.vx += STEER_ACCEL * grip * speedSteerFactor * dt
+  if (input.steerLeft)  v.vx -= STEER_ACCEL * effectiveGrip * speedSteerFactor * dt
+  if (input.steerRight) v.vx += STEER_ACCEL * effectiveGrip * speedSteerFactor * dt
+
+  // Damping — also weakened by slip (past peak = drift persists)
   if (!input.steerLeft && !input.steerRight) {
     const dampMult = SURFACE_STEER_DAMP_MULT[surface]
-    v.vx *= 1 - Math.min(1, STEER_DAMP * grip * dampMult * dt)
-  }
-
-  // Skid — threshold DECREASES with speed (easier to skid when fast)
-  if (SURFACE_SKID_ENABLED[surface]) {
-    const effectiveThreshold = SKID_THRESHOLD * (1 - speedRatio * SPEED_SKID_PENALTY)
-    if (Math.abs(v.vx) > effectiveThreshold) {
-      const excess = Math.abs(v.vx) - effectiveThreshold
-      v.vx += Math.sign(v.vx) * excess * SKID_AMPLIFY * (1 - grip) * dt
-    }
+    v.vx *= 1 - Math.min(1, STEER_DAMP * effectiveGrip * dampMult * dt)
   }
 
   v.vx = Math.max(-MAX_LATERAL_V, Math.min(MAX_LATERAL_V, v.vx))
@@ -107,6 +162,7 @@ export function tickVehicle(
   v.x = Math.max(-2.0, Math.min(2.0, v.x))
 
   // ── Distance + fuel ────────────────────────────────────────────────────
+
   v.distance += (v.speed / 3.6) * dt
 
   if (v.speed > FUEL_IDLE_THRESHOLD && v.fuel > 0) {
