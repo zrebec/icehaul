@@ -19,8 +19,15 @@ function hash(n: number): number {
   return ((x ^ (x >>> 16)) >>> 0) / 0x100000000
 }
 
-const _canisters: Canister[] = []
-let _nextSpawnDist = 400  // first canister after 400m (still on starting asphalt)
+let _canisters: Canister[] = []
+let _nextSpawnDist = 400
+let _seed = 0
+
+export function resetCanisters(seed: number): void {
+  _seed = seed
+  _canisters = []
+  _nextSpawnDist = 400
+}
 
 /**
  * Ensures canisters are generated up to `upToDist`.
@@ -30,8 +37,8 @@ let _nextSpawnDist = 400  // first canister after 400m (still on starting asphal
 function ensureCanisters(upToDist: number): void {
   while (_nextSpawnDist < upToDist + 200) {
     const idx = _canisters.length
-    const h1 = hash(idx * 67 + 13)
-    const h2 = hash(idx * 43 + 29)
+    const h1 = hash(idx * 67 + 13 + _seed)
+    const h2 = hash(idx * 43 + 29 + _seed)
 
     const x = (h1 * 2 - 1) * CANISTER_X_RANGE  // -0.9..+0.9
 

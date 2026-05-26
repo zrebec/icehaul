@@ -31,9 +31,20 @@ function pickSurface(h: number): Surface {
   return 'asphalt'
 }
 
-const _segments: RoadSegment[] = []
+let _segments: RoadSegment[] = []
 let _generatedUpTo = 0
 let _lastWasSpecial = false
+let _seed = 0
+
+/** Reset all road state with a new seed. Call at game start. */
+export function resetRoad(seed: number): void {
+  _seed = seed
+  _segments = []
+  _generatedUpTo = 0
+  _lastWasSpecial = false
+  _curves = []
+  _curvesUpTo = 0
+}
 
 function ensureGenerated(upToDist: number): void {
   while (_generatedUpTo < upToDist + 500) {
@@ -46,9 +57,9 @@ function ensureGenerated(upToDist: number): void {
     }
 
     // After a special surface → recovery asphalt (85% chance)
-    if (_lastWasSpecial && hash(idx * 53 + 7) < RECOVERY_ASPHALT_PCT) {
+    if (_lastWasSpecial && hash(idx * 53 + 7 + _seed) < RECOVERY_ASPHALT_PCT) {
       const [minL, maxL] = RECOVERY_ASPHALT_RANGE
-      const length = minL + (maxL - minL) * hash(idx * 37 + 19)
+      const length = minL + (maxL - minL) * hash(idx * 37 + 19 + _seed)
       _segments.push({ start: _generatedUpTo, end: _generatedUpTo + length, surface: 'asphalt' })
       _generatedUpTo += length
       _lastWasSpecial = false
@@ -56,9 +67,9 @@ function ensureGenerated(upToDist: number): void {
     }
 
     // Normal segment
-    const surface = pickSurface(hash(idx * 17 + 3))
+    const surface = pickSurface(hash(idx * 17 + 3 + _seed))
     const [minLen, maxLen] = SURFACE_LENGTH_RANGE[surface]
-    const length = minLen + (maxLen - minLen) * hash(idx * 31 + 11)
+    const length = minLen + (maxLen - minLen) * hash(idx * 31 + 11 + _seed)
     _segments.push({ start: _generatedUpTo, end: _generatedUpTo + length, surface })
     _generatedUpTo += length
     _lastWasSpecial = surface !== 'asphalt'
@@ -97,10 +108,10 @@ interface CurveSection {
   type: 'straight' | 'rampIn' | 'turn' | 'rampOut'
 }
 
-const _curves: CurveSection[] = []
+let _curves: CurveSection[] = []
 let _curvesUpTo = 0
 
-function ensureCurvesGenerated(upToDist: number): void {
+function ensureCurvesGenerated(upToDist: number): void {  // uses _seed from module scope
   while (_curvesUpTo < upToDist + 500) {
     const idx = _curves.length
 
@@ -118,7 +129,7 @@ function ensureCurvesGenerated(upToDist: number): void {
       // First: straight section
       if (prev.type === 'rampOut') {
         const [minS, maxS] = STRAIGHT_LENGTH_RANGE
-        const straightLen = minS + (maxS - minS) * hash(idx * 41 + 5)
+        const straightLen = minS + (maxS - minS) * hash(idx * 41 + 5 + _seed)
         _curves.push({ start: _curvesUpTo, end: _curvesUpTo + straightLen, curvature: 0, type: 'straight' })
         _curvesUpTo += straightLen
         continue
@@ -126,8 +137,8 @@ function ensureCurvesGenerated(upToDist: number): void {
 
       // After a straight → rampIn to a turn
       const [minI, maxI] = CURVE_INTENSITY_RANGE
-      const intensity = minI + (maxI - minI) * hash(idx * 59 + 13)
-      const direction = hash(idx * 73 + 29) < 0.5 ? -1 : 1
+      const intensity = minI + (maxI - minI) * hash(idx * 59 + 13 + _seed)
+      const direction = hash(idx * 73 + 29 + _seed) < 0.5 ? -1 : 1
       const curvature = intensity * direction
 
       _curves.push({ start: _curvesUpTo, end: _curvesUpTo + TURN_RAMP_M, curvature, type: 'rampIn' })
@@ -138,7 +149,7 @@ function ensureCurvesGenerated(upToDist: number): void {
     if (prev.type === 'rampIn') {
       // rampIn → full turn
       const [minT, maxT] = TURN_LENGTH_RANGE
-      const turnLen = minT + (maxT - minT) * hash(idx * 47 + 17)
+      const turnLen = minT + (maxT - minT) * hash(idx * 47 + 17 + _seed)
       _curves.push({ start: _curvesUpTo, end: _curvesUpTo + turnLen, curvature: prev.curvature, type: 'turn' })
       _curvesUpTo += turnLen
       continue

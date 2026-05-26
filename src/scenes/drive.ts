@@ -16,15 +16,15 @@ import {
   createVehicle, tickVehicle, offRoadAmount, MAX_SPEED,
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
-import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, type Surface } from '../game/road.ts'
+import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
 import { drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic } from '../render/road3d.ts'
 import { drawTruck } from '../render/truck.ts'
 import { drawHUD } from '../render/hud.ts'
 import { drawTopBar } from '../render/topbar.ts'
 import { startEngine, updateEngine, stopEngine, muteEngine, unmuteEngine } from '../audio/engine.ts'
-import { checkCanisterPickup, getVisibleCanisters } from '../game/canisters.ts'
+import { checkCanisterPickup, getVisibleCanisters, resetCanisters } from '../game/canisters.ts'
 import { getRoadsideObjects } from '../game/roadside.ts'
-import { tickTraffic, getVisibleTraffic } from '../game/traffic.ts'
+import { tickTraffic, getVisibleTraffic, resetTraffic } from '../game/traffic.ts'
 
 const OFFROAD_TIMEOUT_S = 3.0
 
@@ -52,6 +52,12 @@ export function createDriveScene(
   let wasOffRoad = false
   let offroadAccumS = 0
   let gameOverFired = false
+  // Seed all generators — every game is unique
+  const gameSeed = Date.now()
+  resetRoad(gameSeed)
+  resetTraffic(gameSeed + 1)
+  resetCanisters(gameSeed + 2)
+
   let driveState: DriveState = 'waiting'
   let startKeyPending = false
 

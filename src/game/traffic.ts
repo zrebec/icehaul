@@ -37,15 +37,22 @@ function hash(n: number): number {
   return ((x ^ (x >>> 16)) >>> 0) / 0x100000000
 }
 
-const _vehicles: TrafficVehicle[] = []
+let _vehicles: TrafficVehicle[] = []
 let _nextSpawnDist = TRAFFIC_START_M
+let _seed = 0
+
+export function resetTraffic(seed: number): void {
+  _seed = seed
+  _vehicles = []
+  _nextSpawnDist = TRAFFIC_START_M
+}
 
 function spawnVehicle(): void {
   const idx = _vehicles.length
-  const h1 = hash(idx * 59 + 7)
-  const h2 = hash(idx * 73 + 13)
-  const h3 = hash(idx * 41 + 29)
-  const h4 = hash(idx * 97 + 37)
+  const h1 = hash(idx * 59 + 7 + _seed)
+  const h2 = hash(idx * 73 + 13 + _seed)
+  const h3 = hash(idx * 41 + 29 + _seed)
+  const h4 = hash(idx * 97 + 37 + _seed)
 
   const dir: TrafficDir = h1 < TRAFFIC_SAME_DIR_PCT ? 'same' : 'oncoming'
   const type: VehicleType = h2 < 0.7 ? 'car' : 'truck'
@@ -70,7 +77,7 @@ function spawnVehicle(): void {
     x, speed, dir, type, gone: false,
   })
 
-  const jitter = 1 + (hash(idx * 83 + 19) * 2 - 1) * TRAFFIC_SPACING_JITTER
+  const jitter = 1 + (hash(idx * 83 + 19 + _seed) * 2 - 1) * TRAFFIC_SPACING_JITTER
   _nextSpawnDist += TRAFFIC_SPACING_M * jitter
 }
 

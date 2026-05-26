@@ -23,13 +23,61 @@ npm run dev       # http://localhost:5173
 | Arrow Down | Brake |
 | Arrow Left / Right | Steer |
 
-**Important:** Speed never decays on asphalt or ice. The truck is heavy — once rolling, only the brake (or surface drag) slows it down. On sand and mud, speed decays passively.
+**Important:** The truck weighs 20 tonnes. It glides — releasing throttle at 120 km/h, you lose only ~1 km/h per second. You MUST brake actively. Braking from 120 on asphalt takes ~10 seconds. On ice: ~25+ seconds.
 
-On ice: **tap** the steering keys for controlled corrections. **Holding** the key causes oversteer — the drift self-amplifies and you lose control (skid).
+On ice: **tap** the steering keys for controlled corrections. **Holding** the key causes oversteer — the drift self-amplifies and you lose control (skid). Same with brakes: **pump** (tap) on ice, don't hold — holding locks the wheels above 30 km/h.
 
 ## Screenshot
 
 ![Ice Haul screenshot](screenshot.png)
+
+---
+
+# Survival Guide
+
+Every game is **randomly generated** — different surfaces, curves, traffic, and canister placement each run.
+
+## Golden rules
+
+1. **50-65 km/h is your cruising speed.** You have 7 minutes for 5 km (average 43 km/h is enough). Don't push to max.
+2. **Brake 200m BEFORE the warning.** "SNOW AHEAD" appears 120m out. At 60 km/h you need ~70m to stop. Start early.
+3. **On ice: 20-30 km/h MAX.** Anything higher = skid in the first curve. No exceptions.
+4. **Tap, never hold** — both steering and brakes on ice. Each tap = controlled impulse. Holding = locked wheels or oversteer.
+5. **Collect every canister on asphalt.** They're free. On other surfaces, only grab centre-road ones.
+6. **Recovery asphalt comes after 85% of danger zones.** Use it to stabilise speed and breathe.
+
+## Target speeds per surface
+
+| Surface | Safe speed | Why |
+|---------|-----------|-----|
+| Asphalt | 50–65 km/h | Comfortable, save fuel for hard sections |
+| Snow | 30–40 km/h | Wheels slip, steering sluggish |
+| Ice | **20–30 km/h** | Grip peak at vx=0.20 — one heavy steer and you're gone |
+| Sand | Let it coast (~25) | You can barely accelerate anyway (0.2× accel) |
+| Mud | 25–35 km/h | Manageable but heavy steering |
+
+## Braking distances (approximate)
+
+| From speed | Asphalt | Snow | Ice | Sand |
+|-----------|---------|------|-----|------|
+| 60 km/h | ~4s | ~6s | ~12s | ~7s |
+| 90 km/h | ~7s | ~10s | ~20s | ~12s |
+| 120 km/h | ~10s | ~14s | ~25s+ | ~16s |
+
+On ice above 30 km/h: wheels lock → you also lose lateral control. Pump the brakes.
+
+## Fuel management
+
+- At 50 km/h on asphalt: ~3% tank per km. 5 km delivery = ~15% tank.
+- Canisters (+20% each) appear every ~700m. Collect 3-4 and you're safe.
+- Going slower saves fuel (quadratic burn: 80 km/h costs 4× as much as 40 km/h per km).
+- Delivery completion refills 50% — that's your main fuel source.
+
+## Traffic
+
+- Same-direction vehicles (green/yellow) are slower than you — overtake by shifting left or right.
+- Oncoming vehicles (white with yellow headlights) travel fast on the left side — stay right.
+- **Collision = instant game over.** Plan overtakes well ahead — acceleration takes 15+ seconds.
 
 ---
 
