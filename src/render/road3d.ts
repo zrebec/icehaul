@@ -4,7 +4,7 @@ import {
   GAME_WIDTH, HORIZON_PCT,
   LATERAL_SHIFT, CURVE_STRENGTH, PERSPECTIVE_K,
   ROAD_HALF_TOP, ROAD_HALF_BOTTOM,
-  KERB_STRIPE_M, KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
+  KERB_STRIPE_M, KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP, ROAD_MARKER_SPACING_M,
 } from '../config.ts'
 
 // ── Star field ──────────────────────────────────────────────────────────────
@@ -89,6 +89,15 @@ export function drawRoad(
     if (kl + kerbW > 0 && kl < GAME_WIDTH) ctx.fillRect(Math.max(0, kl), y, Math.min(kerbW, GAME_WIDTH - kl), 1)
     if (kr >= 0 && kr < GAME_WIDTH)         ctx.fillRect(kr, y, Math.min(kerbW, GAME_WIDTH - kr), 1)
 
+    // Road segment markers — horizontal lines that rush toward the player
+    const markerPhase = absDist % ROAD_MARKER_SPACING_M
+    if (markerPhase < 0.8) {
+      ctx.fillStyle = C.WHITE
+      const ml = Math.max(0, leftX + 2)
+      const mr = Math.min(GAME_WIDTH, rightX - 1)
+      if (mr > ml) ctx.fillRect(ml, y, mr - ml, 1)
+    }
+
     // Centre dashed line
     if ((dy + Math.floor(cameraDistance * 8)) % 10 < 5) {
       const cx = Math.round(centerX)
@@ -109,7 +118,7 @@ function drawSurfaceScanline(
   absDist: number,
 ): void {
   if (w <= 0) return
-  const phase = Math.floor(absDist * 2)
+  const phase = Math.floor(absDist * 5)
 
   switch (surface) {
     case 'asphalt':

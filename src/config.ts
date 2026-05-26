@@ -266,9 +266,15 @@ export const CURVE_STRENGTH = 1.0
 export const PERSPECTIVE_K = 90
 export const ROAD_HALF_TOP = 14
 export const ROAD_HALF_BOTTOM = 120
-export const KERB_STRIPE_M = 3.0
+export const KERB_STRIPE_M = 2.0
 export const KERB_WIDTH_BOTTOM = 4
 export const KERB_WIDTH_TOP = 1
+/**
+ * Road segment marker spacing in metres. Thin horizontal lines across
+ * the road that rush toward the player — primary speed perception cue.
+ * At 120 km/h: ~1.3 markers/s. At 30 km/h: ~0.33 markers/s.
+ */
+export const ROAD_MARKER_SPACING_M = 25
 
 // ── Audio ───────────────────────────────────────────────────────────────────
 
