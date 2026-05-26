@@ -10,7 +10,7 @@ import { COLS, GAME_HEIGHT, GAME_WIDTH } from '../config.ts'
 export function createGameOverScene(stats: {
   distance: number
   elapsedMs: number
-  reason: 'fuel' | 'offroad'
+  reason: 'fuel' | 'offroad' | 'timeout' | 'crash'
   score: number
 }): Scene {
   let ready = false
@@ -34,7 +34,9 @@ export function createGameOverScene(stats: {
 
       drawTextCentered(ctx, 'GAME OVER', 40, COLS, C.B_RED)
 
-      const reasonText = stats.reason === 'fuel' ? 'OUT OF FUEL' : 'LOST CONTROL'
+      const reasonText = stats.reason === 'fuel' ? 'OUT OF FUEL'
+        : stats.reason === 'timeout' ? 'TIME IS UP'
+        : stats.reason === 'crash' ? 'COLLISION' : 'LOST CONTROL'
       drawTextCentered(ctx, reasonText, 64, COLS, C.B_YELLOW)
 
       const distKm = (stats.distance / 1000).toFixed(1)

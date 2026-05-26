@@ -53,12 +53,12 @@ const TRUCK_BMP: Bitmap = createBitmap(new Uint8Array([
   // Row 3 — taillights + plate + wheels (y=24-31): RED sides, WHITE centre
   0xC0, 0x00, 0x03,  // y24: XX....................XX  taillights (red)
   0xC0, 0x00, 0x03,  // y25: XX....................XX
-  0x00, 0xFF, 0x00,  // y26: ........XXXXXXXX........  license plate (white centre)
-  0x00, 0xB6, 0x00,  // y27: ........X.XX.XX.........  plate text marks
-  0x20, 0x00, 0x04,  // y28: ..X...................X.  wheel tread marks (tiny, rest = dark/road)
-  0x10, 0x00, 0x08,  // y29: ...X.................X..  offset tread (rolling look)
-  0x00, 0x00, 0x00,  // y30: ........................  ground clearance
-  0x00, 0x00, 0x00,  // y31: ........................
+  0x00, 0xFF, 0x00,  // y26: ........XXXXXXXX........  license plate (yellow centre)
+  0x00, 0xFF, 0x00,  // y27: ........XXXXXXXX........  plate solid fill
+  0x00, 0x00, 0x00,  // y28: (wheels drawn as black fillRect, not ink)
+  0x00, 0x00, 0x00,  // y29:
+  0x00, 0x00, 0x00,  // y30: ground clearance
+  0x00, 0x00, 0x00,  // y31:
 ]), 24, 32)
 
 // No paper → transparent background. Road surface shows through.
@@ -66,7 +66,7 @@ const TRUCK_ATTRS: AttrMap = createAttrMap(3, 4, [
   C.B_WHITE, C.B_WHITE, C.B_WHITE,    // row 0: cab roof
   C.B_WHITE, C.B_CYAN,  C.B_WHITE,    // row 1: cab body — cyan window, white pillars
   C.B_WHITE, C.B_WHITE, C.B_WHITE,    // row 2: trailer body
-  C.B_RED,   C.B_WHITE, C.B_RED,      // row 3: taillights + plate
+  C.B_RED,   C.B_YELLOW, C.B_RED,     // row 3: taillights (red) + plate (yellow)
 ])
 
 /**
@@ -81,5 +81,19 @@ export function drawTruck(
 ): void {
   const x = Math.round(cx - 12 + lean)
   const y = Math.round(baseY - 32)
+
+  // Black fills BEFORE the bitmap (opaque parts that road must NOT show through)
+  ctx.fillStyle = C.BLACK
+  ctx.fillRect(x + 2, y + 24, 5, 8)   // left wheel — tall black block (5×8)
+  ctx.fillRect(x + 17, y + 24, 5, 8)  // right wheel
+  ctx.fillRect(x + 2, y + 18, 20, 4)  // trailer interior (hollow area must be black, not road)
+
+  // Transparent-paper bitmap on top (road shows through cab outline areas)
   drawBitmapAttrs(ctx, TRUCK_BMP, TRUCK_ATTRS, x, y)
+
+  // Roof marker lights — red dots on the cab roof where it's wide enough
+  ctx.fillStyle = C.B_RED
+  ctx.fillRect(x + 11, y + 3, 2, 1)   // centre marker (y3: roof 16px wide)
+  ctx.fillRect(x + 5,  y + 5, 2, 1)   // left marker (y5: roof 18px wide)
+  ctx.fillRect(x + 17, y + 5, 2, 1)   // right marker
 }

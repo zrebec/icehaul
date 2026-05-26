@@ -146,7 +146,28 @@ export const STEER_DAMP = 5.0
 /** Max lateral velocity (clamp). */
 export const MAX_LATERAL_V = 2.5
 
-/** Lateral vx threshold for oversteer on slippery surfaces. */
+/**
+ * Aerodynamic drag applied on ALL surfaces (km/h lost per second at MAX_SPEED).
+ * Scales with speed². At 80 km/h asphalt: ~1.6 km/h/s. Gentle but real.
+ * Ensures speed always decays without throttle, even on asphalt.
+ */
+export const AERO_DRAG = 3.5
+
+/**
+ * How much speed reduces steering effectiveness (0–1).
+ * At 0: speed has no effect. At 0.6: steering at MAX_SPEED is 40% of standstill.
+ * Simulates: higher speed → more inertia → harder to turn.
+ */
+export const SPEED_STEER_PENALTY = 0.6
+
+/**
+ * How much speed lowers the skid threshold (0–1).
+ * At 0.5: threshold at MAX_SPEED is 50% of standstill value.
+ * Simulates: higher speed → easier to lose traction.
+ */
+export const SPEED_SKID_PENALTY = 0.5
+
+/** Lateral vx threshold for oversteer on slippery surfaces (at standstill). */
 export const SKID_THRESHOLD = 0.4
 /** Skid self-amplification strength. */
 export const SKID_AMPLIFY = 3.0
@@ -262,6 +283,29 @@ export const NEXT_TARGET_RANGE: readonly [number, number] = [15000, 25000]
 export const DELIVERY_FUEL_REFILL = 0.50
 /** Score points awarded per delivery. */
 export const DELIVERY_SCORE = 500
+/** Time limit per delivery in milliseconds (7 minutes). */
+export const DELIVERY_TIME_LIMIT_MS = 7 * 60 * 1000
+
+// ── Traffic ─────────────────────────────────────────────────────────────────
+
+/** Average spacing between traffic vehicles (metres). */
+export const TRAFFIC_SPACING_M = 220
+/** Random jitter on spacing (±fraction). */
+export const TRAFFIC_SPACING_JITTER = 0.4
+/** Probability that a vehicle goes in the same direction (rest = oncoming). */
+export const TRAFFIC_SAME_DIR_PCT = 0.55
+/** Speed range for same-direction vehicles [min, max] km/h. */
+export const TRAFFIC_SAME_SPEED: readonly [number, number] = [30, 55]
+/** Speed range for oncoming vehicles [min, max] km/h. */
+export const TRAFFIC_ONCOMING_SPEED: readonly [number, number] = [60, 90]
+/** Lateral collision radius for cars in player.x units. */
+export const TRAFFIC_COLLISION_RADIUS_CAR = 0.12
+/** Lateral collision radius for trucks (wider). */
+export const TRAFFIC_COLLISION_RADIUS_TRUCK = 0.16
+/** World-distance collision depth (metres). Must match visual sprite depth. */
+export const TRAFFIC_COLLISION_DEPTH_M = 4
+/** First traffic vehicle appears after this many metres (safe start). */
+export const TRAFFIC_START_M = 800
 
 // ── UI timing ───────────────────────────────────────────────────────────────
 

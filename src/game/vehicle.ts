@@ -1,7 +1,8 @@
 import {
   MAX_SPEED, ACCEL, BRAKE_DECEL,
-  CURVE_DRIFT,
+  AERO_DRAG, CURVE_DRIFT,
   STEER_ACCEL, STEER_DAMP, MAX_LATERAL_V,
+  SPEED_STEER_PENALTY, SPEED_SKID_PENALTY,
   ROAD_EDGE, OFF_ROAD_DRAG, OFF_ROAD_RETURN,
   SKID_THRESHOLD, SKID_AMPLIFY,
   FUEL_BURN_RATE, FUEL_IDLE_THRESHOLD,
@@ -46,18 +47,27 @@ export function tickVehicle(
   curvature = 0,
 ): void {
   const dt = dtMs / 1000
+  const speedRatio = v.speed / MAX_SPEED  // 0..1
 
-  // Forward — accelMult varies by surface
+  // ── Forward speed ──────────────────────────────────────────────────────
   if (input.throttle && v.fuel > 0) v.speed = Math.min(MAX_SPEED, v.speed + ACCEL * accelMult * dt)
-  // Brake — effectiveness varies by surface (ice: weak brakes)
   if (input.brake) v.speed = Math.max(0, v.speed - BRAKE_DECEL * SURFACE_BRAKE_MULT[surface] * dt)
 
-  // Passive surface drag — proportional to speed so you can always start moving.
-  // At 0 km/h drag is 0; at MAX_SPEED drag reaches full SURFACE_DRAG value.
-  // Creates a natural equilibrium speed per surface (sand ≈ 50 km/h, mud ≈ higher).
-  const drag = SURFACE_DRAG[surface]
-  if (drag > 0 && v.speed > 0) {
-    v.speed = Math.max(0, v.speed - drag * (v.speed / MAX_SPEED) * dt)
+  // Surface drag (proportional to speed — sand/mud/snow)
+  const surfDrag = SURFACE_DRAG[surface]
+  if (surfDrag > 0 && v.speed > 0) {
+    v.speed = Math.max(0, v.speed - surfDrag * speedRatio * dt)
+  }
+
+  // Aerodynamic drag (ALL surfaces, proportional to speed²)
+  // At 80 km/h: 3.5 × (80/120)² ≈ 1.56 km/h/s
+  if (v.speed > 0) {
+    v.speed = Math.max(0, v.speed - AERO_DRAG * speedRatio * speedRatio * dt)
+  }
+
+  // Empty tank coast-down
+  if (v.fuel <= 0 && v.speed > 0) {
+    v.speed = Math.max(0, v.speed - 8 * dt)
   }
 
   // Off-road penalty
@@ -67,42 +77,40 @@ export function tickVehicle(
     v.vx += (v.x > 0 ? -1 : 1) * OFF_ROAD_RETURN * offRoad * dt
   }
 
+  // ── Lateral physics ────────────────────────────────────────────────────
+
   // Centrifugal drift from curvature
   if (curvature !== 0 && v.speed > 5) {
     v.vx += -curvature * v.speed * CURVE_DRIFT * (1 - grip * 0.7) * dt
   }
 
-  // Steering — with per-surface damping multiplier (sand: extra heavy)
-  if (input.steerLeft)  v.vx -= STEER_ACCEL * grip * dt
-  if (input.steerRight) v.vx += STEER_ACCEL * grip * dt
+  // Steering — effectiveness DECREASES with speed (more inertia at high speed)
+  const speedSteerFactor = 1 - speedRatio * SPEED_STEER_PENALTY
+  if (input.steerLeft)  v.vx -= STEER_ACCEL * grip * speedSteerFactor * dt
+  if (input.steerRight) v.vx += STEER_ACCEL * grip * speedSteerFactor * dt
   if (!input.steerLeft && !input.steerRight) {
     const dampMult = SURFACE_STEER_DAMP_MULT[surface]
     v.vx *= 1 - Math.min(1, STEER_DAMP * grip * dampMult * dt)
   }
 
-  // Skid: only on surfaces where skid is enabled (not sand — sand is resistance, not slip)
-  if (SURFACE_SKID_ENABLED[surface] && Math.abs(v.vx) > SKID_THRESHOLD) {
-    const excess = Math.abs(v.vx) - SKID_THRESHOLD
-    v.vx += Math.sign(v.vx) * excess * SKID_AMPLIFY * (1 - grip) * dt
+  // Skid — threshold DECREASES with speed (easier to skid when fast)
+  if (SURFACE_SKID_ENABLED[surface]) {
+    const effectiveThreshold = SKID_THRESHOLD * (1 - speedRatio * SPEED_SKID_PENALTY)
+    if (Math.abs(v.vx) > effectiveThreshold) {
+      const excess = Math.abs(v.vx) - effectiveThreshold
+      v.vx += Math.sign(v.vx) * excess * SKID_AMPLIFY * (1 - grip) * dt
+    }
   }
 
   v.vx = Math.max(-MAX_LATERAL_V, Math.min(MAX_LATERAL_V, v.vx))
-
   v.x += v.vx * (0.35 + v.speed / 220) * dt
   v.x = Math.max(-2.0, Math.min(2.0, v.x))
 
+  // ── Distance + fuel ────────────────────────────────────────────────────
   v.distance += (v.speed / 3.6) * dt
 
-  // Fuel burn — quadratic: going faster burns MORE per km (not just per second).
-  // This makes slowing down on sand a real survival strategy.
-  // Formula: speed × (speed / MAX_SPEED) × BURN_RATE × SURFACE_MULT
   if (v.speed > FUEL_IDLE_THRESHOLD && v.fuel > 0) {
     const speedFactor = v.speed * (v.speed / MAX_SPEED)
     v.fuel = Math.max(0, v.fuel - speedFactor * FUEL_BURN_RATE * SURFACE_FUEL_MULT[surface] * dt)
-  }
-
-  // Empty tank: engine dies, truck coasts to a stop
-  if (v.fuel <= 0 && v.speed > 0) {
-    v.speed = Math.max(0, v.speed - 8 * dt)
   }
 }

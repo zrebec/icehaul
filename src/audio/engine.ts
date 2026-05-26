@@ -92,6 +92,14 @@ function updateSurfaceTexture(surface: Surface, t: number, baseFreq: number): vo
   }
 }
 
+export function muteEngine(): void {
+  if (ay) ay.muteAll()
+}
+
+export function unmuteEngine(): void {
+  if (ay) currentSurface = null  // forces re-apply on next updateEngine
+}
+
 export function stopEngine(): void {
   if (!ay) return
   ay.muteAll()

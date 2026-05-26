@@ -1,6 +1,6 @@
 import {
   C, CELL,
-  drawText, drawDial, drawSegmentedBar, drawFrame,
+  drawText, drawDial, drawSegmentedBar,
 } from 'zx-kit'
 import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, MAX_SPEED } from '../config.ts'
 
@@ -19,6 +19,7 @@ export function drawHUD(
     gripPct?: number
     missionText?: string
     missionDist?: number
+    missionTimeLeft?: string
   },
 ): void {
   const hudY = GAME_HEIGHT - HUD_ROWS * CELL
@@ -133,19 +134,26 @@ function drawSpeedPanel(
 function drawMissionPanel(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
-  state: { missionText?: string; missionDist?: number },
+  state: { missionText?: string; missionDist?: number; missionTimeLeft?: string },
 ): void {
-  const text = state.missionText ?? 'FREE DRIVE'
+  const text = state.missionText ?? 'DELIVER'
   const dist = state.missionDist
+  const timeLeft = state.missionTimeLeft
 
-  drawFrame(ctx, { x: x + 2, y: y + 4, width: w - 4, height: h - 8, color: C.B_WHITE })
-
+  // Line 1: mission label
   const textX = x + Math.max(2, Math.floor((w - text.length * CELL) / 2))
-  drawText(ctx, text, textX, y + 10, C.B_CYAN, C.BLACK)
+  drawText(ctx, text, textX, y + 8, C.B_CYAN, C.BLACK)
 
+  // Line 2: remaining distance
   if (dist != null) {
     const distStr = `${dist.toFixed(1)}km`
     const distX = x + Math.floor((w - distStr.length * CELL) / 2)
-    drawText(ctx, distStr, distX, y + 28, C.B_YELLOW, C.BLACK)
+    drawText(ctx, distStr, distX, y + 24, C.B_YELLOW, C.BLACK)
+  }
+
+  // Line 3: time remaining
+  if (timeLeft) {
+    const timeX = x + Math.floor((w - timeLeft.length * CELL) / 2)
+    drawText(ctx, timeLeft, timeX, y + 40, C.B_WHITE, C.BLACK)
   }
 }

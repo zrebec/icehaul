@@ -148,6 +148,7 @@ function drawSurfaceScanline(
 
 import type { Canister } from '../game/canisters.ts'
 import type { RoadsideObject } from '../game/roadside.ts'
+import type { TrafficVehicle, VehicleType } from '../game/traffic.ts'
 
 /**
  * Draws fuel canisters on the road in perspective. Call AFTER drawRoad.
@@ -204,6 +205,110 @@ export function drawCanisters(
     ctx.fillRect(screenX - size, y - size * 2, size * 2, size * 2)
     ctx.fillStyle = C.B_YELLOW
     ctx.fillRect(screenX - size, y - size * 2 - 1, size * 2, 1)
+  }
+}
+
+// ── Traffic vehicle rendering ────────────────────────────────────────────────
+
+/**
+ * Draw traffic vehicles in perspective. Call AFTER drawRoad, BEFORE drawTruck.
+ * Same-direction cars: green/yellow. Oncoming cars: white (headlights).
+ */
+export function drawTraffic(
+  ctx: CanvasRenderingContext2D,
+  viewportTop: number,
+  viewportBottom: number,
+  cameraDistance: number,
+  playerX: number,
+  vehicles: readonly TrafficVehicle[],
+  getCurvature: (distM: number) => number,
+): void {
+  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
+  const roadHeight = viewportBottom - horizonY
+  const scanlines = roadHeight - 1
+  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
+
+  // Curve offsets
+  const curveOffset = new Float32Array(scanlines)
+  let acc = 0
+  for (let i = scanlines - 1; i >= 0; i--) {
+    const distFromBottom = (scanlines - 1 - i) / scanlines
+    const dy = i + 1
+    acc += getCurvature(cameraDistance + PERSPECTIVE_K / dy) * CURVE_STRENGTH * distFromBottom
+    curveOffset[i] = acc
+  }
+
+  for (const v of vehicles) {
+    const worldZ = v.distM - cameraDistance
+    if (worldZ < 3 || worldZ > PERSPECTIVE_K) continue
+
+    const dy = PERSPECTIVE_K / worldZ
+    const i = Math.round(dy) - 1
+    if (i < 0 || i >= scanlines) continue
+
+    const y = horizonY + i + 1
+    const t = (i + 1) / roadHeight
+    const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
+    const centerX = baseVanX + (curveOffset[i] ?? 0)
+    const screenX = Math.round(centerX + v.x * half)
+
+    if (screenX < -20 || screenX > GAME_WIDTH + 20) continue
+
+    const scale = Math.max(0.3, t)
+
+    if (v.dir === 'oncoming') {
+      drawOncomingVehicle(ctx, screenX, y, scale, v.type)
+    } else {
+      drawSameDirVehicle(ctx, screenX, y, scale, v.type)
+    }
+  }
+}
+
+function drawSameDirVehicle(
+  ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, type: VehicleType,
+): void {
+  const isTruck = type === 'truck'
+  const w = Math.max(2, Math.round((isTruck ? 10 : 7) * scale))
+  const h = Math.max(3, Math.round((isTruck ? 14 : 8) * scale))
+
+  // Body
+  ctx.fillStyle = isTruck ? C.B_YELLOW : C.B_GREEN
+  ctx.fillRect(x - Math.floor(w / 2), baseY - h, w, h)
+
+  // Roof (darker, narrower)
+  const roofW = Math.max(1, w - 2)
+  ctx.fillStyle = isTruck ? C.YELLOW : C.GREEN
+  ctx.fillRect(x - Math.floor(roofW / 2), baseY - h - Math.max(1, Math.round(2 * scale)), roofW, Math.max(1, Math.round(2 * scale)))
+
+  // Taillights (red dots)
+  if (scale > 0.4) {
+    ctx.fillStyle = C.B_RED
+    ctx.fillRect(x - Math.floor(w / 2), baseY - 1, 1, 1)
+    ctx.fillRect(x + Math.floor(w / 2) - 1, baseY - 1, 1, 1)
+  }
+}
+
+function drawOncomingVehicle(
+  ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, type: VehicleType,
+): void {
+  const isTruck = type === 'truck'
+  const w = Math.max(2, Math.round((isTruck ? 10 : 7) * scale))
+  const h = Math.max(3, Math.round((isTruck ? 14 : 8) * scale))
+
+  // Body (darker — seen from front)
+  ctx.fillStyle = C.WHITE
+  ctx.fillRect(x - Math.floor(w / 2), baseY - h, w, h)
+
+  // Windscreen
+  const wsW = Math.max(1, w - 2)
+  ctx.fillStyle = C.CYAN
+  ctx.fillRect(x - Math.floor(wsW / 2), baseY - h + Math.max(1, Math.round(2 * scale)), wsW, Math.max(1, Math.round(2 * scale)))
+
+  // Headlights (bright yellow — the key visual cue for oncoming)
+  if (scale > 0.35) {
+    ctx.fillStyle = C.B_YELLOW
+    ctx.fillRect(x - Math.floor(w / 2), baseY - Math.round(2 * scale), Math.max(1, Math.round(2 * scale)), Math.max(1, Math.round(scale)))
+    ctx.fillRect(x + Math.floor(w / 2) - Math.max(1, Math.round(2 * scale)), baseY - Math.round(2 * scale), Math.max(1, Math.round(2 * scale)), Math.max(1, Math.round(scale)))
   }
 }
 
