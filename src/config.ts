@@ -82,12 +82,19 @@ export interface BrakeProfile {
   sound: 'screech' | 'grind' | 'none'
 }
 
+/**
+ * Stopping time from 120 km/h (approx):
+ *   asphalt: ~10s    snow: ~14s    ice: ~25s+    sand: ~16s    mud: ~15s
+ *
+ * Compare: car = 3-4s, real 20t truck = 6-8s.
+ * We're slightly slower than reality for HEAVY feel.
+ */
 export const SURFACE_BRAKE: Record<Surface, BrakeProfile> = {
-  asphalt: { decel: 35, speedFade: 0.25, lockSpeed: 100, lateralLoss: 0.10, sound: 'screech' },
-  snow:    { decel: 25, speedFade: 0.35, lockSpeed: 55,  lateralLoss: 0.30, sound: 'none' },
-  ice:     { decel: 15, speedFade: 0.50, lockSpeed: 30,  lateralLoss: 0.50, sound: 'grind' },
-  sand:    { decel: 20, speedFade: 0.20, lockSpeed: 80,  lateralLoss: 0.15, sound: 'none' },
-  mud:     { decel: 22, speedFade: 0.30, lockSpeed: 65,  lateralLoss: 0.25, sound: 'none' },
+  asphalt: { decel: 18, speedFade: 0.40, lockSpeed: 100, lateralLoss: 0.10, sound: 'screech' },
+  snow:    { decel: 12, speedFade: 0.40, lockSpeed: 55,  lateralLoss: 0.30, sound: 'none' },
+  ice:     { decel:  8, speedFade: 0.55, lockSpeed: 30,  lateralLoss: 0.50, sound: 'grind' },
+  sand:    { decel: 10, speedFade: 0.30, lockSpeed: 80,  lateralLoss: 0.15, sound: 'none' },
+  mud:     { decel: 11, speedFade: 0.35, lockSpeed: 65,  lateralLoss: 0.25, sound: 'none' },
 }
 
 /**
@@ -149,8 +156,12 @@ export const SURFACE_PROBABILITY: Record<Surface, number> = {
 
 /** Maximum forward speed in km/h (dial range 0–120). */
 export const MAX_SPEED = 120
-/** Base throttle acceleration in km/h per second (on asphalt). */
-export const ACCEL = 25
+/**
+ * Base throttle acceleration in km/h per second (on asphalt).
+ * 20t truck: real ~2 km/h/s, we use 8 for gameplay (0→120 in ~15s).
+ * Still feels heavy — you plan overtakes well in advance.
+ */
+export const ACCEL = 8
 /** @deprecated Use SURFACE_BRAKE_PROFILE instead. */
 export const BRAKE_DECEL = 35
 /** Steering lateral acceleration at grip=1 (units/s²). */
