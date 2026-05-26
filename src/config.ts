@@ -65,15 +65,29 @@ export const SURFACE_DRAG: Record<Surface, number> = {
 }
 
 /**
- * Per-surface brake effectiveness multiplier.
- * 1.0 = full braking (asphalt). On ice brakes are weak (0.5).
+ * Per-surface brake profile — comprehensive braking model.
+ *
+ * decel:       Base deceleration in km/h/s. Heavy truck = 25-35.
+ * speedFade:   How much speed reduces braking (0–1). At 1: zero brakes at MAX_SPEED.
+ * lockSpeed:   Above this km/h, wheels tend to lock under full braking.
+ * lateralLoss: Lateral grip loss when braking (0=none, 1=total).
+ *              Increases further when speed > lockSpeed (locked wheels).
+ * sound:       Brake sound type for AY chip.
  */
-export const SURFACE_BRAKE_MULT: Record<Surface, number> = {
-  asphalt: 1.0,
-  snow:    0.8,
-  ice:     0.5,
-  sand:    0.7,
-  mud:     0.75,
+export interface BrakeProfile {
+  decel: number
+  speedFade: number
+  lockSpeed: number
+  lateralLoss: number
+  sound: 'screech' | 'grind' | 'none'
+}
+
+export const SURFACE_BRAKE: Record<Surface, BrakeProfile> = {
+  asphalt: { decel: 35, speedFade: 0.25, lockSpeed: 100, lateralLoss: 0.10, sound: 'screech' },
+  snow:    { decel: 25, speedFade: 0.35, lockSpeed: 55,  lateralLoss: 0.30, sound: 'none' },
+  ice:     { decel: 15, speedFade: 0.50, lockSpeed: 30,  lateralLoss: 0.50, sound: 'grind' },
+  sand:    { decel: 20, speedFade: 0.20, lockSpeed: 80,  lateralLoss: 0.15, sound: 'none' },
+  mud:     { decel: 22, speedFade: 0.30, lockSpeed: 65,  lateralLoss: 0.25, sound: 'none' },
 }
 
 /**
@@ -137,8 +151,8 @@ export const SURFACE_PROBABILITY: Record<Surface, number> = {
 export const MAX_SPEED = 120
 /** Base throttle acceleration in km/h per second (on asphalt). */
 export const ACCEL = 25
-/** Base brake deceleration in km/h per second (on asphalt). */
-export const BRAKE_DECEL = 90
+/** @deprecated Use SURFACE_BRAKE_PROFILE instead. */
+export const BRAKE_DECEL = 35
 /** Steering lateral acceleration at grip=1 (units/s²). */
 export const STEER_ACCEL = 3.2
 /** Lateral velocity damping per second at grip=1 (no steering input). */
@@ -172,7 +186,7 @@ export const SURFACE_SLIP_PEAK: Record<Surface, number> = {
   sand:    0.50,
   mud:     0.30,
 }
-/** Braking on low-grip surfaces reduces lateral grip further (0–1 multiplier). */
+/** @deprecated Replaced by SURFACE_BRAKE[surface].lateralLoss */
 export const BRAKE_GRIP_LOSS = 0.7
 
 // ── Fuel ────────────────────────────────────────────────────────────────────
@@ -215,11 +229,7 @@ export const TURN_LENGTH_RANGE: readonly [number, number] = [120, 450]
 /** Length of the smooth ramp into/out of a turn (metres). */
 export const TURN_RAMP_M = 60
 
-/**
- * Speed-dependent braking penalty (0–1).
- * At 0.35: braking at MAX_SPEED is 65% as effective as at standstill.
- * Simulates: kinetic energy ∝ v², so higher speed = harder to stop.
- */
+/** @deprecated Replaced by SURFACE_BRAKE[surface].speedFade */
 export const SPEED_BRAKE_PENALTY = 0.35
 
 // ── Off-road penalties ──────────────────────────────────────────────────────

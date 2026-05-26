@@ -123,7 +123,7 @@ export function createDriveScene(
       const curvature = getCurvatureAt(v.distance)
       tickVehicle(v, input, surface, grip, accel, dt, curvature)
 
-      if (engineStarted) updateEngine(v.speed, MAX_SPEED, surface)
+      if (engineStarted) updateEngine(v.speed, MAX_SPEED, surface, input.brake)
 
       const ctxAudio = getAudioContext()
 
@@ -148,17 +148,7 @@ export function createDriveScene(
         }
       }
 
-      // Brake screech — only on hard surfaces (asphalt: rubber screech, ice: metal scrape)
-      if (ctxAudio && input.brake && v.speed > 25 && (surface === 'asphalt' || surface === 'ice')) {
-        const now = ctxAudio.currentTime
-        if (now - lastScreechAtS > 0.3) {
-          const freq = surface === 'asphalt'
-            ? 400 + Math.random() * 200   // rubber on tarmac: higher pitched
-            : 120 + Math.random() * 80    // metal on ice: low grinding
-          beep(freq, 50, now)
-          lastScreechAtS = now
-        }
-      }
+      // (Brake sounds now handled by AY engine.ts Channel C + beeper)
 
       // Off-road
       const offRoad = offRoadAmount(v)

@@ -24,14 +24,14 @@
  */
 
 import {
-  MAX_SPEED, ACCEL, BRAKE_DECEL,
+  MAX_SPEED, ACCEL,
   AERO_DRAG, ROLLING_RESISTANCE, ENGINE_BRAKE,
-  SPEED_BRAKE_PENALTY, CURVE_DRIFT,
+  CURVE_DRIFT,
   STEER_ACCEL, STEER_DAMP, MAX_LATERAL_V,
-  SPEED_STEER_PENALTY, BRAKE_GRIP_LOSS,
+  SPEED_STEER_PENALTY,
   ROAD_EDGE, OFF_ROAD_DRAG, OFF_ROAD_RETURN,
   FUEL_BURN_RATE, FUEL_IDLE_THRESHOLD,
-  SURFACE_DRAG, SURFACE_BRAKE_MULT,
+  SURFACE_DRAG, SURFACE_BRAKE,
   SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT,
   SURFACE_SLIP_PEAK,
   type Surface,
@@ -91,10 +91,11 @@ export function tickVehicle(
     v.speed = Math.min(MAX_SPEED, v.speed + ACCEL * accelMult * dt)
   }
 
-  // Manual brake — harder to stop at high speed (kinetic energy ∝ v²)
+  // Manual brake — per-surface profile with speed fade and wheel lock
+  const bp = SURFACE_BRAKE[surface]
   if (input.brake) {
-    const brakePenalty = 1 - speedRatio * SPEED_BRAKE_PENALTY
-    v.speed = Math.max(0, v.speed - BRAKE_DECEL * SURFACE_BRAKE_MULT[surface] * brakePenalty * dt)
+    const speedFade = 1 - speedRatio * bp.speedFade
+    v.speed = Math.max(0, v.speed - bp.decel * speedFade * dt)
   }
 
   // Engine braking (throttle released, engine compression resists motion)
@@ -136,10 +137,17 @@ export function tickVehicle(
   const slipPeak = SURFACE_SLIP_PEAK[surface]
   const gripMult = slipGripMult(v.vx, slipPeak)
 
-  // Effective grip — further reduced when braking (locked wheels = less lateral control)
+  // Effective grip — reduced when braking (locked wheels = less lateral control).
+  // Worse when speed exceeds lockSpeed (wheels actually lock on that surface).
   let effectiveGrip = grip * gripMult
-  if (input.brake && grip < 1) {
-    effectiveGrip *= BRAKE_GRIP_LOSS
+  if (input.brake) {
+    let brakeLateralLoss = bp.lateralLoss
+    if (v.speed > bp.lockSpeed) {
+      // Wheels locked: lateral loss intensifies proportionally to excess speed
+      const lockExcess = (v.speed - bp.lockSpeed) / (MAX_SPEED - bp.lockSpeed)
+      brakeLateralLoss = Math.min(0.9, bp.lateralLoss + lockExcess * 0.4)
+    }
+    effectiveGrip *= (1 - brakeLateralLoss)
   }
 
   // Centrifugal drift from road curvature
