@@ -165,11 +165,22 @@ export const MAX_LATERAL_V = 2.5
  * Scales with speed². At 80 km/h asphalt: ~1.6 km/h/s. Gentle but real.
  * Ensures speed always decays without throttle, even on asphalt.
  */
-export const AERO_DRAG = 3.5
-/** Rolling resistance: km/h lost per (km/h of speed) per second. Linear. C_rr ≈ 30×C_drag. */
-export const ROLLING_RESISTANCE = 0.008
-/** Engine braking when throttle released (km/h/s at MAX_SPEED, scales with speed). */
-export const ENGINE_BRAKE = 6.0
+/**
+ * Aerodynamic drag (km/h/s at MAX_SPEED). Scales with speed².
+ * Real 20t truck at 120 km/h: ~0.86 km/h/s. We use 0.5 for heavy feel.
+ */
+export const AERO_DRAG = 0.5
+/**
+ * Rolling resistance (km/h lost per km/h of speed per second).
+ * Real truck Crr ≈ 0.007 → ~0.25 km/h/s at 120.
+ */
+export const ROLLING_RESISTANCE = 0.001
+/**
+ * Engine braking when throttle released (km/h/s at MAX_SPEED).
+ * Minimal for a 20t truck in gear — mass dominates over engine friction.
+ * The truck GLIDES. You must brake manually to stop.
+ */
+export const ENGINE_BRAKE = 0.3
 /** Speed reduces steering (0–1). At 0.6: steering at MAX is 40% of standstill. */
 export const SPEED_STEER_PENALTY = 0.6
 
