@@ -168,8 +168,6 @@ export const MAX_SPEED = 120
  * Still feels heavy — you plan overtakes well in advance.
  */
 export const ACCEL = 8
-/** Base brake reference for README formulas. Actual braking uses SURFACE_BRAKE[surface]. */
-export const BRAKE_DECEL = 35
 /** Steering lateral acceleration at grip=1 (units/s²). */
 export const STEER_ACCEL = 3.2
 /** Lateral velocity damping per second at grip=1 (no steering input). */

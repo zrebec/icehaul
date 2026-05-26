@@ -4,7 +4,7 @@
  *
  * Key forces (longitudinal):
  *   F_engine    = ACCEL × surface_mult          (throttle)
- *   F_brake     = BRAKE_DECEL × surface_mult    (manual brake)
+ *   F_brake     = SURFACE_BRAKE[surface].decel × speedFade  (manual brake)
  *   F_aero      = AERO_DRAG × (v/MAX)²          (quadratic, dominates at high speed)
  *   F_rolling   = ROLLING_RESISTANCE × v         (linear, dominates at low speed)
  *   F_engine_br = ENGINE_BRAKE × (v/MAX)         (throttle released = engine compression)
