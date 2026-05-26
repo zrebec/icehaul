@@ -2,7 +2,7 @@ import {
   C, CELL,
   drawText, drawDial, drawSegmentedBar,
 } from 'zx-kit'
-import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, MAX_SPEED } from '../config.ts'
+import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, MAX_SPEED, TRUCK_WEIGHT_T } from '../config.ts'
 
 /**
  * Bottom instrument cluster — 3 equal-width panels in 9 rows (72 px):
@@ -158,7 +158,10 @@ function drawMissionPanel(
     drawText(ctx, timeLeft, timeX, y + 40, C.B_WHITE, C.BLACK)
   }
 
-  // Build number — bottom right corner
+  // Weight + build number — bottom area
+  const wt = `${TRUCK_WEIGHT_T}t`
+  drawText(ctx, wt, x + 2, y + h - 18, C.B_WHITE, C.BLACK)
+
   if (state.buildNumber) {
     const bld = `B${state.buildNumber}`
     drawText(ctx, bld, x + w - bld.length * CELL - 1, y + h - 9, C.WHITE, C.BLACK)

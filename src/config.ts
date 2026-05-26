@@ -154,6 +154,12 @@ export const SURFACE_PROBABILITY: Record<Surface, number> = {
 
 // ── Vehicle physics ─────────────────────────────────────────────────────────
 
+/**
+ * Truck gross weight in tonnes. Displayed on dashboard.
+ * Affects feel (all physics tuned for this mass). Future: cargo system varies it.
+ */
+export const TRUCK_WEIGHT_T = 20
+
 /** Maximum forward speed in km/h (dial range 0–120). */
 export const MAX_SPEED = 120
 /**
@@ -162,7 +168,7 @@ export const MAX_SPEED = 120
  * Still feels heavy — you plan overtakes well in advance.
  */
 export const ACCEL = 8
-/** @deprecated Use SURFACE_BRAKE_PROFILE instead. */
+/** Base brake reference for README formulas. Actual braking uses SURFACE_BRAKE[surface]. */
 export const BRAKE_DECEL = 35
 /** Steering lateral acceleration at grip=1 (units/s²). */
 export const STEER_ACCEL = 3.2
@@ -208,9 +214,6 @@ export const SURFACE_SLIP_PEAK: Record<Surface, number> = {
   sand:    0.50,
   mud:     0.30,
 }
-/** @deprecated Replaced by SURFACE_BRAKE[surface].lateralLoss */
-export const BRAKE_GRIP_LOSS = 0.7
-
 // ── Fuel ────────────────────────────────────────────────────────────────────
 
 export const FUEL_BURN_RATE = 0.00012
@@ -250,9 +253,6 @@ export const STRAIGHT_LENGTH_RANGE: readonly [number, number] = [80, 250]
 export const TURN_LENGTH_RANGE: readonly [number, number] = [120, 450]
 /** Length of the smooth ramp into/out of a turn (metres). */
 export const TURN_RAMP_M = 60
-
-/** @deprecated Replaced by SURFACE_BRAKE[surface].speedFade */
-export const SPEED_BRAKE_PENALTY = 0.35
 
 // ── Off-road penalties ──────────────────────────────────────────────────────
 
