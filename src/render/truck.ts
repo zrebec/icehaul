@@ -18,8 +18,11 @@ import { C, createBitmap, createAttrMap, drawBitmapAttrs, type Bitmap, type Attr
  *   24-31: Taillights (red corners) + white plate + wheel pairs
  */
 
+export const TRUCK_BMP_W = 24
+export const TRUCK_BMP_H = 32
+
 // prettier-ignore
-const TRUCK_BMP: Bitmap = createBitmap(new Uint8Array([
+export const TRUCK_BMP_DATA = new Uint8Array([
   // Row 0 — cab roof (y=0-7): WHITE across all 3 cells
   0x00, 0xFF, 0x00,  // y0:  ........XXXXXXXX........  narrow 8px
   0x03, 0xFF, 0xC0,  // y1:  ......XXXXXXXXXXXX......  12px
@@ -59,7 +62,29 @@ const TRUCK_BMP: Bitmap = createBitmap(new Uint8Array([
   0x00, 0x00, 0x00,  // y29:
   0x00, 0x00, 0x00,  // y30: ground clearance
   0x00, 0x00, 0x00,  // y31:
-]), 24, 32)
+])
+
+const TRUCK_BMP: Bitmap = createBitmap(TRUCK_BMP_DATA, TRUCK_BMP_W, TRUCK_BMP_H)
+
+// Collision bitmap: TRUCK_BMP_DATA plus the black fillRect regions that are visually
+// solid but transparent in the bitmap (trailer interior, wheel blocks).
+function buildCollisionData(): Uint8Array {
+  const data = new Uint8Array(TRUCK_BMP_DATA)
+  const bpr = TRUCK_BMP_W / 8
+  const setBit = (row: number, col: number) => {
+    const byteIdx = row * bpr + Math.floor(col / 8)
+    data[byteIdx]! |= 1 << (7 - (col % 8))
+  }
+  for (let row = 18; row <= 21; row++)   // trailer interior (cols 2-21)
+    for (let col = 2; col <= 21; col++) setBit(row, col)
+  for (let row = 24; row <= 31; row++) { // left wheel (cols 2-6) + right wheel (cols 17-21)
+    for (let col = 2;  col <= 6;  col++) setBit(row, col)
+    for (let col = 17; col <= 21; col++) setBit(row, col)
+  }
+  return data
+}
+
+export const TRUCK_COLLISION_BMP: Bitmap = createBitmap(buildCollisionData(), TRUCK_BMP_W, TRUCK_BMP_H)
 
 // No paper → transparent background. Road surface shows through.
 const TRUCK_ATTRS: AttrMap = createAttrMap(3, 4, [

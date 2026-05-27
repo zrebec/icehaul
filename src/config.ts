@@ -254,10 +254,17 @@ export const TURN_RAMP_M = 60
 
 // ── Off-road penalties ──────────────────────────────────────────────────────
 
-export const ROAD_EDGE = 1.1
-export const EDGE_WARN_THRESHOLD = 0.9
 export const OFF_ROAD_DRAG = 55
 export const OFF_ROAD_RETURN = 1.8
+
+/** Severity (0–1) at which off-road becomes an instant crash. */
+export const OFFROAD_CRASH_SEVERITY = 0.4
+/** Seconds of ANY off-road before game over. */
+export const OFFROAD_TIMEOUT_S = 3.0
+/** Pixel margin to road edge that triggers "approaching edge" warning. */
+export const EDGE_MARGIN_WARN_PX = 8
+/** Crash animation duration in ms before game-over screen. */
+export const CRASH_ANIM_MS = 1200
 
 // ── Road rendering ──────────────────────────────────────────────────────────
 

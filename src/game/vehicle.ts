@@ -29,7 +29,7 @@ import {
   CURVE_DRIFT,
   STEER_ACCEL, STEER_DAMP, MAX_LATERAL_V,
   SPEED_STEER_PENALTY,
-  ROAD_EDGE, OFF_ROAD_DRAG, OFF_ROAD_RETURN,
+  OFF_ROAD_DRAG, OFF_ROAD_RETURN,
   FUEL_BURN_RATE, FUEL_IDLE_THRESHOLD,
   SURFACE_DRAG, SURFACE_BRAKE,
   SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT,
@@ -58,10 +58,6 @@ export function createVehicle(): Vehicle {
   return { x: 0, vx: 0, speed: 0, distance: 0, fuel: 1.0 }
 }
 
-export function offRoadAmount(v: Vehicle): number {
-  return Math.max(0, Math.abs(v.x) - ROAD_EDGE)
-}
-
 /**
  * Slip angle grip curve. Returns 1.0 in the linear zone,
  * drops off as 1/x² beyond the peak. Minimum 5% residual grip.
@@ -80,6 +76,8 @@ export function tickVehicle(
   accelMult: number,
   dtMs: number,
   curvature = 0,
+  offroadSeverity = 0,
+  offroadReturnDir = 0,
 ): void {
   const dt = dtMs / 1000
   const speedRatio = v.speed / MAX_SPEED
@@ -124,11 +122,10 @@ export function tickVehicle(
     v.speed = Math.max(0, v.speed - 8 * dt)
   }
 
-  // Off-road drag
-  const offRoad = offRoadAmount(v)
-  if (offRoad > 0) {
-    v.speed = Math.max(0, v.speed - OFF_ROAD_DRAG * offRoad * dt)
-    v.vx += (v.x > 0 ? -1 : 1) * OFF_ROAD_RETURN * offRoad * dt
+  // Off-road drag (pixel-perfect severity from offroad.ts)
+  if (offroadSeverity > 0) {
+    v.speed = Math.max(0, v.speed - OFF_ROAD_DRAG * offroadSeverity * dt)
+    v.vx += offroadReturnDir * OFF_ROAD_RETURN * offroadSeverity * dt
   }
 
   // ── Lateral forces (slip angle model) ──────────────────────────────────

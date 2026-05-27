@@ -88,8 +88,10 @@ export function getSurfaceAt(distanceMeters: number, _seed = 0): Surface {
 export function gripFor(surface: Surface): number { return SURFACE_GRIP[surface] }
 export function accelFor(surface: Surface): number { return SURFACE_ACCEL[surface] }
 
-/** Warn if the surface ahead is anything other than asphalt. Always. */
+/** Warn only when approaching a dangerous surface — not when already on it. */
 export function isDangerAhead(currentDist: number): Surface | null {
+  const current = getSurfaceAt(currentDist)
+  if (current !== 'asphalt') return null
   const ahead = getSurfaceAt(currentDist + ICE_AHEAD_LOOK_M)
   return ahead !== 'asphalt' ? ahead : null
 }

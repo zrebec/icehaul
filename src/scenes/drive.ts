@@ -6,14 +6,15 @@ import {
 import {
   GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP, PERSPECTIVE_K,
   COLS, BLINK_MS, SCREECH_COOLDOWN_S, OFFROAD_BEEP_COOLDOWN_S,
-  EDGE_WARN_THRESHOLD,
+  EDGE_MARGIN_WARN_PX,
   LOW_FUEL_WARN, LOW_FUEL_CRITICAL,
   LOW_FUEL_BEEP_COOLDOWN_S, LOW_FUEL_CRIT_BEEP_COOLDOWN_S,
   FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE,
   DELIVERY_FUEL_REFILL, DELIVERY_SCORE, DELIVERY_TIME_LIMIT_MS,
+  OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S, CRASH_ANIM_MS,
 } from '../config.ts'
 import {
-  createVehicle, tickVehicle, offRoadAmount, MAX_SPEED,
+  createVehicle, tickVehicle, MAX_SPEED,
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
 import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
@@ -25,8 +26,8 @@ import { startEngine, updateEngine, stopEngine, muteEngine, unmuteEngine } from 
 import { checkCanisterPickup, getVisibleCanisters, resetCanisters } from '../game/canisters.ts'
 import { getRoadsideObjects } from '../game/roadside.ts'
 import { tickTraffic, getVisibleTraffic, resetTraffic } from '../game/traffic.ts'
-
-const OFFROAD_TIMEOUT_S = 3.0
+import { computeRoadEdges } from '../game/roadgeometry.ts'
+import { checkTruckOffroad, type OffroadResult } from '../game/offroad.ts'
 
 function hash(n: number): number {
   let x = (n + 0x9E3779B9) | 0
@@ -35,7 +36,7 @@ function hash(n: number): number {
   return ((x ^ (x >>> 16)) >>> 0) / 0x100000000
 }
 
-type DriveState = 'waiting' | 'playing' | 'paused'
+type DriveState = 'waiting' | 'playing' | 'paused' | 'crashing'
 
 export function createDriveScene(
   onGameOver: (stats: { distance: number; elapsedMs: number; reason: 'fuel' | 'offroad' | 'timeout' | 'crash'; score: number }) => void,
@@ -52,6 +53,13 @@ export function createDriveScene(
   let wasOffRoad = false
   let offroadAccumS = 0
   let gameOverFired = false
+
+  let lastOffroad: OffroadResult = {
+    offRoadPixels: 0, totalPixels: 1, severity: 0,
+    leftOff: 0, rightOff: 0, marginLeft: Infinity, marginRight: Infinity,
+  }
+  let crashTimerMs = 0
+  let crashReason: 'offroad' | 'crash' | null = null
   // Seed all generators — every game is unique
   const gameSeed = Date.now()
   resetRoad(gameSeed)
@@ -101,6 +109,19 @@ export function createDriveScene(
         return
       }
 
+      // ── Crashing state: slide + shake until animation ends ──
+      if (driveState === 'crashing') {
+        if (gameOverFired) return
+        crashTimerMs += dt
+        v.speed = Math.max(0, v.speed - v.speed * 3 * (dt / 1000))
+        v.x += v.vx * (dt / 1000) * 0.3
+        v.vx *= 0.95
+        if (crashTimerMs >= CRASH_ANIM_MS) {
+          triggerGameOver(crashReason ?? 'crash')
+        }
+        return
+      }
+
       // ── Playing state: check for pause ──
       if (consumePause()) {
         driveState = 'paused'
@@ -116,6 +137,18 @@ export function createDriveScene(
         engineStarted = true
       }
 
+      // ── Pixel-perfect off-road detection (before physics tick) ──
+      const truckScreenX = GAME_WIDTH / 2 + v.x * 50
+      const truckDrawX = Math.round(truckScreenX - 12 + (-v.vx * 1.5))
+      const truckDrawY = Math.round(VIEWPORT_BOTTOM - 2 - 32)
+      const edgesLookup = computeRoadEdges(v.distance, v.x, (d) => getCurvatureAt(d))
+      lastOffroad = checkTruckOffroad(truckDrawX, truckDrawY, edgesLookup)
+
+      let offroadReturnDir = 0
+      if (lastOffroad.severity > 0) {
+        offroadReturnDir = lastOffroad.rightOff > lastOffroad.leftOff ? -1 : 1
+      }
+
       const input: VehicleInput = {
         throttle:   isHeld('ArrowUp'),
         brake:      isHeld('ArrowDown'),
@@ -127,7 +160,8 @@ export function createDriveScene(
       const grip = gripFor(surface)
       const accel = accelFor(surface)
       const curvature = getCurvatureAt(v.distance)
-      tickVehicle(v, input, surface, grip, accel, dt, curvature)
+      tickVehicle(v, input, surface, grip, accel, dt, curvature,
+        lastOffroad.severity, offroadReturnDir)
 
       if (engineStarted) updateEngine(v.speed, MAX_SPEED, surface, input.brake)
 
@@ -136,12 +170,7 @@ export function createDriveScene(
       // Traffic
       const trafficResult = tickTraffic(v.distance, v.x, v.speed, dt)
       if (trafficResult === 'crash') {
-        if (ctxAudio) {
-          beep(100, 200, ctxAudio.currentTime)
-          beep(60, 300, ctxAudio.currentTime + 0.1)
-        }
-        flashBorder(C.B_RED, 4, 100)
-        triggerGameOver('crash')
+        startCrash('crash')
         return
       }
 
@@ -154,30 +183,34 @@ export function createDriveScene(
         }
       }
 
-      // (Brake sounds now handled by AY engine.ts Channel C + beeper)
-
-      // Off-road
-      const offRoad = offRoadAmount(v)
-      const atEdge = Math.abs(v.x) > EDGE_WARN_THRESHOLD && offRoad === 0
-      if (offRoad > 0) offroadAccumS += dt / 1000
+      // ── Off-road warnings (pixel-perfect) ──
+      const isOffRoad = lastOffroad.severity > 0
+      const nearEdge = !isOffRoad && Math.min(lastOffroad.marginLeft, lastOffroad.marginRight) < EDGE_MARGIN_WARN_PX
+      if (isOffRoad) offroadAccumS += dt / 1000
       else offroadAccumS = 0
 
       if (ctxAudio && v.speed > 10) {
         const now = ctxAudio.currentTime
-        if (offRoad > 0) {
+        if (isOffRoad) {
           if (now - lastOffroadBeepS > OFFROAD_BEEP_COOLDOWN_S) {
-            beep(80 + offRoad * 40, 100, now)
+            beep(80 + lastOffroad.severity * 120, 100, now)
             lastOffroadBeepS = now
           }
           if (!wasOffRoad) flashBorder(C.B_RED, 2, 120)
-        } else if (atEdge) {
+        } else if (nearEdge) {
           if (now - lastOffroadBeepS > 0.5) {
             beep(200, 30, now)
             lastOffroadBeepS = now
           }
         }
       }
-      wasOffRoad = offRoad > 0
+      wasOffRoad = isOffRoad
+
+      // Instant crash at high severity
+      if (lastOffroad.severity >= OFFROAD_CRASH_SEVERITY) {
+        startCrash('offroad')
+        return
+      }
 
       // Low fuel
       if (ctxAudio && v.fuel > 0) {
@@ -226,8 +259,22 @@ export function createDriveScene(
 
       // Game over
       if (v.fuel <= 0 && v.speed < 1) triggerGameOver('fuel')
-      else if (offroadAccumS > OFFROAD_TIMEOUT_S) triggerGameOver('offroad')
+      else if (offroadAccumS > OFFROAD_TIMEOUT_S) startCrash('offroad')
       else if (missionTimerMs <= 0) triggerGameOver('timeout')
+
+      function startCrash(reason: 'offroad' | 'crash') {
+        crashReason = reason
+        crashTimerMs = 0
+        driveState = 'crashing'
+        muteEngine()
+        const audio = getAudioContext()
+        if (audio) {
+          beep(100, 200, audio.currentTime)
+          beep(60, 300, audio.currentTime + 0.1)
+          beep(40, 400, audio.currentTime + 0.3)
+        }
+        flashBorder(C.B_RED, 6, 80)
+      }
 
       function triggerGameOver(reason: 'fuel' | 'offroad' | 'timeout' | 'crash') {
         gameOverFired = true
@@ -267,7 +314,14 @@ export function createDriveScene(
         (d) => getCurvatureAt(d))
 
       const truckX = GAME_WIDTH / 2 + v.x * 50
-      drawTruck(ctx, truckX, VIEWPORT_BOTTOM - 2, -v.vx * 1.5)
+      let shakeX = 0
+      let shakeY = 0
+      if (driveState === 'crashing') {
+        const tick = Math.floor(crashTimerMs / 33)
+        shakeX = ((hash(tick) * 8) | 0) - 4
+        shakeY = ((hash(tick + 7) * 4) | 0) - 2
+      }
+      drawTruck(ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5)
 
       const timeLeftSec = Math.ceil(missionTimerMs / 1000)
       const tlMin = Math.floor(timeLeftSec / 60).toString().padStart(2, '0')
