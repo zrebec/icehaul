@@ -5,6 +5,7 @@ import {
 
 import {
   GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP, PERSPECTIVE_K,
+  HORIZON_PCT, ROAD_HALF_TOP, ROAD_HALF_BOTTOM, LATERAL_SHIFT,
   COLS, BLINK_MS, SCREECH_COOLDOWN_S, OFFROAD_BEEP_COOLDOWN_S,
   EDGE_MARGIN_WARN_PX,
   LOW_FUEL_WARN, LOW_FUEL_CRITICAL,
@@ -12,6 +13,7 @@ import {
   FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE,
   DELIVERY_FUEL_REFILL, DELIVERY_SCORE, DELIVERY_TIME_LIMIT_MS,
   OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S, CRASH_ANIM_MS,
+  TRAFFIC_COLLISION_DEPTH_M,
 } from '../config.ts'
 import {
   createVehicle, tickVehicle, MAX_SPEED,
@@ -27,7 +29,7 @@ import { checkCanisterPickup, getVisibleCanisters, resetCanisters } from '../gam
 import { getRoadsideObjects } from '../game/roadside.ts'
 import { tickTraffic, getVisibleTraffic, resetTraffic } from '../game/traffic.ts'
 import { computeRoadEdges } from '../game/roadgeometry.ts'
-import { checkTruckOffroad, type OffroadResult } from '../game/offroad.ts'
+import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../game/offroad.ts'
 
 function hash(n: number): number {
   let x = (n + 0x9E3779B9) | 0
@@ -167,11 +169,35 @@ export function createDriveScene(
 
       const ctxAudio = getAudioContext()
 
-      // Traffic
-      const trafficResult = tickTraffic(v.distance, v.x, v.speed, dt)
-      if (trafficResult === 'crash') {
-        startCrash('crash')
-        return
+      // Traffic — move vehicles, then pixel-perfect collision
+      tickTraffic(v.distance, v.x, v.speed, dt)
+
+      const horizonY = VIEWPORT_TOP + Math.floor((VIEWPORT_BOTTOM - VIEWPORT_TOP) * HORIZON_PCT)
+      const roadHeight = VIEWPORT_BOTTOM - horizonY
+      const baseVanX = GAME_WIDTH / 2 - v.x * LATERAL_SHIFT
+
+      for (const tv of getVisibleTraffic(v.distance, TRAFFIC_COLLISION_DEPTH_M)) {
+        const worldZ = tv.distM - v.distance
+        if (worldZ <= 0 || worldZ > TRAFFIC_COLLISION_DEPTH_M) continue
+
+        const dy = PERSPECTIVE_K / worldZ
+        const i  = Math.round(dy) - 1
+        if (i < 0 || i >= roadHeight - 1) continue
+
+        const t      = (i + 1) / roadHeight
+        const half   = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
+        const screenX = Math.round(baseVanX + tv.x * half)
+        const scale  = Math.max(0.3, t)
+        const w = Math.max(3, Math.round((tv.type === 'truck' ? 16 : 12) * scale))
+        const h = Math.max(4, Math.round((tv.type === 'truck' ? 22 : 14) * scale))
+
+        if (checkTruckTrafficCollision(
+          truckDrawX, truckDrawY,
+          screenX - Math.floor(w / 2), (horizonY + i + 1) - h, w, h,
+        )) {
+          startCrash('crash')
+          return
+        }
       }
 
       // Tire screech — steering on slippery surfaces

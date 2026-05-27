@@ -8,8 +8,7 @@
 import {
   TRAFFIC_SPACING_M, TRAFFIC_SPACING_JITTER,
   TRAFFIC_SAME_DIR_PCT, TRAFFIC_SAME_SPEED, TRAFFIC_ONCOMING_SPEED,
-  TRAFFIC_COLLISION_RADIUS_CAR, TRAFFIC_COLLISION_RADIUS_TRUCK,
-  TRAFFIC_COLLISION_DEPTH_M, TRAFFIC_START_M,
+  TRAFFIC_START_M,
 } from '../config.ts'
 
 export type TrafficDir = 'same' | 'oncoming'
@@ -67,8 +66,8 @@ function spawnVehicle(): void {
   } else {
     const [minS, maxS] = TRAFFIC_ONCOMING_SPEED
     speed = minS + (maxS - minS) * h3
-    // Oncoming: opposite side (left half of road)
-    x = -0.6 + h4 * 0.4
+    // Oncoming: clearly in the left lane — player must drift to collide
+    x = -0.6 + h4 * 0.3  // range [-0.6, -0.3]
   }
 
   _vehicles.push({
@@ -82,54 +81,34 @@ function spawnVehicle(): void {
 }
 
 /**
- * Update traffic positions. Call each frame.
- * Returns 'crash' if player collided with a vehicle, null otherwise.
+ * Update traffic vehicle positions each frame.
+ * Collision is detected separately using pixel-perfect screen-space check in drive.ts.
  */
 export function tickTraffic(
   playerDist: number,
   playerX: number,
   playerSpeed: number,
   dtMs: number,
-): 'crash' | null {
+): void {
   const dt = dtMs / 1000
 
-  // Ensure vehicles are spawned ahead
   while (_nextSpawnDist < playerDist + 500) {
     spawnVehicle()
   }
 
-  let crashed = false
-
   for (const v of _vehicles) {
     if (v.gone) continue
 
-    // Move vehicles
     if (v.dir === 'same') {
-      // Same-direction vehicles move forward at their own speed
       v.distM += (v.speed / 3.6) * dt
     } else {
-      // Oncoming vehicles approach from ahead (move toward player)
       v.distM -= (v.speed / 3.6) * dt
     }
 
-    // Clean up vehicles far behind
     if (v.distM < playerDist - 100) {
       v.gone = true
-      continue
-    }
-
-    // Collision check — radius matches visual sprite size
-    const dz = v.distM - playerDist
-    if (Math.abs(dz) < TRAFFIC_COLLISION_DEPTH_M) {
-      const dx = Math.abs(v.x - playerX)
-      const collisionW = v.type === 'truck' ? TRAFFIC_COLLISION_RADIUS_TRUCK : TRAFFIC_COLLISION_RADIUS_CAR
-      if (dx < collisionW) {
-        crashed = true
-      }
     }
   }
-
-  return crashed ? 'crash' : null
 }
 
 /**

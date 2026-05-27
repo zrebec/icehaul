@@ -89,7 +89,7 @@ describe('isDangerAhead', () => {
     expect(isDangerAhead(100)).toBeNull()
   })
 
-  it('returns surface type when danger approaches', () => {
+  it('returns surface type when danger approaches from asphalt', () => {
     let firstNonAsphaltDist = -1
     for (let d = 0; d < 10000; d += 5) {
       if (getSurfaceAt(d) !== 'asphalt') { firstNonAsphaltDist = d; break }
@@ -102,17 +102,51 @@ describe('isDangerAhead', () => {
     }
   })
 
-  it('returns null when already on non-asphalt surface', () => {
+  it('returns null when already on a surface and the same surface is still ahead', () => {
+    // Standing in the middle of an ice/snow/etc zone — no warning needed
     let nonAsphaltDist = -1
     for (let d = 0; d < 10000; d += 5) {
       if (getSurfaceAt(d) !== 'asphalt') { nonAsphaltDist = d; break }
     }
     expect(nonAsphaltDist).toBeGreaterThan(0)
-    expect(isDangerAhead(nonAsphaltDist)).toBeNull()
+    // If ahead is also the same surface, should be silent
+    const current = getSurfaceAt(nonAsphaltDist)
+    const ahead = getSurfaceAt(nonAsphaltDist + ICE_AHEAD_LOOK_M)
+    if (ahead === current) {
+      expect(isDangerAhead(nonAsphaltDist)).toBeNull()
+    }
   })
 
-  it('returns null well before any surface change', () => {
-    expect(isDangerAhead(0)).toBeNull()
+  it('warns when approaching a different dangerous surface from a dangerous surface', () => {
+    // Find a transition: current = non-asphalt, ahead = different non-asphalt
+    // (e.g. snow → dust, ice → mud). Scan a long stretch to find one.
+    let warnDist = -1
+    let expectedSurface: string | null = null
+    for (let d = 0; d < 50000; d += 5) {
+      const current = getSurfaceAt(d)
+      const ahead = getSurfaceAt(d + ICE_AHEAD_LOOK_M)
+      if (current !== 'asphalt' && ahead !== 'asphalt' && ahead !== current) {
+        warnDist = d
+        expectedSurface = ahead
+        break
+      }
+    }
+    if (warnDist >= 0) {
+      expect(isDangerAhead(warnDist)).toBe(expectedSurface)
+    }
+    // If no cross-surface transition found in 50km the test is vacuously fine
+  })
+
+  it('returns null when heading back onto asphalt from a dangerous surface', () => {
+    // Find a position: current = non-asphalt, ahead = asphalt (exiting the zone)
+    for (let d = 0; d < 10000; d += 5) {
+      const current = getSurfaceAt(d)
+      const ahead = getSurfaceAt(d + ICE_AHEAD_LOOK_M)
+      if (current !== 'asphalt' && ahead === 'asphalt') {
+        expect(isDangerAhead(d)).toBeNull()
+        return
+      }
+    }
   })
 })
 

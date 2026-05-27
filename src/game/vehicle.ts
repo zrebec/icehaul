@@ -134,30 +134,36 @@ export function tickVehicle(
   const slipPeak = SURFACE_SLIP_PEAK[surface]
   const gripMult = slipGripMult(v.vx, slipPeak)
 
-  // Effective grip — reduced when braking (locked wheels = less lateral control).
-  // Worse when speed exceeds lockSpeed (wheels actually lock on that surface).
-  let effectiveGrip = grip * gripMult
+  // Brake lateral loss — locked wheels reduce steering authority.
+  let brakeLoss = 0
   if (input.brake) {
-    let brakeLateralLoss = bp.lateralLoss
+    brakeLoss = bp.lateralLoss
     if (v.speed > bp.lockSpeed) {
-      // Wheels locked: lateral loss intensifies proportionally to excess speed
       const lockExcess = (v.speed - bp.lockSpeed) / (MAX_SPEED - bp.lockSpeed)
-      brakeLateralLoss = Math.min(0.9, bp.lateralLoss + lockExcess * 0.4)
+      brakeLoss = Math.min(0.9, brakeLoss + lockExcess * 0.4)
     }
-    effectiveGrip *= (1 - brakeLateralLoss)
   }
+
+  // steeringGrip: what the driver's input can do — base grip minus brake loss.
+  // NOT reduced by the slip curve: the wheel is still turned, force still exists.
+  const steeringGrip = grip * (1 - brakeLoss)
+
+  // effectiveGrip: physics self-correction — full model including slip collapse.
+  // When sliding, the tire cannot self-correct (this is the "drift persists" behaviour).
+  const effectiveGrip = grip * gripMult * (1 - brakeLoss)
 
   // Centrifugal drift from road curvature
   if (curvature !== 0 && v.speed > 5) {
     v.vx += -curvature * v.speed * CURVE_DRIFT * (1 - grip * 0.7) * dt
   }
 
-  // Steering — weakens with speed AND with slip (past peak = less control)
+  // Steering input — uses steeringGrip so the player always has agency
+  // proportional to base surface grip. On ice it is weak (grip=0.25) but present.
   const speedSteerFactor = 1 - speedRatio * SPEED_STEER_PENALTY
-  if (input.steerLeft)  v.vx -= STEER_ACCEL * effectiveGrip * speedSteerFactor * dt
-  if (input.steerRight) v.vx += STEER_ACCEL * effectiveGrip * speedSteerFactor * dt
+  if (input.steerLeft)  v.vx -= STEER_ACCEL * steeringGrip * speedSteerFactor * dt
+  if (input.steerRight) v.vx += STEER_ACCEL * steeringGrip * speedSteerFactor * dt
 
-  // Damping — also weakened by slip (past peak = drift persists)
+  // Damping — uses effectiveGrip: past the slip peak, drift persists (ice doesn't forgive)
   if (!input.steerLeft && !input.steerRight) {
     const dampMult = SURFACE_STEER_DAMP_MULT[surface]
     v.vx *= 1 - Math.min(1, STEER_DAMP * effectiveGrip * dampMult * dt)

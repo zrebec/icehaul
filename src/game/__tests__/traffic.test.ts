@@ -15,11 +15,6 @@ describe('resetTraffic', () => {
 })
 
 describe('tickTraffic', () => {
-  it('returns null when no collision', () => {
-    const result = tickTraffic(0, 0, 60, 16)
-    expect(result).toBeNull()
-  })
-
   it('spawns vehicles ahead of the player', () => {
     tickTraffic(900, 0, 60, 16)
     const visible = getVisibleTraffic(900, 200)
@@ -65,4 +60,5 @@ describe('tickTraffic', () => {
       expect(v.distM).toBeGreaterThan(2600)
     }
   })
+
 })

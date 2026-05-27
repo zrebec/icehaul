@@ -38,7 +38,7 @@ export const SURFACE_ACCEL: Record<Surface, number> = {
   asphalt: 1.0,
   snow:    0.55,
   ice:     1.8,
-  sand:    0.2,
+  sand:    0.35,
   mud:     0.35,
 }
 
@@ -60,7 +60,7 @@ export const SURFACE_DRAG: Record<Surface, number> = {
   asphalt: 0,
   snow:    4,
   ice:     0,
-  sand:    12,
+  sand:    7,
   mud:     8,
 }
 
@@ -130,7 +130,7 @@ export const SURFACE_FUEL_MULT: Record<Surface, number> = {
   asphalt: 1.0,
   snow:    1.2,
   ice:     0.9,
-  sand:    1.5,
+  sand:    1.2,  // was 1.5 — two large sand segments were eating 36% of tank
   mud:     1.3,
 }
 
@@ -208,13 +208,14 @@ export const SPEED_STEER_PENALTY = 0.6
 export const SURFACE_SLIP_PEAK: Record<Surface, number> = {
   asphalt: 0.90,
   snow:    0.35,
-  ice:     0.20,
+  ice:     0.25,
   sand:    0.50,
   mud:     0.30,
 }
 // ── Fuel ────────────────────────────────────────────────────────────────────
 
-export const FUEL_BURN_RATE = 0.00012
+// export const FUEL_BURN_RATE = 0.00012  // original — tight but completable with canisters
+export const FUEL_BURN_RATE = 0.000110
 export const FUEL_IDLE_THRESHOLD = 5
 
 // ── Road generation ─────────────────────────────────────────────────────────
@@ -351,12 +352,12 @@ export const TRAFFIC_SAME_DIR_PCT = 0.55
 export const TRAFFIC_SAME_SPEED: readonly [number, number] = [30, 55]
 /** Speed range for oncoming vehicles [min, max] km/h. */
 export const TRAFFIC_ONCOMING_SPEED: readonly [number, number] = [60, 90]
-/** Lateral collision radius for cars in player.x units. */
-export const TRAFFIC_COLLISION_RADIUS_CAR = 0.12
-/** Lateral collision radius for trucks (wider). */
-export const TRAFFIC_COLLISION_RADIUS_TRUCK = 0.16
-/** World-distance collision depth (metres). Must match visual sprite depth. */
-export const TRAFFIC_COLLISION_DEPTH_M = 4
+/**
+ * Pre-filter range for pixel-perfect traffic collision (metres ahead of player).
+ * Vehicles outside this range can't possibly overlap the truck sprite — skip them.
+ * Actual pixel overlap only triggers at ~worldZ < 2m; 6 gives safe frame margin.
+ */
+export const TRAFFIC_COLLISION_DEPTH_M = 6
 /** First traffic vehicle appears after this many metres (safe start). */
 export const TRAFFIC_START_M = 800
 

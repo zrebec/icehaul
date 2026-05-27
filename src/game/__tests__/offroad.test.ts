@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { checkTruckOffroad, type OffroadResult } from '../offroad.ts'
+import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../offroad.ts'
 import { computeRoadEdges } from '../roadgeometry.ts'
 import { TRUCK_BMP_W, TRUCK_BMP_H, TRUCK_BMP_DATA } from '../../render/truck.ts'
 import { GAME_WIDTH, VIEWPORT_BOTTOM } from '../../config.ts'
@@ -124,5 +124,58 @@ describe('checkTruckOffroad', () => {
     expect(r2.severity).toBe(0)
     expect(r1.offRoadPixels).toBe(0)
     expect(r2.offRoadPixels).toBe(0)
+  })
+})
+
+describe('checkTruckTrafficCollision', () => {
+  // Truck bitmap: 24 × 32 px, truckDrawX/Y = 0 for simplicity.
+  // The solid body/cab rows are roughly rows 4–27 of the bitmap.
+
+  it('no overlap when rect is entirely to the right', () => {
+    expect(checkTruckTrafficCollision(0, 0, 30, 0, 10, 32)).toBe(false)
+  })
+
+  it('no overlap when rect is entirely to the left', () => {
+    expect(checkTruckTrafficCollision(0, 0, -15, 0, 10, 32)).toBe(false)
+  })
+
+  it('no overlap when rect is entirely above', () => {
+    expect(checkTruckTrafficCollision(0, 0, 0, -10, 24, 8)).toBe(false)
+  })
+
+  it('no overlap when rect is entirely below the bitmap', () => {
+    expect(checkTruckTrafficCollision(0, 0, 0, 35, 24, 8)).toBe(false)
+  })
+
+  it('overlap when rect covers the solid body rows', () => {
+    // Rows 6–20 are the solid cab+body area
+    expect(checkTruckTrafficCollision(0, 0, 0, 6, 24, 14)).toBe(true)
+  })
+
+  it('overlap for full rect covering entire bitmap', () => {
+    expect(checkTruckTrafficCollision(0, 0, 0, 0, 24, 32)).toBe(true)
+  })
+
+  it('truckDrawX offset shifts truck pixels correctly', () => {
+    // Truck at x=100: rect at (0,0,24,32) must not overlap
+    expect(checkTruckTrafficCollision(100, 0, 0, 0, 24, 32)).toBe(false)
+    // Same rect shifted to truck position — must overlap
+    expect(checkTruckTrafficCollision(100, 0, 100, 0, 24, 32)).toBe(true)
+  })
+
+  it('truckDrawY offset shifts truck pixels correctly', () => {
+    // Truck at y=50: rect at (0, 0, 24, 10) misses
+    expect(checkTruckTrafficCollision(0, 50, 0, 0, 24, 10)).toBe(false)
+    // Rect at y=56 (solid body area of shifted truck) — must overlap
+    expect(checkTruckTrafficCollision(0, 50, 0, 56, 24, 14)).toBe(true)
+  })
+
+  it('zero-width rect never overlaps', () => {
+    expect(checkTruckTrafficCollision(0, 0, 0, 0, 0, 32)).toBe(false)
+  })
+
+  it('single-pixel rect inside solid area overlaps', () => {
+    // x=12, y=10 is inside the truck body
+    expect(checkTruckTrafficCollision(0, 0, 12, 10, 1, 1)).toBe(true)
   })
 })
