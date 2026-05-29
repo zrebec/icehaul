@@ -210,6 +210,49 @@ describe('checkTruckTrafficCollision', () => {
     )).toBe(true)
   })
 
+  it('does not collide with visible distant traffic before visual contact', () => {
+    const truck = truckDrawPos(0, 0)
+    const vehicle: TrafficVehicle = {
+      spawnDist: 560,
+      distM: 560,
+      x: 0,
+      speed: 40,
+      dir: 'same',
+      type: 'car',
+      gone: false,
+    }
+    const projected = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 500, 0, vehicle, noCurve)
+
+    expect(projected).not.toBeNull()
+    expect(projected!.top + projected!.h).toBeLessThan(truck.y)
+    expect(checkTruckTrafficCollision(
+      truck.x, truck.y,
+      projected!.left, projected!.top, projected!.w, projected!.h,
+      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+    )).toBe(false)
+  })
+
+  it('keeps centered near traffic collision after world-depth scaling', () => {
+    const truck = truckDrawPos(0, 0)
+    const vehicle: TrafficVehicle = {
+      spawnDist: 500.8,
+      distM: 500.8,
+      x: 0,
+      speed: 40,
+      dir: 'same',
+      type: 'bus',
+      gone: false,
+    }
+    const projected = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 500, 0, vehicle, noCurve)
+
+    expect(projected).not.toBeNull()
+    expect(checkTruckTrafficCollision(
+      truck.x, truck.y,
+      projected!.left, projected!.top, projected!.w, projected!.h,
+      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+    )).toBe(true)
+  })
+
   it('does not collide with a near oncoming vehicle still in the left lane', () => {
     const truck = truckDrawPos(0, 0)
     const vehicle: TrafficVehicle = {

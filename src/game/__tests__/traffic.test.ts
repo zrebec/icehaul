@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { resetTraffic, tickTraffic, getVisibleTraffic } from '../traffic.ts'
+import { followPlayerSpeed, resetTraffic, tickTraffic, getVisibleTraffic } from '../traffic.ts'
 import { projectTrafficVehicle } from '../../render/road3d.ts'
-import { VIEWPORT_TOP, VIEWPORT_BOTTOM } from '../../config.ts'
+import { VIEWPORT_TOP, VIEWPORT_BOTTOM, TRAFFIC_VIEW_DISTANCE_M } from '../../config.ts'
 import type { TrafficVehicle } from '../traffic.ts'
 
 const SEED = 123
@@ -66,6 +66,27 @@ describe('tickTraffic', () => {
 
 })
 
+describe('followPlayerSpeed', () => {
+  it('keeps same-direction traffic speed when the player is not ahead', () => {
+    expect(followPlayerSpeed(1005, 50, 1000, 25, 1000)).toBe(50)
+  })
+
+  it('keeps speed when the traffic vehicle is not closing on the player', () => {
+    expect(followPlayerSpeed(970, 25, 1000, 30, 1000)).toBe(25)
+  })
+
+  it('brakes a same-direction vehicle that is closing inside the safe gap', () => {
+    const nextSpeed = followPlayerSpeed(980, 55, 1000, 25, 1000)
+
+    expect(nextSpeed).toBeLessThan(55)
+    expect(nextSpeed).toBeGreaterThanOrEqual(23)
+  })
+
+  it('does not brake a distant same-direction vehicle with enough time gap', () => {
+    expect(followPlayerSpeed(900, 55, 1000, 25, 1000)).toBe(55)
+  })
+})
+
 describe('projectTrafficVehicle', () => {
   function vehicleOf(type: TrafficVehicle['type']): TrafficVehicle {
     return {
@@ -108,23 +129,60 @@ describe('projectTrafficVehicle', () => {
 
   it('keeps growing as traffic gets closer to the truck', () => {
     const far = vehicleOf('car')
-    far.distM = 1050
-    far.spawnDist = 1050
+    far.distM = 1200
+    far.spawnDist = 1200
+    const mid = vehicleOf('car')
+    mid.distM = 1050
+    mid.spawnDist = 1050
     const near = vehicleOf('car')
 
     const projectedFar = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, far, () => 0)
+    const projectedMid = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, mid, () => 0)
     const projectedNear = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, near, () => 0)
 
     expect(projectedFar).not.toBeNull()
+    expect(projectedMid).not.toBeNull()
     expect(projectedNear).not.toBeNull()
-    expect(projectedNear!.w).toBeGreaterThan(projectedFar!.w)
-    expect(projectedNear!.h).toBeGreaterThan(projectedFar!.h)
+    expect(projectedMid!.w).toBeGreaterThan(projectedFar!.w)
+    expect(projectedNear!.w).toBeGreaterThan(projectedMid!.w)
+    expect(projectedMid!.h).toBeGreaterThan(projectedFar!.h)
+    expect(projectedNear!.h).toBeGreaterThan(projectedMid!.h)
+  })
+
+  it('bases vehicle scale on world depth, not only on screen row', () => {
+    const far = vehicleOf('bus')
+    far.distM = 1210
+    far.spawnDist = far.distM
+    const closer = vehicleOf('bus')
+    closer.distM = 1180
+    closer.spawnDist = closer.distM
+
+    const projectedFar = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, far, () => 0)
+    const projectedCloser = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, closer, () => 0)
+
+    expect(projectedFar).not.toBeNull()
+    expect(projectedCloser).not.toBeNull()
+    expect(projectedCloser!.scale).toBeGreaterThan(projectedFar!.scale)
+  })
+
+  it('keeps vehicle scale monotonic with world depth across the long view', () => {
+    const distances = [1215, 1180, 1120, 1060, 1005]
+    const scales = distances.map((distM) => {
+      const vehicle = vehicleOf('car')
+      vehicle.distM = distM
+      vehicle.spawnDist = distM
+      return projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, vehicle, () => 0)!.scale
+    })
+
+    for (let i = 1; i < scales.length; i++) {
+      expect(scales[i]).toBeGreaterThan(scales[i - 1]!)
+    }
   })
 
   it('keeps distant traffic small enough to read lane position', () => {
     const vehicle = vehicleOf('car')
-    vehicle.distM = 1080
-    vehicle.spawnDist = 1080
+    vehicle.distM = 1200
+    vehicle.spawnDist = 1200
 
     const projected = projectTrafficVehicle(
       VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, vehicle, () => 0,
@@ -133,6 +191,33 @@ describe('projectTrafficVehicle', () => {
     expect(projected).not.toBeNull()
     expect(projected!.w).toBeLessThanOrEqual(10)
     expect(projected!.h).toBeLessThanOrEqual(7)
+  })
+
+  it('projects traffic almost as far as the traffic look-ahead limit', () => {
+    const vehicle = vehicleOf('car')
+    vehicle.distM = 1000 + TRAFFIC_VIEW_DISTANCE_M - 5
+    vehicle.spawnDist = vehicle.distM
+
+    const projected = projectTrafficVehicle(
+      VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, vehicle, () => 0,
+    )
+
+    expect(projected).not.toBeNull()
+    expect(projected!.y).toBeGreaterThan(VIEWPORT_TOP)
+    expect(projected!.y).toBeLessThan(VIEWPORT_BOTTOM)
+    expect(projected!.scale).toBeLessThan(0.5)
+  })
+
+  it('does not project traffic beyond the traffic look-ahead limit', () => {
+    const vehicle = vehicleOf('car')
+    vehicle.distM = 1000 + TRAFFIC_VIEW_DISTANCE_M + 1
+    vehicle.spawnDist = vehicle.distM
+
+    const projected = projectTrafficVehicle(
+      VIEWPORT_TOP, VIEWPORT_BOTTOM, 1000, 0, vehicle, () => 0,
+    )
+
+    expect(projected).toBeNull()
   })
 
   it('keeps an almost nose-to-nose vehicle visible for collision checks', () => {

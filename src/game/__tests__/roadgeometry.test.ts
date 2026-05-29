@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { computeRoadEdges } from '../roadgeometry.ts'
-import { VIEWPORT_TOP, VIEWPORT_BOTTOM, HORIZON_PCT, GAME_WIDTH, LATERAL_SHIFT } from '../../config.ts'
+import {
+  VIEWPORT_TOP, VIEWPORT_BOTTOM, HORIZON_PCT, GAME_WIDTH, LATERAL_SHIFT,
+  PERSPECTIVE_K,
+} from '../../config.ts'
 
 const horizonY = VIEWPORT_TOP + Math.floor((VIEWPORT_BOTTOM - VIEWPORT_TOP) * HORIZON_PCT)
 
@@ -20,6 +23,10 @@ describe('computeRoadEdges', () => {
     expect(bottomEdge).toBeDefined()
     expect(bottomEdge!.leftRoad).toBeLessThan(bottomEdge!.rightRoad)
     expect(bottomEdge!.kerbW).toBeGreaterThanOrEqual(1)
+  })
+
+  it('uses an extended projection depth for long-road visibility', () => {
+    expect(PERSPECTIVE_K).toBeGreaterThanOrEqual(150)
   })
 
   it('road is wider at bottom (perspective)', () => {

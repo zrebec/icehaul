@@ -271,7 +271,14 @@ export const CRASH_ANIM_MS = 1200
 
 export const LATERAL_SHIFT = 22
 export const CURVE_STRENGTH = 1.0
-export const PERSPECTIVE_K = 90
+/** Road texture/canister/roadside projection depth in metres. */
+export const PERSPECTIVE_K = 150
+/**
+ * Traffic look-ahead distance in metres.
+ * Kept separate from road scanline projection so vehicles can be introduced
+ * earlier than the short visible road texture depth.
+ */
+export const TRAFFIC_VIEW_DISTANCE_M = 220
 export const ROAD_HALF_TOP = 14
 export const ROAD_HALF_BOTTOM = 120
 export const KERB_STRIPE_M = 2.0
@@ -352,6 +359,12 @@ export const TRAFFIC_SAME_DIR_PCT = 0.55
 export const TRAFFIC_SAME_SPEED: readonly [number, number] = [30, 55]
 /** Speed range for oncoming vehicles [min, max] km/h. */
 export const TRAFFIC_ONCOMING_SPEED: readonly [number, number] = [60, 90]
+/** Desired same-direction following time behind a slow player. */
+export const TRAFFIC_FOLLOW_TIME_S = 2.2
+/** Minimum same-direction gap when following the player, in metres. */
+export const TRAFFIC_MIN_FOLLOW_GAP_M = 10
+/** Maximum same-direction AI braking when closing on the player, in km/h/s. */
+export const TRAFFIC_FOLLOW_BRAKE_KMH_S = 45
 /**
  * Pre-filter range for visual traffic collision (metres ahead of player).
  * Vehicles outside this range cannot overlap the player truck on screen.

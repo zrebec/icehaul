@@ -3,6 +3,7 @@ import {
   type Surface,
   GAME_WIDTH, HORIZON_PCT,
   LATERAL_SHIFT, CURVE_STRENGTH, PERSPECTIVE_K,
+  TRAFFIC_VIEW_DISTANCE_M,
   ROAD_HALF_TOP, ROAD_HALF_BOTTOM,
   KERB_STRIPE_M, KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP, ROAD_MARKER_SPACING_M,
 } from '../config.ts'
@@ -257,6 +258,25 @@ export interface TrafficProjection {
 }
 
 const TRAFFIC_PASS_BEHIND_M = 5
+const TRAFFIC_PERSPECTIVE_GAMMA = 1.55
+const TRAFFIC_SCALE_GAMMA = 1.1
+
+function trafficDepthToScanline(worldZ: number, scanlines: number): number | null {
+  if (worldZ <= 0) return scanlines - 1
+  if (worldZ > TRAFFIC_VIEW_DISTANCE_M) return null
+
+  const nearZ = 1
+  const farZ = TRAFFIC_VIEW_DISTANCE_M
+  const closeness = Math.max(0, Math.min(1, (farZ - worldZ) / (farZ - nearZ)))
+  return Math.round(Math.pow(closeness, TRAFFIC_PERSPECTIVE_GAMMA) * (scanlines - 1))
+}
+
+function trafficDepthToScale(worldZ: number): number {
+  const nearZ = 1
+  const farZ = TRAFFIC_VIEW_DISTANCE_M
+  const closeness = Math.max(0, Math.min(1, (farZ - worldZ) / (farZ - nearZ)))
+  return 0.28 + Math.pow(closeness, TRAFFIC_SCALE_GAMMA) * 1.15
+}
 
 export function projectTrafficVehicle(
   viewportTop: number,
@@ -270,7 +290,7 @@ export function projectTrafficVehicle(
   const roadHeight = viewportBottom - horizonY
   const scanlines = roadHeight - 1
   const worldZ = vehicle.distM - cameraDistance
-  if (worldZ < -TRAFFIC_PASS_BEHIND_M || worldZ > PERSPECTIVE_K) return null
+  if (worldZ < -TRAFFIC_PASS_BEHIND_M || worldZ > TRAFFIC_VIEW_DISTANCE_M) return null
 
   if (worldZ <= 0) {
     const t = 1
@@ -293,10 +313,9 @@ export function projectTrafficVehicle(
     }
   }
 
-  const dy = PERSPECTIVE_K / worldZ
-  const rawI = Math.round(dy) - 1
-  if (rawI < 0) return null
-  const i = Math.min(scanlines - 1, rawI)
+  const projectedScanline = trafficDepthToScanline(worldZ, scanlines)
+  if (projectedScanline === null) return null
+  const i = Math.min(scanlines - 1, projectedScanline)
 
   const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
   let curveOffset = 0
@@ -310,7 +329,7 @@ export function projectTrafficVehicle(
   const t = (i + 1) / roadHeight
   const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
   const x = Math.round(baseVanX + curveOffset + vehicle.x * half)
-  const scale = 0.35 + t * t * 1.1
+  const scale = trafficDepthToScale(worldZ)
   const dims = trafficSpriteSize(vehicle.type)
   const w = Math.max(3, Math.round(dims.w * scale))
   const h = Math.max(3, Math.round(dims.h * scale))

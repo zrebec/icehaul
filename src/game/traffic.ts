@@ -9,6 +9,7 @@ import {
   TRAFFIC_SPACING_M, TRAFFIC_SPACING_JITTER,
   TRAFFIC_SAME_DIR_PCT, TRAFFIC_SAME_SPEED, TRAFFIC_ONCOMING_SPEED,
   TRAFFIC_START_M,
+  TRAFFIC_FOLLOW_TIME_S, TRAFFIC_MIN_FOLLOW_GAP_M, TRAFFIC_FOLLOW_BRAKE_KMH_S,
 } from '../config.ts'
 
 export type TrafficDir = 'same' | 'oncoming'
@@ -44,6 +45,35 @@ export function resetTraffic(seed: number): void {
   _seed = seed
   _vehicles = []
   _nextSpawnDist = TRAFFIC_START_M
+}
+
+/**
+ * Simple car-following guard for same-direction traffic behind the player.
+ * It prevents unfair rear-end crashes when the truck slows hard on snow/sand/mud.
+ */
+export function followPlayerSpeed(
+  trafficDist: number,
+  trafficSpeed: number,
+  playerDist: number,
+  playerSpeed: number,
+  dtMs: number,
+): number {
+  const gapM = playerDist - trafficDist
+  if (gapM <= 0) return trafficSpeed
+  if (trafficSpeed <= playerSpeed) return trafficSpeed
+
+  const closingMps = (trafficSpeed - playerSpeed) / 3.6
+  if (closingMps <= 0) return trafficSpeed
+
+  const trafficMps = trafficSpeed / 3.6
+  const desiredGapM = TRAFFIC_MIN_FOLLOW_GAP_M + trafficMps * TRAFFIC_FOLLOW_TIME_S
+  const timeToCollisionS = gapM / closingMps
+  if (gapM >= desiredGapM && timeToCollisionS >= TRAFFIC_FOLLOW_TIME_S) return trafficSpeed
+
+  const dt = Math.max(0, dtMs / 1000)
+  const brakeStep = TRAFFIC_FOLLOW_BRAKE_KMH_S * dt
+  const targetSpeed = Math.max(0, playerSpeed - 2)
+  return Math.max(targetSpeed, trafficSpeed - brakeStep)
 }
 
 function spawnVehicle(): void {
@@ -100,6 +130,7 @@ export function tickTraffic(
     if (v.gone) continue
 
     if (v.dir === 'same') {
+      v.speed = followPlayerSpeed(v.distM, v.speed, playerDist, playerSpeed, dtMs)
       v.distM += (v.speed / 3.6) * dt
     } else {
       v.distM -= (v.speed / 3.6) * dt

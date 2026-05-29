@@ -6,7 +6,7 @@ import {
 } from 'zx-kit'
 
 import {
-  GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP, PERSPECTIVE_K,
+  GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP, PERSPECTIVE_K, TRAFFIC_VIEW_DISTANCE_M,
   COLS, BLINK_MS, SCREECH_COOLDOWN_S, OFFROAD_BEEP_COOLDOWN_S,
   EDGE_MARGIN_WARN_PX,
   LOW_FUEL_WARN, LOW_FUEL_CRITICAL,
@@ -405,7 +405,7 @@ export function createDriveScene(
       drawRoadsideObjects(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, roadside,
         (d) => getCurvatureAt(d))
 
-      const traffic = getVisibleTraffic(v.distance, PERSPECTIVE_K)
+      const traffic = getVisibleTraffic(v.distance, TRAFFIC_VIEW_DISTANCE_M)
       drawTraffic(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, traffic,
         (d) => getCurvatureAt(d))
 
