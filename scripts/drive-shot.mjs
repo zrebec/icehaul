@@ -20,6 +20,19 @@ try {
   await page.setViewport({ width: 1440, height: 1024, deviceScaleFactor: 1 })
   await page.goto(URL, { waitUntil: 'networkidle0' })
   await page.click('canvas#game')  // unlocks audio context
+  await new Promise(r => setTimeout(r, 500))
+  await page.evaluate(() => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+    document.dispatchEvent(event)
+  })
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('s')
   await new Promise(r => setTimeout(r, 100))
 
   await page.keyboard.down('ArrowUp')

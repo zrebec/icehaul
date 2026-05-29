@@ -221,7 +221,7 @@ export function drawCanisters(
 
 /**
  * Draw traffic vehicles in perspective. Call AFTER drawRoad, BEFORE drawTruck.
- * Same-direction cars: green/yellow. Oncoming cars: white (headlights).
+ * Same-direction traffic: rear views. Oncoming traffic: front views with headlights.
  */
 export function drawTraffic(
   ctx: CanvasRenderingContext2D,
@@ -232,93 +232,287 @@ export function drawTraffic(
   vehicles: readonly TrafficVehicle[],
   getCurvature: (distM: number) => number,
 ): void {
-  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
-  const roadHeight = viewportBottom - horizonY
-  const scanlines = roadHeight - 1
-  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
-
-  // Curve offsets
-  const curveOffset = new Float32Array(scanlines)
-  let acc = 0
-  for (let i = scanlines - 1; i >= 0; i--) {
-    const distFromBottom = (scanlines - 1 - i) / scanlines
-    const dy = i + 1
-    acc += getCurvature(cameraDistance + PERSPECTIVE_K / dy) * CURVE_STRENGTH * distFromBottom
-    curveOffset[i] = acc
-  }
-
   for (const v of vehicles) {
-    const worldZ = v.distM - cameraDistance
-    if (worldZ < 3 || worldZ > PERSPECTIVE_K) continue
-
-    const dy = PERSPECTIVE_K / worldZ
-    const i = Math.round(dy) - 1
-    if (i < 0 || i >= scanlines) continue
-
-    const y = horizonY + i + 1
-    const t = (i + 1) / roadHeight
-    const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
-    const centerX = baseVanX + (curveOffset[i] ?? 0)
-    const screenX = Math.round(centerX + v.x * half)
-
-    if (screenX < -20 || screenX > GAME_WIDTH + 20) continue
-
-    const scale = Math.max(0.3, t)
+    const p = projectTrafficVehicle(viewportTop, viewportBottom, cameraDistance, playerX, v, getCurvature)
+    if (!p) continue
+    if (p.x < -20 || p.x > GAME_WIDTH + 20) continue
 
     if (v.dir === 'oncoming') {
-      drawOncomingVehicle(ctx, screenX, y, scale, v.type)
+      drawOncomingVehicle(ctx, p)
     } else {
-      drawSameDirVehicle(ctx, screenX, y, scale, v.type)
+      drawSameDirVehicle(ctx, p)
     }
   }
 }
 
-function drawSameDirVehicle(
-  ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, type: VehicleType,
-): void {
-  const isTruck = type === 'truck'
-  const w = Math.max(3, Math.round((isTruck ? 16 : 12) * scale))
-  const h = Math.max(4, Math.round((isTruck ? 22 : 14) * scale))
+export interface TrafficProjection {
+  x: number
+  y: number
+  left: number
+  top: number
+  w: number
+  h: number
+  scale: number
+  type: VehicleType
+}
 
-  // Body
-  ctx.fillStyle = isTruck ? C.B_YELLOW : C.B_GREEN
-  ctx.fillRect(x - Math.floor(w / 2), baseY - h, w, h)
+const TRAFFIC_PASS_BEHIND_M = 5
 
-  // Roof (darker, narrower)
-  const roofW = Math.max(1, w - 2)
-  ctx.fillStyle = isTruck ? C.YELLOW : C.GREEN
-  ctx.fillRect(x - Math.floor(roofW / 2), baseY - h - Math.max(1, Math.round(2 * scale)), roofW, Math.max(1, Math.round(2 * scale)))
+export function projectTrafficVehicle(
+  viewportTop: number,
+  viewportBottom: number,
+  cameraDistance: number,
+  playerX: number,
+  vehicle: TrafficVehicle,
+  getCurvature: (distM: number) => number,
+): TrafficProjection | null {
+  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
+  const roadHeight = viewportBottom - horizonY
+  const scanlines = roadHeight - 1
+  const worldZ = vehicle.distM - cameraDistance
+  if (worldZ < -TRAFFIC_PASS_BEHIND_M || worldZ > PERSPECTIVE_K) return null
 
-  // Taillights (red dots)
-  if (scale > 0.4) {
-    ctx.fillStyle = C.B_RED
-    ctx.fillRect(x - Math.floor(w / 2), baseY - 1, 1, 1)
-    ctx.fillRect(x + Math.floor(w / 2) - 1, baseY - 1, 1, 1)
+  if (worldZ <= 0) {
+    const t = 1
+    const pass = Math.min(1, -worldZ / TRAFFIC_PASS_BEHIND_M)
+    const half = ROAD_HALF_BOTTOM
+    const centerX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
+    const x = Math.round(centerX + vehicle.x * half)
+    const y = Math.round(viewportBottom - 1 + pass * 14)
+    const scale = 1.45 + pass * 0.15
+    const dims = trafficSpriteSize(vehicle.type)
+    const w = Math.max(3, Math.round(dims.w * scale))
+    const h = Math.max(3, Math.round(dims.h * scale))
+
+    return {
+      x, y,
+      left: x - Math.floor(w / 2),
+      top: y - h,
+      w, h, scale,
+      type: vehicle.type,
+    }
+  }
+
+  const dy = PERSPECTIVE_K / worldZ
+  const rawI = Math.round(dy) - 1
+  if (rawI < 0) return null
+  const i = Math.min(scanlines - 1, rawI)
+
+  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
+  let curveOffset = 0
+  for (let ci = scanlines - 1; ci >= i; ci--) {
+    const distFromBottom = (scanlines - 1 - ci) / scanlines
+    const cdy = ci + 1
+    curveOffset += getCurvature(cameraDistance + PERSPECTIVE_K / cdy) * CURVE_STRENGTH * distFromBottom
+  }
+
+  const y = horizonY + i + 1
+  const t = (i + 1) / roadHeight
+  const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
+  const x = Math.round(baseVanX + curveOffset + vehicle.x * half)
+  const scale = 0.35 + t * t * 1.1
+  const dims = trafficSpriteSize(vehicle.type)
+  const w = Math.max(3, Math.round(dims.w * scale))
+  const h = Math.max(3, Math.round(dims.h * scale))
+
+  return {
+    x, y,
+    left: x - Math.floor(w / 2),
+    top: y - h,
+    w, h, scale,
+    type: vehicle.type,
   }
 }
 
-function drawOncomingVehicle(
-  ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number, type: VehicleType,
-): void {
-  const isTruck = type === 'truck'
-  const w = Math.max(3, Math.round((isTruck ? 16 : 12) * scale))
-  const h = Math.max(4, Math.round((isTruck ? 22 : 14) * scale))
+function drawSameDirVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
+  drawScaledRows(ctx, getTrafficSpriteRows('same', p.type), getTrafficSpriteColors('same', p.type), p)
+}
 
-  // Body (darker — seen from front)
-  ctx.fillStyle = C.WHITE
-  ctx.fillRect(x - Math.floor(w / 2), baseY - h, w, h)
+function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
+  drawScaledRows(ctx, getTrafficSpriteRows('oncoming', p.type), getTrafficSpriteColors('oncoming', p.type), p)
+}
 
-  // Windscreen
-  const wsW = Math.max(1, w - 2)
-  ctx.fillStyle = C.CYAN
-  ctx.fillRect(x - Math.floor(wsW / 2), baseY - h + Math.max(1, Math.round(2 * scale)), wsW, Math.max(1, Math.round(2 * scale)))
-
-  // Headlights (bright yellow — the key visual cue for oncoming)
-  if (scale > 0.35) {
-    ctx.fillStyle = C.B_YELLOW
-    ctx.fillRect(x - Math.floor(w / 2), baseY - Math.round(2 * scale), Math.max(1, Math.round(2 * scale)), Math.max(1, Math.round(scale)))
-    ctx.fillRect(x + Math.floor(w / 2) - Math.max(1, Math.round(2 * scale)), baseY - Math.round(2 * scale), Math.max(1, Math.round(2 * scale)), Math.max(1, Math.round(scale)))
+function trafficSpriteSize(type: VehicleType): { w: number; h: number } {
+  switch (type) {
+    case 'mini': return { w: 14, h: 11 }
+    case 'car':  return { w: 22, h: 15 }
+    case 'bus':  return { w: 28, h: 18 }
   }
+}
+
+type RowColors = Record<string, SpectrumColor>
+
+export function getTrafficSpriteRows(dir: TrafficVehicle['dir'], type: VehicleType): readonly string[] {
+  if (dir === 'oncoming') {
+    switch (type) {
+      case 'mini': return ONCOMING_MINI_ROWS
+      case 'car':  return ONCOMING_CAR_ROWS
+      case 'bus':  return ONCOMING_BUS_ROWS
+    }
+  }
+
+  switch (type) {
+    case 'mini': return SAME_MINI_ROWS
+    case 'car':  return SAME_CAR_ROWS
+    case 'bus':  return SAME_BUS_ROWS
+  }
+}
+
+function getTrafficSpriteColors(dir: TrafficVehicle['dir'], type: VehicleType): RowColors {
+  if (dir === 'oncoming') {
+    switch (type) {
+      case 'mini': return ONCOMING_MINI_COLORS
+      case 'car':  return ONCOMING_CAR_COLORS
+      case 'bus':  return ONCOMING_BUS_COLORS
+    }
+  }
+
+  switch (type) {
+    case 'mini': return SAME_MINI_COLORS
+    case 'car':  return SAME_CAR_COLORS
+    case 'bus':  return SAME_BUS_COLORS
+  }
+}
+
+function drawScaledRows(
+  ctx: CanvasRenderingContext2D,
+  rows: readonly string[],
+  colors: RowColors,
+  p: TrafficProjection,
+): void {
+  const srcH = rows.length
+  const srcW = rows[0]?.length ?? 0
+  const left = p.left
+  const top = p.top
+
+  for (let sy = 0; sy < srcH; sy++) {
+    const row = rows[sy]!
+    const y0 = top + Math.floor(sy * p.h / srcH)
+    const y1 = top + Math.floor((sy + 1) * p.h / srcH)
+    const ph = Math.max(1, y1 - y0)
+
+    for (let sx = 0; sx < srcW; sx++) {
+      const color = colors[row[sx]!]
+      if (!color) continue
+      const x0 = left + Math.floor(sx * p.w / srcW)
+      const x1 = left + Math.floor((sx + 1) * p.w / srcW)
+      ctx.fillStyle = color
+      ctx.fillRect(x0, y0, Math.max(1, x1 - x0), ph)
+    }
+  }
+}
+
+const SAME_MINI_ROWS = [
+  '...GGGGGG...',
+  '..GCCCCCCG..',
+  '.GGGGGGGGGG.',
+  'GGGGGGGGGGGG',
+  'GGG......GGG',
+  'GG..RRRR..GG',
+  'GGG..YY..GGG',
+  '.BB......BB.',
+  '.BB......BB.',
+  '............',
+] as const
+
+const ONCOMING_MINI_ROWS = [
+  '...WWWWWW...',
+  '..WCCCCCCW..',
+  '.WWWWWWWWWW.',
+  'WWWWWWWWWWWW',
+  'WW..BBBB..WW',
+  'WY..BBBB..YW',
+  'WW........WW',
+  '.BB......BB.',
+  '.BB......BB.',
+  '............',
+] as const
+
+const SAME_CAR_ROWS = [
+  '.....GGGGGGGG.....',
+  '....GCCCCCCCCG....',
+  '...GCCCCCCCCCCG...',
+  '..GGGGGGGGGGGGGG..',
+  '.GGGGGGGGGGGGGGGG.',
+  'GGGGGGGGGGGGGGGGGG',
+  'GGG............GGG',
+  'GG...RRRRRRRR...GG',
+  'GGG.....YY.....GGG',
+  '.BBB..........BBB.',
+  '.BBB..........BBB.',
+  '..................',
+] as const
+
+const ONCOMING_CAR_ROWS = [
+  '.....WWWWWWWW.....',
+  '....WCCCCCCCCW....',
+  '...WCCCCCCCCCCW...',
+  '..WWWWWWWWWWWWWW..',
+  '.WWWWWWWWWWWWWWWW.',
+  'WWWBBBBBBBBBBBBWWW',
+  'WWBBBBBBBBBBBBBBWW',
+  'YYWWBBBBBBBBBBWWYY',
+  'WWWWWWWWWWWWWWWWWW',
+  '.BBBB........BBBB.',
+  '.BBBB........BBBB.',
+  '..................',
+] as const
+
+const SAME_BUS_ROWS = [
+  '....RRRRRRRRRRRRRRRR....',
+  '...RCCCCCCCCCCCCCCCCR...',
+  '..RCCCCCCCCCCCCCCCCCCR..',
+  '.RRCCCCCCCCCCCCCCCCCCRR.',
+  'RRRRRRRRRRRRRRRRRRRRRRRR',
+  'RRYYYYYYYYYYYYYYYYYYYYRR',
+  'RRRRRRRRRRRRRRRRRRRRRRRR',
+  'RRR..................RRR',
+  'RR..RRRRRRRRRRRRRRRR..RR',
+  'RR..RRRRRRRRRRRRRRRR..RR',
+  'RR..RRRRRRRRRRRRRRRR..RR',
+  'RRBBBBBBBBBBBBBBBBBBBBRR',
+  'RRR....RRRRRRRRRR....RRR',
+  '.BBBB..............BBBB.',
+  '.BBBB..............BBBB.',
+  '........................',
+] as const
+
+const ONCOMING_BUS_ROWS = [
+  '....RRRRRRRRRRRRRRRR....',
+  '...RCCCCCCCCCCCCCCCCR...',
+  '..RCCCCCCCCCCCCCCCCCCR..',
+  '.RRCCCCCCCCCCCCCCCCCCRR.',
+  'RRRRRRRRRRRRRRRRRRRRRRRR',
+  'RRRWWWWWWWWWWWWWWWWWWRRR',
+  'RRRRRRRRRRRRRRRRRRRRRRRR',
+  'RRBBBBBBBBBBBBBBBBBBBBRR',
+  'YY..BBBBBBBBBBBBBBBB..YY',
+  'RR....................RR',
+  'RR..RRRRRRRRRRRRRRRR..RR',
+  'RR..RRRRRRRRRRRRRRRR..RR',
+  'RRR....RRRRRRRRRR....RRR',
+  '.BBBB..............BBBB.',
+  '.BBBB..............BBBB.',
+  '........................',
+] as const
+
+const SAME_MINI_COLORS: RowColors = {
+  G: C.B_GREEN, C: C.CYAN, R: C.B_RED, B: C.BLACK, Y: C.B_YELLOW,
+}
+const ONCOMING_MINI_COLORS: RowColors = {
+  W: C.B_WHITE, C: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
+}
+const SAME_CAR_COLORS: RowColors = {
+  G: C.B_GREEN, C: C.CYAN, R: C.B_RED, B: C.BLACK,
+}
+const ONCOMING_CAR_COLORS: RowColors = {
+  W: C.B_WHITE, C: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
+}
+const SAME_BUS_COLORS: RowColors = {
+  R: C.B_RED, C: C.CYAN, Y: C.B_YELLOW, B: C.BLACK,
+}
+const ONCOMING_BUS_COLORS: RowColors = {
+  R: C.B_RED, C: C.CYAN, W: C.B_WHITE, B: C.BLACK, Y: C.B_YELLOW,
 }
 
 // ── Roadside objects rendering ───────────────────────────────────────────────

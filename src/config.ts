@@ -36,19 +36,19 @@ export type Surface = 'asphalt' | 'snow' | 'ice' | 'sand' | 'mud'
 /** Per-surface acceleration multiplier applied to base ACCEL. */
 export const SURFACE_ACCEL: Record<Surface, number> = {
   asphalt: 1.0,
-  snow:    0.55,
-  ice:     1.8,
-  sand:    0.35,
-  mud:     0.35,
+  snow: 0.55,
+  ice: 1.8,
+  sand: 0.35,
+  mud: 0.35,
 }
 
 /** Per-surface grip (0–1). Steering + damping + centrifugal drift. */
 export const SURFACE_GRIP: Record<Surface, number> = {
   asphalt: 1.0,
-  snow:    0.55,
-  ice:     0.25,
-  sand:    0.35,
-  mud:     0.45,
+  snow: 0.55,
+  ice: 0.25,
+  sand: 0.35,
+  mud: 0.45,
 }
 
 /**
@@ -58,10 +58,10 @@ export const SURFACE_GRIP: Record<Surface, number> = {
  */
 export const SURFACE_DRAG: Record<Surface, number> = {
   asphalt: 0,
-  snow:    4,
-  ice:     0,
-  sand:    7,
-  mud:     8,
+  snow: 4,
+  ice: 0,
+  sand: 7,
+  mud: 8,
 }
 
 /**
@@ -91,10 +91,10 @@ export interface BrakeProfile {
  */
 export const SURFACE_BRAKE: Record<Surface, BrakeProfile> = {
   asphalt: { decel: 18, speedFade: 0.40, lockSpeed: 100, lateralLoss: 0.10, sound: 'screech' },
-  snow:    { decel: 12, speedFade: 0.40, lockSpeed: 55,  lateralLoss: 0.30, sound: 'none' },
-  ice:     { decel:  8, speedFade: 0.55, lockSpeed: 30,  lateralLoss: 0.50, sound: 'grind' },
-  sand:    { decel: 10, speedFade: 0.30, lockSpeed: 80,  lateralLoss: 0.15, sound: 'none' },
-  mud:     { decel: 11, speedFade: 0.35, lockSpeed: 65,  lateralLoss: 0.25, sound: 'none' },
+  snow: { decel: 12, speedFade: 0.40, lockSpeed: 55, lateralLoss: 0.30, sound: 'none' },
+  ice: { decel: 8, speedFade: 0.55, lockSpeed: 30, lateralLoss: 0.50, sound: 'grind' },
+  sand: { decel: 10, speedFade: 0.30, lockSpeed: 80, lateralLoss: 0.15, sound: 'none' },
+  mud: { decel: 11, speedFade: 0.35, lockSpeed: 65, lateralLoss: 0.25, sound: 'none' },
 }
 
 /**
@@ -104,10 +104,10 @@ export const SURFACE_BRAKE: Record<Surface, BrakeProfile> = {
  */
 export const SURFACE_SKID_ENABLED: Record<Surface, boolean> = {
   asphalt: false,
-  snow:    true,
-  ice:     true,
-  sand:    false,
-  mud:     true,
+  snow: true,
+  ice: true,
+  sand: false,
+  mud: true,
 }
 
 /**
@@ -116,10 +116,10 @@ export const SURFACE_SKID_ENABLED: Record<Surface, boolean> = {
  */
 export const SURFACE_STEER_DAMP_MULT: Record<Surface, number> = {
   asphalt: 1.0,
-  snow:    1.0,
-  ice:     1.0,
-  sand:    2.5,
-  mud:     1.5,
+  snow: 1.0,
+  ice: 1.0,
+  sand: 2.5,
+  mud: 1.5,
 }
 
 /**
@@ -128,28 +128,28 @@ export const SURFACE_STEER_DAMP_MULT: Record<Surface, number> = {
  */
 export const SURFACE_FUEL_MULT: Record<Surface, number> = {
   asphalt: 1.0,
-  snow:    1.2,
-  ice:     0.9,
-  sand:    1.2,  // was 1.5 — two large sand segments were eating 36% of tank
-  mud:     1.3,
+  snow: 1.2,
+  ice: 0.9,
+  sand: 1.2,  // was 1.5 — two large sand segments were eating 36% of tank
+  mud: 1.3,
 }
 
 /** Per-surface tire wear rate multiplier (future mechanic). */
 export const SURFACE_WEAR: Record<Surface, number> = {
   asphalt: 1.0,
-  snow:    1.6,
-  ice:     2.5,
-  sand:    1.8,
-  mud:     1.4,
+  snow: 1.6,
+  ice: 2.5,
+  sand: 1.8,
+  mud: 1.4,
 }
 
 /** Probability weights for surface generation (~sums to 1.0). */
 export const SURFACE_PROBABILITY: Record<Surface, number> = {
   asphalt: 0.30,
-  snow:    0.22,
-  ice:     0.22,
-  sand:    0.10,
-  mud:     0.16,
+  snow: 0.22,
+  ice: 0.22,
+  sand: 0.10,
+  mud: 0.16,
 }
 
 // ── Vehicle physics ─────────────────────────────────────────────────────────
@@ -207,10 +207,10 @@ export const SPEED_STEER_PENALTY = 0.6
  */
 export const SURFACE_SLIP_PEAK: Record<Surface, number> = {
   asphalt: 0.90,
-  snow:    0.35,
-  ice:     0.25,
-  sand:    0.50,
-  mud:     0.30,
+  snow: 0.35,
+  ice: 0.25,
+  sand: 0.50,
+  mud: 0.30,
 }
 // ── Fuel ────────────────────────────────────────────────────────────────────
 
@@ -226,10 +226,10 @@ export const START_ASPHALT_M = 1000
 /** Per-surface segment length range [min, max] in metres. */
 export const SURFACE_LENGTH_RANGE: Record<Surface, readonly [number, number]> = {
   asphalt: [200, 800],
-  snow:    [100, 800],
-  ice:     [100, 300],
-  sand:    [100, 800],
-  mud:     [100, 800],
+  snow: [100, 800],
+  ice: [100, 300],
+  sand: [100, 800],
+  mud: [100, 800],
 }
 
 /**
@@ -296,11 +296,11 @@ export const OFFROAD_BEEP_COOLDOWN_S = 0.25
  * Sand: deep square. Mud: modulated triangle.
  */
 export const SURFACE_ENGINE_SOUND: Record<Surface, readonly [OscillatorType, number, number]> = {
-  asphalt: ['square',   40, 235],
-  snow:    ['triangle', 35, 180],
-  ice:     ['sawtooth', 50, 280],
-  sand:    ['square',   25, 140],
-  mud:     ['triangle', 30, 160],
+  asphalt: ['square', 40, 235],
+  snow: ['triangle', 35, 180],
+  ice: ['sawtooth', 50, 280],
+  sand: ['square', 25, 140],
+  mud: ['triangle', 30, 160],
 }
 
 // ── Fuel canisters ──────────────────────────────────────────────────────────
@@ -353,9 +353,8 @@ export const TRAFFIC_SAME_SPEED: readonly [number, number] = [30, 55]
 /** Speed range for oncoming vehicles [min, max] km/h. */
 export const TRAFFIC_ONCOMING_SPEED: readonly [number, number] = [60, 90]
 /**
- * Pre-filter range for pixel-perfect traffic collision (metres ahead of player).
- * Vehicles outside this range can't possibly overlap the truck sprite — skip them.
- * Actual pixel overlap only triggers at ~worldZ < 2m; 6 gives safe frame margin.
+ * Pre-filter range for visual traffic collision (metres ahead of player).
+ * Vehicles outside this range cannot overlap the player truck on screen.
  */
 export const TRAFFIC_COLLISION_DEPTH_M = 6
 /** First traffic vehicle appears after this many metres (safe start). */
@@ -364,7 +363,7 @@ export const TRAFFIC_START_M = 800
 // ── UI timing ───────────────────────────────────────────────────────────────
 
 export const BLINK_MS = 400
-export const ICE_AHEAD_LOOK_M = 120
+export const ICE_AHEAD_LOOK_M = 220
 
 // ── CRT effect ─────────────────────────────────────────────────────────────
 

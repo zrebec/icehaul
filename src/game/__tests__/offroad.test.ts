@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../offroad.ts'
 import { computeRoadEdges } from '../roadgeometry.ts'
 import { TRUCK_BMP_W, TRUCK_BMP_H, TRUCK_BMP_DATA } from '../../render/truck.ts'
-import { GAME_WIDTH, VIEWPORT_BOTTOM } from '../../config.ts'
+import { GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
+import { getTrafficSpriteRows, projectTrafficVehicle } from '../../render/road3d.ts'
+import type { TrafficVehicle } from '../traffic.ts'
 
 const noCurve = () => 0
 
@@ -177,5 +179,76 @@ describe('checkTruckTrafficCollision', () => {
   it('single-pixel rect inside solid area overlaps', () => {
     // x=12, y=10 is inside the truck body
     expect(checkTruckTrafficCollision(0, 0, 12, 10, 1, 1)).toBe(true)
+  })
+
+  it('ignores transparent traffic pixels even when the truck pixel is inside the projected rect', () => {
+    expect(checkTruckTrafficCollision(0, 0, 12, 10, 1, 1, ['.'])).toBe(false)
+  })
+
+  it('collides with solid traffic pixels when the truck mask touches the sprite mask', () => {
+    expect(checkTruckTrafficCollision(0, 0, 12, 10, 1, 1, ['X'])).toBe(true)
+  })
+
+  it('matches projected traffic rect for a centered near car', () => {
+    const truck = truckDrawPos(0, 0)
+    const vehicle: TrafficVehicle = {
+      spawnDist: 501.1,
+      distM: 501.1,
+      x: 0,
+      speed: 40,
+      dir: 'same',
+      type: 'car',
+      gone: false,
+    }
+    const projected = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 500, 0, vehicle, noCurve)
+
+    expect(projected).not.toBeNull()
+    expect(checkTruckTrafficCollision(
+      truck.x, truck.y,
+      projected!.left, projected!.top, projected!.w, projected!.h,
+      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+    )).toBe(true)
+  })
+
+  it('does not collide with a near oncoming vehicle still in the left lane', () => {
+    const truck = truckDrawPos(0, 0)
+    const vehicle: TrafficVehicle = {
+      spawnDist: 501.1,
+      distM: 501.1,
+      x: -0.55,
+      speed: 80,
+      dir: 'oncoming',
+      type: 'car',
+      gone: false,
+    }
+    const projected = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 500, 0, vehicle, noCurve)
+
+    expect(projected).not.toBeNull()
+    expect(checkTruckTrafficCollision(
+      truck.x, truck.y,
+      projected!.left, projected!.top, projected!.w, projected!.h,
+      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+    )).toBe(false)
+  })
+
+  it('keeps side contact possible during the pass-by phase', () => {
+    const truck = truckDrawPos(0, 0)
+    const vehicle: TrafficVehicle = {
+      spawnDist: 497,
+      distM: 497,
+      x: -0.15,
+      speed: 80,
+      dir: 'oncoming',
+      type: 'car',
+      gone: false,
+    }
+    const projected = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 500, 0, vehicle, noCurve)
+
+    expect(projected).not.toBeNull()
+    expect(checkTruckTrafficCollision(
+      truck.x, truck.y,
+      projected!.left, projected!.top, projected!.w, projected!.h,
+      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+    )).toBe(true)
   })
 })

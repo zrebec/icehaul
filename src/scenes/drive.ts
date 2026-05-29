@@ -1,11 +1,12 @@
 import {
   C, beep, flashBorder, isHeld, getAudioContext, consumePause,
-  playPattern, drawTextCentered, type Scene,
+  playPattern, drawTextCentered,
+  createParticleSystem, emitParticles, tickParticles, renderParticles,
+  type ParticleSystem, type Scene, type SpectrumColor,
 } from 'zx-kit'
 
 import {
   GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP, PERSPECTIVE_K,
-  HORIZON_PCT, ROAD_HALF_TOP, ROAD_HALF_BOTTOM, LATERAL_SHIFT,
   COLS, BLINK_MS, SCREECH_COOLDOWN_S, OFFROAD_BEEP_COOLDOWN_S,
   EDGE_MARGIN_WARN_PX,
   LOW_FUEL_WARN, LOW_FUEL_CRITICAL,
@@ -20,7 +21,10 @@ import {
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
 import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
-import { drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic } from '../render/road3d.ts'
+import {
+  drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic,
+  getTrafficSpriteRows, projectTrafficVehicle,
+} from '../render/road3d.ts'
 import { drawTruck } from '../render/truck.ts'
 import { drawHUD } from '../render/hud.ts'
 import { drawTopBar } from '../render/topbar.ts'
@@ -36,6 +40,44 @@ function hash(n: number): number {
   x = Math.imul(x ^ (x >>> 16), 0x85EBCA6B)
   x = Math.imul(x ^ (x >>> 13), 0xC2B2AE35)
   return ((x ^ (x >>> 16)) >>> 0) / 0x100000000
+}
+
+function emitWheelSpray(
+  particles: ParticleSystem,
+  truckDrawX: number,
+  truckDrawY: number,
+  lateralV: number,
+  count: number,
+  color: readonly SpectrumColor[],
+  speed: readonly [number, number],
+  life: readonly [number, number],
+  size = 1,
+): void {
+  if (count <= 0) return
+
+  const sideBias = Math.max(-0.45, Math.min(0.45, lateralV * 0.22))
+  const leftCount = Math.ceil(count / 2)
+  const rightCount = count - leftCount
+  const wheels = [
+    { x: truckDrawX + 4, count: leftCount, angle: -Math.PI * 0.78 + sideBias },
+    { x: truckDrawX + 20, count: rightCount, angle: -Math.PI * 0.22 + sideBias },
+  ] as const
+
+  for (const wheel of wheels) {
+    const wheelCount = wheel.count
+    if (wheelCount <= 0) continue
+    emitParticles(particles, {
+      x: wheel.x,
+      y: truckDrawY + 27,
+      count: wheelCount,
+      color,
+      speed,
+      angle: wheel.angle,
+      spread: Math.PI * 0.7,
+      life,
+      size,
+    })
+  }
 }
 
 type DriveState = 'waiting' | 'playing' | 'paused' | 'crashing'
@@ -55,6 +97,9 @@ export function createDriveScene(
   let wasOffRoad = false
   let offroadAccumS = 0
   let gameOverFired = false
+  const surfaceParticles = createParticleSystem(420)
+  let snowSprayAccum = 0
+  let skidSprayAccum = 0
 
   let lastOffroad: OffroadResult = {
     offRoadPixels: 0, totalPixels: 1, severity: 0,
@@ -115,6 +160,7 @@ export function createDriveScene(
       if (driveState === 'crashing') {
         if (gameOverFired) return
         crashTimerMs += dt
+        tickParticles(surfaceParticles, dt, 0.00025)
         v.speed = Math.max(0, v.speed - v.speed * 3 * (dt / 1000))
         v.x += v.vx * (dt / 1000) * 0.3
         v.vx *= 0.95
@@ -164,36 +210,26 @@ export function createDriveScene(
       const curvature = getCurvatureAt(v.distance)
       tickVehicle(v, input, surface, grip, accel, dt, curvature,
         lastOffroad.severity, offroadReturnDir)
+      tickParticles(surfaceParticles, dt, 0.00022)
 
       if (engineStarted) updateEngine(v.speed, MAX_SPEED, surface, input.brake)
 
       const ctxAudio = getAudioContext()
 
-      // Traffic — move vehicles, then pixel-perfect collision
+      // Traffic — move vehicles, then visual screen-space collision.
       tickTraffic(v.distance, v.x, v.speed, dt)
 
-      const horizonY = VIEWPORT_TOP + Math.floor((VIEWPORT_BOTTOM - VIEWPORT_TOP) * HORIZON_PCT)
-      const roadHeight = VIEWPORT_BOTTOM - horizonY
-      const baseVanX = GAME_WIDTH / 2 - v.x * LATERAL_SHIFT
-
       for (const tv of getVisibleTraffic(v.distance, TRAFFIC_COLLISION_DEPTH_M)) {
-        const worldZ = tv.distM - v.distance
-        if (worldZ <= 0 || worldZ > TRAFFIC_COLLISION_DEPTH_M) continue
-
-        const dy = PERSPECTIVE_K / worldZ
-        const i  = Math.round(dy) - 1
-        if (i < 0 || i >= roadHeight - 1) continue
-
-        const t      = (i + 1) / roadHeight
-        const half   = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
-        const screenX = Math.round(baseVanX + tv.x * half)
-        const scale  = Math.max(0.3, t)
-        const w = Math.max(3, Math.round((tv.type === 'truck' ? 16 : 12) * scale))
-        const h = Math.max(4, Math.round((tv.type === 'truck' ? 22 : 14) * scale))
+        const projected = projectTrafficVehicle(
+          VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, tv,
+          (d) => getCurvatureAt(d),
+        )
+        if (!projected) continue
 
         if (checkTruckTrafficCollision(
           truckDrawX, truckDrawY,
-          screenX - Math.floor(w / 2), (horizonY + i + 1) - h, w, h,
+          projected.left, projected.top, projected.w, projected.h,
+          getTrafficSpriteRows(tv.dir, tv.type),
         )) {
           startCrash('crash')
           return
@@ -207,6 +243,44 @@ export function createDriveScene(
           beep(160 + Math.random() * 60, 60, now)
           lastScreechAtS = now
         }
+      }
+
+      const skidIntensity = Math.min(1, Math.max(0, (Math.abs(v.vx) - 0.08) / 0.65))
+      if (surface === 'snow' && v.speed > 8) {
+        snowSprayAccum += dt * (0.085 + v.speed * 0.0016 + skidIntensity * 0.12)
+        const count = Math.floor(snowSprayAccum)
+        snowSprayAccum -= count
+        emitWheelSpray(
+          surfaceParticles, truckDrawX, truckDrawY, v.vx, count,
+          [C.CYAN, C.B_CYAN, C.B_WHITE],
+          [0.07, 0.2],
+          [360, 850],
+        )
+      }
+
+      if ((surface === 'ice' || surface === 'snow') && skidIntensity > 0 && v.speed > 25) {
+        skidSprayAccum += dt * skidIntensity * (input.brake ? 0.22 : 0.12)
+        const count = Math.floor(skidSprayAccum)
+        skidSprayAccum -= count
+        emitWheelSpray(
+          surfaceParticles, truckDrawX, truckDrawY, v.vx, count,
+          surface === 'ice' ? [C.B_CYAN, C.B_WHITE, C.B_YELLOW] : [C.B_WHITE, C.B_YELLOW],
+          [0.13, 0.34],
+          [180, 420],
+          surface === 'ice' ? 2 : 1,
+        )
+      }
+
+      if ((surface === 'sand' || surface === 'mud') && v.speed > 10) {
+        snowSprayAccum += dt * (0.05 + v.speed * 0.001 + skidIntensity * 0.08)
+        const count = Math.floor(snowSprayAccum)
+        snowSprayAccum -= count
+        emitWheelSpray(
+          surfaceParticles, truckDrawX, truckDrawY, v.vx, count,
+          surface === 'sand' ? [C.YELLOW, C.B_YELLOW, C.WHITE] : [C.RED, C.B_RED, C.YELLOW],
+          [0.045, 0.16],
+          [300, 700],
+        )
       }
 
       // ── Off-road warnings (pixel-perfect) ──
@@ -338,6 +412,7 @@ export function createDriveScene(
       const visible = getVisibleCanisters(v.distance, PERSPECTIVE_K)
       drawCanisters(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, visible,
         (d) => getCurvatureAt(d))
+      renderParticles(ctx, surfaceParticles)
 
       const truckX = GAME_WIDTH / 2 + v.x * 50
       let shakeX = 0

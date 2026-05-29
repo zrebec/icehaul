@@ -65,18 +65,25 @@ export function checkTruckOffroad(
 }
 
 /**
- * Pixel-perfect check: does any solid truck bitmap pixel fall inside the given
- * screen-space rectangle (traffic vehicle body)? Same mask as off-road detection.
+ * Pixel-perfect check: does any solid truck bitmap pixel touch a solid traffic
+ * sprite pixel? Without trafficRows this falls back to the old full-rect check.
  * truckDrawX/Y — top-left of the truck bitmap in game pixels.
  * trafficLeft/Top, trafficW/H — the rendered vehicle rectangle.
+ * trafficRows — sprite row strings where "." is transparent.
  */
 export function checkTruckTrafficCollision(
   truckDrawX: number, truckDrawY: number,
   trafficLeft: number, trafficTop: number,
   trafficW: number, trafficH: number,
+  trafficRows?: readonly string[],
 ): boolean {
+  if (trafficW <= 0 || trafficH <= 0) return false
+
   const trafficRight  = trafficLeft + trafficW
   const trafficBottom = trafficTop  + trafficH
+  const srcH = trafficRows?.length ?? 0
+  const srcW = srcH > 0 ? trafficRows![0]?.length ?? 0 : 0
+  const useTrafficMask = srcW > 0 && srcH > 0
 
   for (let row = 0; row < TRUCK_PIXEL_MASK.height; row++) {
     const screenY = truckDrawY + row
@@ -92,7 +99,13 @@ export function checkTruckTrafficCollision(
 
     for (const col of maskRow) {
       const sx = truckDrawX + col
-      if (sx >= trafficLeft && sx < trafficRight) return true
+      if (sx < trafficLeft || sx >= trafficRight) continue
+      if (!useTrafficMask) return true
+
+      const trafficX = Math.floor((sx - trafficLeft) * srcW / trafficW)
+      const trafficY = Math.floor((screenY - trafficTop) * srcH / trafficH)
+      const ch = trafficRows![trafficY]?.[trafficX]
+      if (ch && ch !== '.') return true
     }
   }
   return false

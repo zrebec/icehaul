@@ -12,7 +12,7 @@ import {
 } from '../config.ts'
 
 export type TrafficDir = 'same' | 'oncoming'
-export type VehicleType = 'car' | 'truck'
+export type VehicleType = 'mini' | 'car' | 'bus'
 
 export interface TrafficVehicle {
   /** Absolute world distance when spawned (metres). */
@@ -54,7 +54,7 @@ function spawnVehicle(): void {
   const h4 = hash(idx * 97 + 37 + _seed)
 
   const dir: TrafficDir = h1 < TRAFFIC_SAME_DIR_PCT ? 'same' : 'oncoming'
-  const type: VehicleType = h2 < 0.7 ? 'car' : 'truck'
+  const type: VehicleType = h2 < 0.38 ? 'mini' : h2 < 0.78 ? 'car' : 'bus'
 
   let speed: number
   let x: number
