@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { followPlayerSpeed, resetTraffic, tickTraffic, getVisibleTraffic } from '../traffic.ts'
-import { projectTrafficVehicle } from '../../render/road3d.ts'
+import { getTrafficSpriteRows, projectTrafficVehicle } from '../../render/road3d.ts'
 import { VIEWPORT_TOP, VIEWPORT_BOTTOM, TRAFFIC_VIEW_DISTANCE_M } from '../../config.ts'
 import type { TrafficVehicle } from '../traffic.ts'
 
 const SEED = 123
+const TRAFFIC_SPRITE_DIMS = {
+  mini: { w: 14, h: 11 },
+  car: { w: 22, h: 15 },
+  bus: { w: 28, h: 18 },
+} as const
 
 beforeEach(() => {
   resetTraffic(SEED)
@@ -84,6 +89,29 @@ describe('followPlayerSpeed', () => {
 
   it('does not brake a distant same-direction vehicle with enough time gap', () => {
     expect(followPlayerSpeed(900, 55, 1000, 25, 1000)).toBe(55)
+  })
+})
+
+describe('traffic sprite rows', () => {
+  for (const dir of ['same', 'oncoming'] as const) {
+    for (const type of ['mini', 'car', 'bus'] as const) {
+      it(`${dir} ${type} preserves source dimensions and solid pixels`, () => {
+        const rows = getTrafficSpriteRows(dir, type)
+        const expected = TRAFFIC_SPRITE_DIMS[type]
+        const solid = rows.join('').replaceAll('.', '').length
+
+        expect(rows).toHaveLength(expected.h)
+        for (const row of rows) expect(row).toHaveLength(expected.w)
+        expect(solid).toBeGreaterThan(expected.w * expected.h * 0.45)
+      })
+    }
+  }
+
+  it('keeps mini, car, and bus source silhouettes in increasing size order', () => {
+    expect(TRAFFIC_SPRITE_DIMS.mini.w).toBeLessThan(TRAFFIC_SPRITE_DIMS.car.w)
+    expect(TRAFFIC_SPRITE_DIMS.car.w).toBeLessThan(TRAFFIC_SPRITE_DIMS.bus.w)
+    expect(TRAFFIC_SPRITE_DIMS.mini.h).toBeLessThan(TRAFFIC_SPRITE_DIMS.car.h)
+    expect(TRAFFIC_SPRITE_DIMS.car.h).toBeLessThan(TRAFFIC_SPRITE_DIMS.bus.h)
   })
 })
 

@@ -145,6 +145,7 @@ export function drawTruck(
   ctx.fillRect(x + 7, y + 9, 3, 4)
   ctx.fillRect(x + 14, y + 9, 3, 4)
   ctx.fillRect(x + 11, y + 8, 2, 1)
+  ctx.fillRect(x + 3, y + 15, 18, 1)
 
   ctx.fillStyle = C.B_WHITE
   ctx.fillRect(x + 8, y + 0, 8, 1)
