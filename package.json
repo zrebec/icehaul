@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "zx-kit": "^0.24.1"
+    "zx-kit": "^0.26.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.6",
