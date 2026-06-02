@@ -3,7 +3,7 @@
  * adapted for pseudo-3D (1 axis lateral + forward speed).
  *
  * Key forces (longitudinal):
- *   F_engine    = ACCEL × surface_mult          (throttle)
+ *   F_engine    = gear.accel × torque(rpm) × surface_mult  (throttle, gear-limited)
  *   F_brake     = SURFACE_BRAKE[surface].decel × speedFade  (manual brake)
  *   F_aero      = AERO_DRAG × (v/MAX)²          (quadratic, dominates at high speed)
  *   F_rolling   = ROLLING_RESISTANCE × v         (linear, dominates at low speed)
@@ -24,7 +24,7 @@
  */
 
 import {
-  MAX_SPEED, ACCEL,
+  MAX_SPEED,
   AERO_DRAG, ROLLING_RESISTANCE, ENGINE_BRAKE,
   CURVE_DRIFT,
   STEER_ACCEL, STEER_DAMP, MAX_LATERAL_V,
@@ -34,6 +34,8 @@ import {
   SURFACE_DRAG, SURFACE_BRAKE,
   SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT,
   SURFACE_SLIP_PEAK,
+  GEARS, GEAR_COUNT, BOG_RPM, BOG_FLOOR, POWER_RPM, REDLINE_FLOOR, OVERREV_ENGINE_BRAKE,
+  STALL_RPM, STALL_GRACE_MS,
   type Surface,
 } from '../config.ts'
 
@@ -45,6 +47,16 @@ export interface Vehicle {
   speed: number
   distance: number
   fuel: number
+  /** Current engaged gear (1..GEAR_COUNT). */
+  gear: number
+  /** Engine revs within the current gear's band (0..1, 1 = redline). For display. */
+  rpm: number
+  /** True when the engine has stalled (lugged below idle). Restart with ENTER. */
+  stalled: boolean
+  /** Milliseconds the engine has lugged below the stall threshold (grace countdown). */
+  stallWarnMs: number
+  /** True while the "ENGINE STALLING" warning shows — lugging, not dead yet. */
+  stallWarning: boolean
 }
 
 export interface VehicleInput {
@@ -52,10 +64,46 @@ export interface VehicleInput {
   brake: boolean
   steerLeft: boolean
   steerRight: boolean
+  /** Edge-triggered: shift up one gear this tick. */
+  shiftUp?: boolean
+  /** Edge-triggered: shift down one gear this tick. */
+  shiftDown?: boolean
+  /** Edge-triggered: ENTER ignition — restart a stalled engine. */
+  restart?: boolean
 }
 
 export function createVehicle(): Vehicle {
-  return { x: 0, vx: 0, speed: 0, distance: 0, fuel: 1.0 }
+  return {
+    x: 0, vx: 0, speed: 0, distance: 0, fuel: 1.0,
+    gear: 1, rpm: 0, stalled: false, stallWarnMs: 0, stallWarning: false,
+  }
+}
+
+/**
+ * Pick a sensible gear to re-engage on restart so the engine does not instantly
+ * re-stall (too tall) or redline (too short). Falls back to 1st at low speed.
+ */
+function startableGear(speed: number): number {
+  for (let g = GEAR_COUNT; g >= 1; g--) {
+    const spec = GEARS[g - 1]!
+    const span = spec.to - spec.from
+    const rpm = span > 0 ? (speed - spec.from) / span : 0
+    if (rpm >= 0 && rpm < 0.9) return g
+  }
+  return 1
+}
+
+/**
+ * Throttle torque multiplier from engine rpm (0..1+ inside the current gear band).
+ * Lugging below the power band is weak; the flat band is full power; near redline
+ * torque tapers; at/above redline the engine cannot pull the gear any faster.
+ */
+function gearTorqueMult(rpm: number): number {
+  if (rpm >= 1) return 0
+  const r = Math.max(0, rpm)
+  if (r < BOG_RPM) return BOG_FLOOR + (r / BOG_RPM) * (1 - BOG_FLOOR)
+  if (r <= POWER_RPM) return 1
+  return 1 - ((r - POWER_RPM) / (1 - POWER_RPM)) * (1 - REDLINE_FLOOR)
 }
 
 /**
@@ -82,11 +130,52 @@ export function tickVehicle(
   const dt = dtMs / 1000
   const speedRatio = v.speed / MAX_SPEED
 
+  // ── Gearbox (manual) — shift, optional restart, then derive rpm + torque ──
+  if (input.shiftUp && v.gear < GEAR_COUNT) v.gear++
+  if (input.shiftDown && v.gear > 1) v.gear--
+
+  // ENTER ignition — restart a stalled engine in a sensible gear.
+  if (v.stalled && input.restart) {
+    v.stalled = false
+    v.stallWarnMs = 0
+    v.gear = startableGear(v.speed)
+  }
+
+  const gear = GEARS[v.gear - 1]!
+  const gearSpan = gear.to - gear.from
+  const rpmRaw = gearSpan > 0 ? (v.speed - gear.from) / gearSpan : 0
+
+  // Stall — lugging far below a gear's band kills the engine, but only after a
+  // grace period during which an "ENGINE STALLING" warning shows, giving the
+  // driver time to downshift. First gear (from = 0) never lugs this low.
+  if (v.stalled) {
+    v.stallWarnMs = 0
+  } else if (rpmRaw < STALL_RPM) {
+    v.stallWarnMs += dtMs
+    if (v.stallWarnMs >= STALL_GRACE_MS) {
+      v.stalled = true
+      v.stallWarnMs = 0
+    }
+  } else {
+    v.stallWarnMs = 0
+  }
+  v.stallWarning = !v.stalled && v.stallWarnMs > 0
+
+  v.rpm = v.stalled ? 0 : Math.max(0, Math.min(1, rpmRaw))
+  const torque = v.stalled ? 0 : gearTorqueMult(rpmRaw)
+
   // ── Longitudinal forces ────────────────────────────────────────────────
 
-  // Engine force (throttle)
-  if (input.throttle && v.fuel > 0) {
-    v.speed = Math.min(MAX_SPEED, v.speed + ACCEL * accelMult * dt)
+  // Engine force (throttle) — torque-scaled, capped at the current gear's top.
+  // A stalled engine produces nothing; the truck just freewheels.
+  if (!v.stalled && input.throttle && v.fuel > 0 && v.speed < gear.to) {
+    v.speed = Math.min(gear.to, v.speed + gear.accel * torque * accelMult * dt)
+  }
+
+  // Over-rev engine braking — too low a gear for this speed (e.g. after a
+  // downshift) drags speed back down toward the gear's top. Compression, not brake.
+  if (!v.stalled && v.speed > gear.to) {
+    v.speed = Math.max(gear.to, v.speed - OVERREV_ENGINE_BRAKE * dt)
   }
 
   // Manual brake — per-surface profile with speed fade and wheel lock
@@ -97,7 +186,7 @@ export function tickVehicle(
   }
 
   // Engine braking (throttle released, engine compression resists motion)
-  if (!input.throttle && !input.brake && v.fuel > 0 && v.speed > 0) {
+  if (!v.stalled && !input.throttle && !input.brake && v.fuel > 0 && v.speed > 0) {
     v.speed = Math.max(0, v.speed - ENGINE_BRAKE * speedRatio * dt)
   }
 
@@ -177,7 +266,7 @@ export function tickVehicle(
 
   v.distance += (v.speed / 3.6) * dt
 
-  if (v.speed > FUEL_IDLE_THRESHOLD && v.fuel > 0) {
+  if (!v.stalled && v.speed > FUEL_IDLE_THRESHOLD && v.fuel > 0) {
     const speedFactor = v.speed * (v.speed / MAX_SPEED)
     v.fuel = Math.max(0, v.fuel - speedFactor * FUEL_BURN_RATE * SURFACE_FUEL_MULT[surface] * dt)
   }

@@ -29,21 +29,25 @@ GitHub repo: `zrebec/ice-haul`. Built on **[zx-kit](https://github.com/zrebec/zx
 │     <pseudo-3D road scene>     │   sky ~25%, road ~75%
 │                                │
 ├────────────────────────────────┤
-│ E▮▮▮▮F  │       80    │ FREE  │ rows 15–23 (HUD, 9 cells / 72 px)
-│ NW N NE │  ◯  km/h   │ DRIVE │ 3 equal panels: instruments | speed | mission
-│ ▮▮ ▮▮   │  0    160  │       │
+│E▮▮▮▮F   │       80    │ FREE  │ rows 15–23 (HUD, 9 cells / 72 px)
+│RPM ▮▮▮▮▮│  ◯  km/h   │ DRIVE │ 3 equal panels: drivetrain | speed | mission
+│GEAR 3/5 │  0    120  │       │
+│GRIP ▮▮▮▮│             │       │
 └────────────────────────────────┘
    85 px      85 px     86 px
 ```
 
-HUD has **3 equal-width panels** (256/3). Left panel: FUEL bar + compass (3-dir) + GRIP bars, NO text labels. Centre: speed dial (radius 20). Right: mission info placeholder. Status bar is **4 rows** — no "ICE TRUCKER" title.
+HUD has **3 equal-width panels** (256/3). Left ("drivetrain") panel, top→bottom: **FUEL** bar, **RPM** bar, **GEAR** (current/total), **GRIP** bar — with short labels. Centre: speed dial (radius 20, range 0–120). Right: mission info placeholder. Status bar is **4 rows** — no "ICE TRUCKER" title.
+
+> The original "no text labels / 3-dir compass / double vertical GRIP" left panel was replaced when the manual gearbox landed: RPM and GEAR readouts need labels, and the static compass was dropped to make room. If `heading` ever becomes dynamic, restore the compass in the top status bar instead.
 
 | Widget | zx-kit function |
 |--------|-----------------|
-| Compass (3-dir) | Manual `drawText` — `NW N NE`, centre highlighted `B_YELLOW` |
-| SPEED | `drawDial` with `ticks: 5`, `rimColor`, `tickColor`. `km/h` label rendered inside dial face below pivot. |
+| SPEED | `drawDial` with `ticks: 5`, `rimColor`, `tickColor`. `km/h` label rendered inside dial face below pivot. Range 0–120. |
 | FUEL | `drawSegmentedBar` (horizontal). E in `B_RED`, F in `B_GREEN`, segments `B_YELLOW`. |
-| GRIP | `drawSegmentedBar` (vertical, two parallel strips). 3-stop gradient `[B_RED, B_YELLOW, B_GREEN]`. |
+| RPM | `drawSegmentedBar` (horizontal, 7 seg). 3-stop gradient `[B_GREEN, B_YELLOW, B_RED]` — reddens toward redline. |
+| GEAR | `drawText` — current gear in `B_CYAN`, `/N` total in `WHITE`. |
+| GRIP | `drawSegmentedBar` (horizontal, single 6-seg bar). 3-stop gradient `[B_RED, B_YELLOW, B_GREEN]`. |
 | Star field | Hand-plotted `STAR_POSITIONS` table (~17 points for compact sky). |
 | Warning text `ICE AHEAD` | `drawTextCentered` + blink toggle in drive scene. |
 | Kerb stripes | Pole-Position-style alternating `B_WHITE`/`B_YELLOW`, perspective-scaled width. |
@@ -133,17 +137,23 @@ node scripts/screenshot.mjs out.png        # headless capture of canvas bitmap (
 node scripts/drive-shot.mjs out.png 5      # boots, holds ArrowUp+ArrowRight for N seconds, then captures
 ```
 
-## Controls (phase 1)
+## Controls
 
-- **ArrowUp** — throttle (speed ramps up, no auto-decay — truck is heavy, only brake slows it)
-- **ArrowDown** — brake (active deceleration)
+- **ArrowUp** — throttle
+- **ArrowDown** — brake
 - **ArrowLeft / ArrowRight** — steer
+- **A** — shift up · **D** — shift down (manual 5-speed gearbox)
+- **ENTER** — start the engine / restart a stalled engine (also starts the game from the title)
 
-**First-person view** — no truck visible. The road scrolls toward you. Speed **never decreases on its own** — you must brake. This is core gameplay: manage speed before ice, because ice grip is brutally low (`ICE_GRIP = 0.15` in `game/vehicle.ts` — tunable constant). On ice, steering barely responds and lateral velocity persists → drift. Watch for the blinking `ICE AHEAD` strip in the top bar — that's your cue to slow down.
+**The manual gearbox is core.** Each gear has a top speed — **1st caps at ~28 km/h, so you physically cannot reach 120 in a low gear** — and a torque band shown on the **RPM** gauge. Acceleration is deliberately slow and heavy: you climb through the gears with **A/D**. The engine dies if you **stall** it by braking/slowing without downshifting (revs fall below the gear's band; 1st gear is immune): a ~3.5 s **ENGINE STALLING** warning (the engine coughs) precedes the actual stall so you can downshift in time — miss it and the truck freewheels with no power until you press **ENTER** to re-ignite. The model lives in `config.ts` (`GEARS`, `STALL_RPM`, `OVERREV_ENGINE_BRAKE`, …) and `game/vehicle.ts`; RPM also drives engine pitch in `audio/engine.ts`.
+
+**First-person view** — no truck visible; the road scrolls toward you. Manage speed *before* ice, where grip is brutally low (`SURFACE_GRIP.ice` in `config.ts`): steering barely responds and lateral velocity persists → drift. Watch the blinking `ICE AHEAD` strip in the top bar — your cue to slow down (and downshift).
 
 ## Phased roadmap
 
 Each phase is self-contained, ends with a runnable build, and leaves the previous scene playable. Time estimates assume part-time work with AI assistance.
+
+> **Recent (post-phase-1):** manual 5-speed gearbox — per-gear top speed, deliberately slow acceleration, RPM gauge, **A/D** shifting, engine **stall + ENTER restart**, RPM-driven engine pitch, and a reworked drivetrain HUD panel. This pulls the "gear-shift feel" of phase 3 forward; the delivery time budget was raised 7 → 8 min to suit the slower acceleration.
 
 | Phase | Goal | Est. (h) |
 |-------|------|----------|

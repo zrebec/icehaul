@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createVehicle, tickVehicle, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
+import { STALL_GRACE_MS } from '../../config.ts'
 
 const noInput: VehicleInput = { throttle: false, brake: false, steerLeft: false, steerRight: false }
 const dt16 = 16
@@ -182,5 +183,69 @@ describe('tickVehicle — distance and fuel', () => {
     const v = freshVehicle({ speed: 80, vx: 0 })
     tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, 100, 1.5)
     expect(v.vx).not.toBe(0)
+  })
+})
+
+describe('tickVehicle — manual gearbox + stall', () => {
+  it('first gear cannot exceed its top speed (~28 km/h)', () => {
+    const v = freshVehicle({ speed: 27, gear: 1 })
+    for (let i = 0; i < 300; i++) {
+      tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, dt16)
+    }
+    expect(v.speed).toBeLessThanOrEqual(28.001)
+    expect(v.stalled).toBe(false)
+  })
+
+  it('shiftUp raises the gear, shiftDown lowers it', () => {
+    const v = freshVehicle({ speed: 40, gear: 2 })
+    tickVehicle(v, { ...noInput, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.gear).toBe(3)
+    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.gear).toBe(2)
+  })
+
+  it('lugging a high gear warns first, then stalls after the grace period', () => {
+    const v = freshVehicle({ speed: 20, gear: 4 })  // 4th wants 68+ km/h
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.stallWarning).toBe(true)               // coughing, not dead yet
+    expect(v.stalled).toBe(false)
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, STALL_GRACE_MS + 100)
+    expect(v.stalled).toBe(true)
+    expect(v.rpm).toBe(0)
+  })
+
+  it('downshifting during the warning avoids the stall', () => {
+    const v = freshVehicle({ speed: 20, gear: 4 })
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.stallWarning).toBe(true)
+    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 4→3
+    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 3→2 recovers
+    expect(v.stallWarning).toBe(false)
+    expect(v.stalled).toBe(false)
+  })
+
+  it('first gear never stalls or warns, even at a standstill', () => {
+    const v = freshVehicle({ speed: 0, gear: 1 })
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.stallWarning).toBe(false)
+    expect(v.stalled).toBe(false)
+  })
+
+  it('a stalled engine produces no throttle power', () => {
+    const v = freshVehicle({ speed: 20, gear: 4 })
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, STALL_GRACE_MS + 100)  // lug past grace → stall
+    expect(v.stalled).toBe(true)
+    const before = v.speed
+    tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.speed).toBeLessThanOrEqual(before)          // no acceleration while dead
+  })
+
+  it('ENTER restart clears the stall and engages a drivable gear', () => {
+    const v = freshVehicle({ speed: 0, gear: 4 })
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, STALL_GRACE_MS + 100)  // stall in 4th
+    expect(v.stalled).toBe(true)
+    tickVehicle(v, { ...noInput, restart: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.stalled).toBe(false)
+    expect(v.gear).toBe(1)                               // startableGear(0) → 1st
   })
 })

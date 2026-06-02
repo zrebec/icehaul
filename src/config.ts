@@ -212,6 +212,83 @@ export const SURFACE_SLIP_PEAK: Record<Surface, number> = {
   sand: 0.50,
   mud: 0.30,
 }
+
+// ── Gearbox (manual) ─────────────────────────────────────────────────────────
+
+/**
+ * Manual 5-speed gearbox. Each gear has a speed band [from, to] in km/h and a
+ * peak throttle torque (km/h/s at full power inside its band).
+ *
+ * Design intent:
+ *   - Low gears: strong pull, low top speed. You MUST shift up to go fast.
+ *   - High gears: weak pull, high top speed. Bog down if engaged too early.
+ *   - First gear caps at ~28 km/h — it physically cannot reach 120.
+ *   - Bands overlap so there is a correct shift "sweet spot".
+ *
+ * RPM (for the dashboard + torque curve) is where `speed` sits in the band:
+ *   rpm = (speed - from) / (to - from)
+ *     rpm < BOG_RPM       lugging a too-tall gear      → weak torque
+ *     BOG_RPM..POWER_RPM  power band                   → full torque
+ *     POWER_RPM..1        approaching redline          → torque tapers
+ *     rpm >= 1            redline                       → no pull, must upshift
+ *
+ * Acceleration is deliberately much slower than the old single-speed model
+ * (which hit 120 in ~15 s). Reaching top speed now means shifting up through
+ * every gear and takes ~30 s of clean driving.
+ */
+export interface GearSpec {
+  /** Lower edge of the gear's speed band (km/h). */
+  from: number
+  /** Upper edge / top speed reachable in this gear (km/h). */
+  to: number
+  /** Peak throttle acceleration in this gear (km/h/s) at full torque. */
+  accel: number
+}
+
+export const GEARS: readonly GearSpec[] = [
+  { from: 0,  to: 28,  accel: 5.5 },  // 1 — pull away, careful starts on snow/ice
+  { from: 22, to: 52,  accel: 4.2 },  // 2
+  { from: 44, to: 76,  accel: 3.2 },  // 3 — main cruising gear
+  { from: 68, to: 100, accel: 2.4 },  // 4
+  { from: 90, to: 120, accel: 1.8 },  // 5 — top speed, weak acceleration
+]
+
+/** Number of forward gears. */
+export const GEAR_COUNT = GEARS.length
+
+/** Below this rpm the engine lugs (too-tall gear); torque is floored at BOG_FLOOR. */
+export const BOG_RPM = 0.18
+/** Torque multiplier floor when lugging far below the power band. */
+export const BOG_FLOOR = 0.30
+/** Top of the flat power band; above this, torque tapers toward redline. */
+export const POWER_RPM = 0.82
+/** Torque multiplier just before redline (rpm → 1). */
+export const REDLINE_FLOOR = 0.10
+/**
+ * Engine-braking pull (km/h/s) applied when speed sits above the current gear's
+ * top (e.g. you downshifted at speed). Compression drags you back to the gear top.
+ */
+export const OVERREV_ENGINE_BRAKE = 7
+
+/**
+ * Stall threshold on raw rpm `(speed - gear.from) / gear.span`.
+ * When revs fall this far BELOW a gear's lower band the engine lugs and dies —
+ * i.e. if you slow down (brake) without downshifting, the motor stalls.
+ *
+ * First gear has `from = 0`, so its raw rpm never goes negative: you can always
+ * idle and pull away in 1st. Every higher gear has a lug limit, e.g. with
+ * `STALL_RPM = -0.35`: 2nd dies below ~12 km/h, 3rd below ~33, 4th below ~57,
+ * 5th below ~80. A stalled engine must be restarted with ENTER (ignition).
+ */
+export const STALL_RPM = -0.35
+
+/**
+ * Grace period (ms) the engine lugs and **coughs** with an "ENGINE STALLING"
+ * warning before it actually dies — time for the driver to downshift. Long
+ * enough to react mid-corner on snow while braking (≈ 3.5 s).
+ */
+export const STALL_GRACE_MS = 3500
+
 // ── Fuel ────────────────────────────────────────────────────────────────────
 
 // export const FUEL_BURN_RATE = 0.00012  // original — tight but completable with canisters
@@ -344,8 +421,12 @@ export const NEXT_TARGET_RANGE: readonly [number, number] = [15000, 25000]
 export const DELIVERY_FUEL_REFILL = 0.50
 /** Score points awarded per delivery. */
 export const DELIVERY_SCORE = 500
-/** Time limit per delivery in milliseconds (7 minutes). */
-export const DELIVERY_TIME_LIMIT_MS = 7 * 60 * 1000
+/**
+ * Time limit per delivery in milliseconds (8 minutes).
+ * Raised from 7 → 8 min when the manual gearbox made acceleration much slower:
+ * a careful (conservative) driver must still be able to finish 5 km on time.
+ */
+export const DELIVERY_TIME_LIMIT_MS = 8 * 60 * 1000
 
 // ── Traffic ─────────────────────────────────────────────────────────────────
 

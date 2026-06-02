@@ -5,7 +5,97 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased] — 2026-05-27
+## [Unreleased] — 2026-06-02
+
+### Added
+
+#### Manual 5-speed gearbox
+The truck now has a manual gearbox (`GEARS` table in `config.ts`, logic in
+`game/vehicle.ts`). Each gear has a speed band `[from, to]` and a torque value:
+low gears pull hard but top out early — **1st gear caps at ~28 km/h, so you
+physically cannot reach 120 km/h in a low gear** — while high gears have a high
+top speed but weak pull. Engine `rpm = (speed − gear.from) / gear.span` drives a
+torque curve: lugging below the band is weak, the mid-band is full power, and at
+redline (`rpm ≥ 1`) the engine can't pull the gear any faster, so you must shift
+up. Shift with **A** (up) / **D** (down). Reaching top speed now means climbing
+through every gear and takes ~30 s of clean driving.
+
+New tunables in `config.ts`: `GEARS`, `GEAR_COUNT`, `BOG_RPM`, `BOG_FLOOR`,
+`POWER_RPM`, `REDLINE_FLOOR`, `OVERREV_ENGINE_BRAKE`.
+
+#### Engine stall + ENTER restart, with a "stalling" grace warning
+Slow down or brake without downshifting and the revs fall below the gear's band
+(`STALL_RPM = −0.35`) — the engine **stalls** and dies. First gear (`from = 0`)
+is immune, so you can always idle and pull away in 1st. A stalled engine
+freewheels with no power (and burns no fuel) until you press **ENTER** to
+re-ignite, which re-engages a sensible gear for the current speed
+(`startableGear`).
+
+Before it actually dies, the engine lugs and **coughs** for `STALL_GRACE_MS`
+(3.5 s) with an `ENGINE STALLING / SHIFT DOWN D` overlay — enough time to react
+mid-corner on snow. Downshifting in time cancels the stall.
+
+#### RPM-driven engine audio
+`audio/engine.ts` now pitches the AY engine tone by **engine RPM within the
+current gear** instead of absolute speed, so revs audibly climb as you accelerate
+in a gear and **drop on an upshift** — the manual-gearbox sound. The engine tone
+is silenced while stalled (tyre/surface noise rolls on). Added a shift-blip beep,
+a descending "engine dying" cue on stall, and an ignition crank on restart.
+
+#### Drivetrain HUD panel
+The left HUD panel was reworked into a drivetrain cluster: **FUEL · RPM · GEAR ·
+GRIP**. The RPM bar is a 7-segment gauge that reddens toward redline
+(`[B_GREEN, B_YELLOW, B_RED]`); GEAR shows current/total; GRIP is now a single
+horizontal bar.
+
+#### Drivetrain roadmap doc
+`docs/DRIVETRAIN_ROADMAP.md` — implemented features, the owner's future ideas
+(non-instant engine start, weight-based acceleration, damage model,
+low-speed-crash rework, speed↔tachometer swap) each with an honest assessment,
+four agent-proposed ideas ordered by effort, and a suggested build sequence.
+(A Slovak `*.sk.md` mirror exists locally; `*.sk.md` is gitignored by project
+convention.)
+
+#### Tests
+- `vehicle.test.ts` — new `manual gearbox + stall` block: 1st-gear top-speed cap,
+  shift up/down, lug → stalling warning → stall after the grace period,
+  downshifting in time avoids the stall, 1st gear never stalls, a stalled engine
+  produces no throttle power, and ENTER restart re-engages 1st.
+
+### Changed
+
+#### Acceleration is now gear-limited and much slower
+The old single-speed model (`ACCEL = 8`, 0→120 in ~15 s, capped only at
+`MAX_SPEED`) was replaced by per-gear torque capped at each gear's top speed.
+Engine force is now `gear.accel × torque(rpm) × surface_mult`, plus over-rev
+engine braking (`OVERREV_ENGINE_BRAKE`) that drags speed back to the gear top
+after a downshift at speed. `ACCEL` is no longer used by `vehicle.ts`.
+
+#### Delivery time limit 7 → 8 minutes
+`DELIVERY_TIME_LIMIT_MS`: 7 → **8 min**. With the slower gear-limited
+acceleration a careful (conservative) driver was timing out short of 5 km. After
+the bump, both the moderate and conservative strategies complete the first
+delivery with margin (confirmed by the completability simulation).
+
+#### Completability simulation now shifts gears
+The ideal-driver simulation (`completability.test.ts`) gained an auto-gearbox
+(upshift near redline, downshift at low rpm) so it can use the full speed range —
+without it the simulated driver would be stuck in 1st at ~28 km/h. The required
+average speed for the 5 km / 8 min budget is now ~37.5 km/h.
+
+#### HUD left panel — compass and double GRIP bar removed
+The static 3-direction compass (heading was always "N") and the twin vertical
+GRIP bars were removed to make room for the RPM and GEAR readouts. If `heading`
+ever becomes dynamic, restore the compass in the top status bar instead.
+
+#### Docs
+`CLAUDE.md` and `README.md` updated for the new controls (A/D, ENTER), the
+drivetrain HUD layout, the stall + warning mechanic, and the 8-minute budget.
+Corrected a stale `ICE_GRIP = 0.15` reference to `SURFACE_GRIP.ice`.
+
+---
+
+## [2026-05-27]
 
 ### Fixed
 

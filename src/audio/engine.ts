@@ -25,21 +25,28 @@ export function startEngine(): void {
 }
 
 export function updateEngine(
-  speed: number, maxSpeed: number, surface: Surface, braking: boolean,
+  speed: number, rpm: number, surface: Surface, braking: boolean, running: boolean,
 ): void {
   if (!ay) return
 
   const [, idleHz, topHz] = SURFACE_ENGINE_SOUND[surface]
-  const t = Math.max(0, Math.min(1, speed / maxSpeed))
+  // Pitch tracks engine RPM within the current gear: revs climb as you
+  // accelerate in a gear, then DROP on an upshift — the manual-gearbox sound.
+  const t = Math.max(0, Math.min(1, rpm))
   const baseFreq = idleHz + (topHz - idleHz) * t
 
-  // Channel A — main engine tone (quieter when braking)
-  const mainVol = braking ? Math.round(3 + t * 4) : Math.round(6 + t * 6)
-  ay.tone('A', baseFreq, mainVol)
-
-  // Channel B — detuned harmonic
-  const detune = 4 + t * 6
-  ay.tone('B', baseFreq + detune, Math.round(mainVol * 0.6))
+  if (running) {
+    // Channel A — main engine tone (quieter when braking)
+    const mainVol = braking ? Math.round(3 + t * 4) : Math.round(6 + t * 6)
+    ay.tone('A', baseFreq, mainVol)
+    // Channel B — detuned harmonic
+    const detune = 4 + t * 6
+    ay.tone('B', baseFreq + detune, Math.round(mainVol * 0.6))
+  } else {
+    // Engine off (stalled) — silence the engine tone; tyres (Channel C) roll on.
+    ay.tone('A', baseFreq, 0)
+    ay.tone('B', baseFreq, 0)
+  }
 
   // Channel C — brake sound OR surface texture
   const brakeSound = SURFACE_BRAKE[surface].sound

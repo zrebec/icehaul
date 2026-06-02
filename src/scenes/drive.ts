@@ -17,7 +17,7 @@ import {
   TRAFFIC_COLLISION_DEPTH_M,
 } from '../config.ts'
 import {
-  createVehicle, tickVehicle, MAX_SPEED,
+  createVehicle, tickVehicle,
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
 import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
@@ -115,14 +115,28 @@ export function createDriveScene(
 
   let driveState: DriveState = 'waiting'
   let startKeyPending = false
+  // Manual gearbox — A = shift up, D = shift down. Edge-triggered (ignore key-repeat).
+  let shiftUpQueued = false
+  let shiftDownQueued = false
+  // ENTER ignition — restart a stalled engine. wasStalled tracks the audio transition.
+  let restartQueued = false
+  let wasStalled = false
+  let lastCoughS = -1
 
-  // Only Enter or S starts the game — not Command, not any random key
+  // Only Enter or S starts the game — not Command, not any random key.
+  // While playing, A/D queue a gear shift; ENTER re-ignites a stalled engine.
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     if (driveState === 'waiting') {
-      if (e.key === 'Enter' || e.key === 's' || e.key === 'S') {
-        startKeyPending = true
-      }
+      if (e.key === 'Enter' || e.key === 's' || e.key === 'S') startKeyPending = true
+      return
     }
+    if (driveState === 'playing' && v.stalled && e.key === 'Enter') {
+      restartQueued = true
+      return
+    }
+    if (e.repeat) return
+    if (e.key === 'a' || e.key === 'A') shiftUpQueued = true
+    else if (e.key === 'd' || e.key === 'D') shiftDownQueued = true
   })
 
   let targetDist = FIRST_TARGET_DIST_M
@@ -202,7 +216,14 @@ export function createDriveScene(
         brake:      isHeld('ArrowDown'),
         steerLeft:  isHeld('ArrowLeft'),
         steerRight: isHeld('ArrowRight'),
+        shiftUp:    shiftUpQueued,
+        shiftDown:  shiftDownQueued,
+        restart:    restartQueued,
       }
+      shiftUpQueued = false
+      shiftDownQueued = false
+      restartQueued = false
+      const gearBefore = v.gear
 
       const surface: Surface = getSurfaceAt(v.distance)
       const grip = gripFor(surface)
@@ -212,9 +233,33 @@ export function createDriveScene(
         lastOffroad.severity, offroadReturnDir)
       tickParticles(surfaceParticles, dt, 0.00022)
 
-      if (engineStarted) updateEngine(v.speed, MAX_SPEED, surface, input.brake)
+      if (engineStarted) updateEngine(v.speed, v.rpm, surface, input.brake, !v.stalled)
 
       const ctxAudio = getAudioContext()
+
+      // Gear-shift feedback beep — only when a shift actually changed gear.
+      if (v.gear !== gearBefore && !v.stalled && ctxAudio) {
+        beep(v.gear > gearBefore ? 320 : 200, 35, ctxAudio.currentTime)
+      }
+
+      // Engine stall / restart audio cues
+      if (v.stalled && !wasStalled && ctxAudio) {
+        const now = ctxAudio.currentTime
+        beep(120, 120, now); beep(70, 200, now + 0.1); beep(45, 260, now + 0.25)
+        flashBorder(C.B_RED, 2, 120)
+      } else if (!v.stalled && wasStalled && ctxAudio) {
+        beep(180, 70, ctxAudio.currentTime)  // ignition crank
+      }
+      wasStalled = v.stalled
+
+      // Engine stalling — periodic cough/splutter while lugging (grace period)
+      if (v.stallWarning && ctxAudio) {
+        const now = ctxAudio.currentTime
+        if (now - lastCoughS > 0.4) {
+          beep(60 + Math.random() * 30, 55, now)
+          lastCoughS = now
+        }
+      }
 
       // Traffic — move vehicles, then visual screen-space collision.
       tickTraffic(v.distance, v.x, v.speed, dt)
@@ -431,6 +476,8 @@ export function createDriveScene(
       const currentGrip = gripFor(getSurfaceAt(v.distance))
       drawHUD(ctx, {
         speed: v.speed,
+        rpm: v.rpm,
+        gear: v.gear,
         fuelPct: v.fuel,
         gripPct: currentGrip,
         missionText: 'DELIVER',
@@ -442,6 +489,13 @@ export function createDriveScene(
       // ── Overlays ──
       if (driveState === 'waiting' && blinkPhase) {
         drawTextCentered(ctx, 'PRESS ENTER', 56, COLS, C.B_YELLOW, C.BLACK)
+      }
+      if (driveState === 'playing' && v.stalled) {
+        drawTextCentered(ctx, 'ENGINE STALLED', 44, COLS, C.B_RED, C.BLACK)
+        if (blinkPhase) drawTextCentered(ctx, 'PRESS ENTER', 60, COLS, C.B_YELLOW, C.BLACK)
+      } else if (driveState === 'playing' && v.stallWarning && blinkPhase) {
+        drawTextCentered(ctx, 'ENGINE STALLING', 44, COLS, C.B_YELLOW, C.BLACK)
+        drawTextCentered(ctx, 'SHIFT DOWN  D', 60, COLS, C.B_YELLOW, C.BLACK)
       }
       if (driveState === 'paused' && blinkPhase) {
         drawTextCentered(ctx, 'PAUSED', 56, COLS, C.B_RED, C.B_YELLOW)

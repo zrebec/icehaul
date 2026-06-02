@@ -21,7 +21,7 @@ import { resetRoad, getSurfaceAt, getCurvatureAt, gripFor, accelFor, type Surfac
 import { createVehicle, tickVehicle } from '../vehicle.ts'
 import {
   DELIVERY_TIME_LIMIT_MS, FIRST_TARGET_DIST_M,
-  SURFACE_FUEL_MULT,
+  SURFACE_FUEL_MULT, GEARS, GEAR_COUNT,
 } from '../../config.ts'
 
 // ─── Strategies ──────────────────────────────────────────────────────────────
@@ -133,9 +133,17 @@ function runSim(strategyName: string, targetKph: Strategy): SimResult {
     const steerLeft  = v.x > 0.08 || v.vx > 0.12
     const steerRight = v.x < -0.08 || v.vx < -0.12
 
+    // Auto-gearbox — keep revs in the power band so the ideal driver can use the
+    // full speed range (mirrors what a human does with A/D shifting).
+    const spec = GEARS[v.gear - 1]!
+    const span = spec.to - spec.from
+    const rpm  = span > 0 ? (v.speed - spec.from) / span : 0
+    const shiftUp   = throttle && rpm > 0.9 && v.gear < GEAR_COUNT
+    const shiftDown = rpm < 0.05 && v.gear > 1
+
     tickVehicle(
       v,
-      { throttle, brake, steerLeft, steerRight },
+      { throttle, brake, steerLeft, steerRight, shiftUp, shiftDown },
       surface, grip, accel, DT_MS, curvature,
     )
 

@@ -2,11 +2,11 @@ import {
   C, CELL,
   drawText, drawDial, drawSegmentedBar,
 } from 'zx-kit'
-import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, MAX_SPEED, TRUCK_WEIGHT_T } from '../config.ts'
+import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, MAX_SPEED, TRUCK_WEIGHT_T, GEAR_COUNT } from '../config.ts'
 
 /**
  * Bottom instrument cluster — 3 equal-width panels in 9 rows (72 px):
- *   Left:   FUEL + compass + GRIP (no labels, widgets speak for themselves)
+ *   Left:   FUEL + RPM + GEAR + GRIP (drivetrain readouts, short labels)
  *   Centre: speed dial
  *   Right:  mission info (placeholder for phase 1)
  */
@@ -14,7 +14,8 @@ export function drawHUD(
   ctx: CanvasRenderingContext2D,
   state: {
     speed: number
-    heading?: number
+    rpm?: number
+    gear?: number
     fuelPct?: number
     gripPct?: number
     missionText?: string
@@ -44,63 +45,57 @@ export function drawHUD(
   ctx.fillRect(0, hudY, GAME_WIDTH, 1)
 }
 
-// ── Left panel: FUEL + compass + GRIP (no labels) ──────────────────────────
+// ── Left panel: FUEL + RPM + GEAR + GRIP (drivetrain) ───────────────────────
 
 function drawInstrumentsPanel(
   ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number,
-  state: { heading?: number; fuelPct?: number; gripPct?: number },
+  x: number, y: number, _w: number, _h: number,
+  state: { fuelPct?: number; gripPct?: number; rpm?: number; gear?: number },
 ): void {
   const fuelPct = state.fuelPct ?? 0.75
   const gripPct = state.gripPct ?? 0.87
-  const heading = state.heading ?? 0
+  const rpm = state.rpm ?? 0
+  const gear = state.gear ?? 1
 
-  // FUEL bar — horizontal, top third
+  // FUEL — horizontal, row 1
   const fuelSegs = 6
-  const fuelY = y + 6
+  const fuelY = y + 5
   drawText(ctx, 'E', x + 2, fuelY, C.B_RED, C.BLACK)
   drawSegmentedBar(ctx, {
     x: x + 10, y: fuelY,
-    segments: fuelSegs,
-    value: Math.round(fuelPct * fuelSegs), max: fuelSegs,
+    segments: fuelSegs, value: Math.round(fuelPct * fuelSegs), max: fuelSegs,
     segmentWidth: 6, segmentHeight: 8, gap: 1,
-    color: C.B_YELLOW, paper: C.BLACK,
-    orientation: 'horizontal',
+    color: C.B_YELLOW, paper: C.BLACK, orientation: 'horizontal',
   })
   drawText(ctx, 'F', x + 10 + fuelSegs * 7 + 2, fuelY, C.B_GREEN, C.BLACK)
 
-  // Compass — middle third. Show 3 directions: prev CURRENT next.
-  // drawCompassText (5 dirs) overflows 85px panel, so we render manually.
-  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const
-  const compassY = y + 26
-  const idx = Math.round(((heading % 360 + 360) % 360) / 45) % 8
-  const prev = dirs[(idx + 7) % 8]!
-  const curr = dirs[idx]!
-  const next = dirs[(idx + 1) % 8]!
-  const label = `${prev} ${curr} ${next}`
-  const labelX = x + Math.floor((w - label.length * CELL) / 2)
-  drawText(ctx, prev, labelX, compassY, C.B_WHITE, C.BLACK)
-  drawText(ctx, curr, labelX + (prev.length + 1) * CELL, compassY, C.B_YELLOW, C.BLACK)
-  drawText(ctx, next, labelX + (prev.length + 1 + curr.length + 1) * CELL, compassY, C.B_WHITE, C.BLACK)
+  // RPM — horizontal, row 2. Green → yellow → red as revs climb to redline.
+  const rpmSegs = 7
+  const rpmY = y + 22
+  drawText(ctx, 'RPM', x + 2, rpmY, C.B_WHITE, C.BLACK)
+  drawSegmentedBar(ctx, {
+    x: x + 28, y: rpmY,
+    segments: rpmSegs, value: Math.round(rpm * rpmSegs), max: rpmSegs,
+    segmentWidth: 6, segmentHeight: 8, gap: 1,
+    colors: [C.B_GREEN, C.B_YELLOW, C.B_RED], paper: C.BLACK, orientation: 'horizontal',
+  })
 
-  // GRIP — two small vertical bars, bottom third
+  // GEAR — row 3. Label + current gear over total.
+  const gearY = y + 39
+  drawText(ctx, 'GEAR', x + 2, gearY, C.B_WHITE, C.BLACK)
+  drawText(ctx, String(gear), x + 42, gearY, C.B_CYAN, C.BLACK)
+  drawText(ctx, `/${GEAR_COUNT}`, x + 50, gearY, C.WHITE, C.BLACK)
+
+  // GRIP — horizontal, row 4. Single bar: red (low) → yellow → green (high).
   const gripSegs = 6
-  const segH = 3
-  const gap = 1
-  const totalH = gripSegs * segH + (gripSegs - 1) * gap
-  const gripY = y + h - totalH - 4
-  const gripX = x + Math.floor((w - 20) / 2)
-  const val = Math.round(gripPct * gripSegs)
-
-  for (let strip = 0; strip < 2; strip++) {
-    drawSegmentedBar(ctx, {
-      x: gripX + strip * 12, y: gripY,
-      segments: gripSegs, value: val, max: gripSegs,
-      segmentWidth: 6, segmentHeight: segH, gap,
-      colors: [C.B_RED, C.B_YELLOW, C.B_GREEN],
-      paper: C.BLACK, orientation: 'vertical',
-    })
-  }
+  const gripY = y + 56
+  drawText(ctx, 'GRIP', x + 2, gripY, C.B_WHITE, C.BLACK)
+  drawSegmentedBar(ctx, {
+    x: x + 36, y: gripY,
+    segments: gripSegs, value: Math.round(gripPct * gripSegs), max: gripSegs,
+    segmentWidth: 6, segmentHeight: 8, gap: 1,
+    colors: [C.B_RED, C.B_YELLOW, C.B_GREEN], paper: C.BLACK, orientation: 'horizontal',
+  })
 }
 
 // ── Centre panel: speed dial ────────────────────────────────────────────────
