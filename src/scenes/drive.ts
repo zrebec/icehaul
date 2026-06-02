@@ -135,8 +135,8 @@ export function createDriveScene(
       return
     }
     if (e.repeat) return
-    if (e.key === 'a' || e.key === 'A') shiftUpQueued = true
-    else if (e.key === 'd' || e.key === 'D') shiftDownQueued = true
+    if (e.key === 'a' || e.key === 'A') shiftDownQueued = true
+    else if (e.key === 'd' || e.key === 'D') shiftUpQueued = true
   })
 
   let targetDist = FIRST_TARGET_DIST_M
@@ -212,13 +212,13 @@ export function createDriveScene(
       }
 
       const input: VehicleInput = {
-        throttle:   isHeld('ArrowUp'),
-        brake:      isHeld('ArrowDown'),
-        steerLeft:  isHeld('ArrowLeft'),
+        throttle: isHeld('ArrowUp'),
+        brake: isHeld('ArrowDown'),
+        steerLeft: isHeld('ArrowLeft'),
         steerRight: isHeld('ArrowRight'),
-        shiftUp:    shiftUpQueued,
-        shiftDown:  shiftDownQueued,
-        restart:    restartQueued,
+        shiftUp: shiftUpQueued,
+        shiftDown: shiftDownQueued,
+        restart: restartQueued,
       }
       shiftUpQueued = false
       shiftDownQueued = false
