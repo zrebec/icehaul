@@ -272,9 +272,9 @@ export const RPM_DISPLAY_REDLINE = 2600
  * Below this rpm the engine is off the power band → weak torque (floored at BOG_FLOOR).
  * Raised so a too-tall gear (5th at 30 km/h ≈ 0.23) pulls sluggishly, not at full power.
  */
-export const BOG_RPM = 0.45
+export const BOG_RPM = 0.50
 /** Torque multiplier floor at idle / when lugging — diesel low-end grunt. */
-export const BOG_FLOOR = 0.40
+export const BOG_FLOOR = 0.12
 /** Top of the flat power band; above this, torque tapers toward redline. */
 export const POWER_RPM = 0.82
 /** Torque multiplier just before redline (rpm → 1). */
@@ -315,6 +315,9 @@ export const REDLINE_BURN_MS = 6000
  * quick upshifts through the gears don't blare an alarm every time.
  */
 export const REDLINE_WARN_DELAY_MS = 900
+
+/** Milliseconds ENTER must be held to crank the engine to a start. */
+export const CRANK_NEEDED_MS = 1800
 
 // ── Fuel ────────────────────────────────────────────────────────────────────
 

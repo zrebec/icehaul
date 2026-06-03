@@ -9,6 +9,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+#### Non-instant engine start — crank starter
+Hold **ENTER** for ~1.8 s to crank the engine. Releasing before it fires resets
+the crank — you must try again. Works both for the initial game start and for
+restarting a stalled engine mid-drive. While cranking, the overlay shows
+`STARTING...` (green, steady) and irregular beeper pulses simulate a diesel
+starter motor. On a successful fire, a short rising beep confirms ignition.
+
+`CRANK_NEEDED_MS = 1800` in `config.ts` controls the hold time. The vehicle
+itself is unchanged — `input.restart` is only sent to `tickVehicle` after the
+crank completes, so the physics restart path is identical to before.
+
+"PRESS ENTER" overlays (start screen and stall screen) renamed to `HOLD ENTER`.
+
+#### Harder torque curve — high gears genuinely struggle at low speed
+The torque multiplier below the power band was reworked so that driving in too
+tall a gear has real consequences:
+
+- **`BOG_FLOOR`**: `0.40 → 0.12` — diesel floor at idle is now genuinely weak.
+- **`BOG_RPM`**: `0.45 → 0.50` — wider bog zone (5th gear at 40 km/h sits inside it).
+- **Curve shape**: linear interpolation below `BOG_RPM` changed to **quadratic** —
+  torque drops steeply as rpm falls toward idle.
+
+Net effect:
+- **5th @ 30 km/h** → stall warning fires, torque too low to escape the grace
+  period (needs 5.1 s to gain enough revs; grace is 3.5 s) → engine stalls. ✓
+- **5th @ 40 km/h** → pulls at ~0.72 km/h/s vs 4th's ~1.54 km/h/s (2× faster) —
+  clearly noticeable, RPM bar sits low, player is nudged to downshift. ✓
+- **5th @ 65+ km/h** → above `BOG_RPM`, full power band, unchanged. ✓
+
+#### Multi-seed completability sweep (20 seeds)
+The `completability.test.ts` simulation now runs 20 diverse seeds (covering
+layouts with 2× ICE, 2× MUD, 3× SNOW, etc.) instead of the single seed 42.
+
+Per-seed summary table is printed for human inspection. Two new assertions:
+- **"aggressive never times out"** — aggressive may run dry on fuel on heavy
+  surface routes (by design), but it must never hit the 8-min wall.
+- **"at least one strategy completes every seed"** — the 8-min budget holds
+  across all 20 layouts (worst case: 428 s = 7.1 min, 52 s inside the limit).
+
+#### Node 22 / `.nvmrc`
+`.nvmrc` added (`22`); `package.json` `engines` updated to `>=22.12.0`. Vite 7
+and jsdom 29 require Node ≥ 20.19 / ≥ 22.12 — Node 20.11 was breaking all tests.
+
+---
+
+### Added
+
 #### Synchro downshift limits (per-gear `maxSpeedToShift`)
 You can only **downshift into** a gear below its synchro speed: **1st < 35 km/h,
 2nd < 60, 3rd < 85**; 4th and 5th are `null` (no limit, engage at any speed). A

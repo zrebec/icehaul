@@ -15,6 +15,7 @@ import {
   DELIVERY_FUEL_REFILL, DELIVERY_SCORE, DELIVERY_TIME_LIMIT_MS,
   OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S, CRASH_ANIM_MS,
   TRAFFIC_COLLISION_DEPTH_M,
+  CRANK_NEEDED_MS,
 } from '../config.ts'
 import {
   createVehicle, tickVehicle,
@@ -114,31 +115,39 @@ export function createDriveScene(
   resetCanisters(gameSeed + 2)
 
   let driveState: DriveState = 'waiting'
-  let startKeyPending = false
   // Manual gearbox — A = shift up, D = shift down. Edge-triggered (ignore key-repeat).
   let shiftUpQueued = false
   let shiftDownQueued = false
-  // ENTER ignition — restart a stalled engine. wasStalled tracks the audio transition.
+  // ENTER ignition — crank the engine (hold to start). wasStalled tracks audio transition.
   let restartQueued = false
   let wasStalled = false
+  let isCranking = false
+  let crankMs = 0
+  let lastCrankBeepMs = 0
   let lastCoughS = -1
   let lastBuzzS = -1
   let gearBlockFlashMs = 0
 
   // Only Enter or S starts the game — not Command, not any random key.
-  // While playing, A/D queue a gear shift; ENTER re-ignites a stalled engine.
+  // While playing, A/D queue a gear shift; ENTER cranks a stalled engine.
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     if (driveState === 'waiting') {
-      if (e.key === 'Enter' || e.key === 's' || e.key === 'S') startKeyPending = true
+      if (e.key === 'Enter' || e.key === 's' || e.key === 'S') isCranking = true
       return
     }
     if (driveState === 'playing' && v.stalled && e.key === 'Enter') {
-      restartQueued = true
+      isCranking = true
       return
     }
     if (e.repeat) return
     if (e.key === 'a' || e.key === 'A') shiftDownQueued = true
     else if (e.key === 'd' || e.key === 'D') shiftUpQueued = true
+  })
+
+  window.addEventListener('keyup', (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === 's' || e.key === 'S') {
+      if (crankMs < CRANK_NEEDED_MS) { isCranking = false; crankMs = 0; lastCrankBeepMs = 0 }
+    }
   })
 
   let targetDist = FIRST_TARGET_DIST_M
@@ -153,15 +162,27 @@ export function createDriveScene(
       blinkAccum += dt
       while (blinkAccum >= BLINK_MS) { blinkAccum -= BLINK_MS; blinkPhase = !blinkPhase }
 
-      // ── Waiting state: only Enter / S starts the game ──
+      // ── Waiting state: hold Enter/S to crank the engine ──
       if (driveState === 'waiting') {
-        if (startKeyPending) {
-          startKeyPending = false
-          driveState = 'playing'
-          if (!engineStarted && getAudioContext() != null) {
-            startEngine()
-            engineStarted = true
+        if (isCranking && (isHeld('Enter') || isHeld('s'))) {
+          crankMs += dt
+          const ctxCrank = getAudioContext()
+          if (ctxCrank && crankMs - lastCrankBeepMs > 200) {
+            lastCrankBeepMs = crankMs
+            beep(80 + Math.random() * 25, 25, ctxCrank.currentTime)
           }
+          if (crankMs >= CRANK_NEEDED_MS) {
+            isCranking = false; crankMs = 0; lastCrankBeepMs = 0
+            driveState = 'playing'
+            if (!engineStarted && getAudioContext() != null) {
+              startEngine()
+              engineStarted = true
+            }
+            const ctxStart = getAudioContext()
+            if (ctxStart) beep(220, 60, ctxStart.currentTime)
+          }
+        } else if (!isHeld('Enter') && !isHeld('s')) {
+          crankMs = 0; lastCrankBeepMs = 0
         }
         return
       }
@@ -200,6 +221,23 @@ export function createDriveScene(
       if (!engineStarted && getAudioContext() != null) {
         startEngine()
         engineStarted = true
+      }
+
+      // ── Crank tick (stalled engine restart) ──
+      if (v.stalled && isCranking && isHeld('Enter')) {
+        crankMs += dt
+        const ctxCrank = getAudioContext()
+        if (ctxCrank && crankMs - lastCrankBeepMs > 200) {
+          lastCrankBeepMs = crankMs
+          beep(80 + Math.random() * 25, 25, ctxCrank.currentTime)
+        }
+        if (crankMs >= CRANK_NEEDED_MS) {
+          isCranking = false; crankMs = 0; lastCrankBeepMs = 0
+          restartQueued = true
+        }
+      } else if (!isHeld('Enter')) {
+        if (!v.stalled) { isCranking = false; crankMs = 0; lastCrankBeepMs = 0 }
+        else { crankMs = 0; lastCrankBeepMs = 0 }
       }
 
       // ── Pixel-perfect off-road detection (before physics tick) ──
@@ -509,12 +547,20 @@ export function createDriveScene(
       })
 
       // ── Overlays ──
-      if (driveState === 'waiting' && blinkPhase) {
-        drawTextCentered(ctx, 'PRESS ENTER', 56, COLS, C.B_YELLOW, C.BLACK)
+      if (driveState === 'waiting') {
+        if (isCranking) {
+          drawTextCentered(ctx, 'STARTING...', 56, COLS, C.B_GREEN, C.BLACK)
+        } else if (blinkPhase) {
+          drawTextCentered(ctx, 'HOLD ENTER', 56, COLS, C.B_YELLOW, C.BLACK)
+        }
       }
       if (driveState === 'playing' && v.stalled) {
         drawTextCentered(ctx, 'ENGINE STALLED', 44, COLS, C.B_RED, C.BLACK)
-        if (blinkPhase) drawTextCentered(ctx, 'PRESS ENTER', 60, COLS, C.B_YELLOW, C.BLACK)
+        if (isCranking) {
+          drawTextCentered(ctx, 'STARTING...', 60, COLS, C.B_GREEN, C.BLACK)
+        } else if (blinkPhase) {
+          drawTextCentered(ctx, 'HOLD ENTER', 60, COLS, C.B_YELLOW, C.BLACK)
+        }
       } else if (driveState === 'playing' && v.stallWarning && blinkPhase) {
         drawTextCentered(ctx, 'ENGINE STALLING', 44, COLS, C.B_YELLOW, C.BLACK)
         drawTextCentered(ctx, 'SHIFT DOWN  A', 60, COLS, C.B_YELLOW, C.BLACK)

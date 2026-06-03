@@ -83,8 +83,12 @@ interface SimResult {
 const DT_MS = 16
 const SEED  = 42
 
-function runSim(strategyName: string, targetKph: Strategy): SimResult {
-  resetRoad(SEED)
+// 20 diverse seeds that cover a wide range of generated surfaces
+const MULTI_SEEDS = [0, 1, 7, 42, 99, 137, 256, 500, 777, 999,
+                     1234, 2025, 4096, 8888, 12345, 19999, 55555, 99999, 123456, 999999]
+
+function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResult {
+  resetRoad(seed)
   const v = createVehicle()
 
   let elapsedMs     = 0
@@ -271,5 +275,79 @@ describe('completability — first 5 km (first delivery)', () => {
     console.log(`\nSurfaces in first 5km (seed ${SEED}):`, [...surfaces].sort().join(', '))
     console.log(`Required min avg speed: ${((FIRST_TARGET_DIST_M / 1000) / (DELIVERY_TIME_LIMIT_MS / 3600000)).toFixed(1)} km/h`)
     expect(nonAsphalt.length).toBeGreaterThanOrEqual(0) // informational
+  })
+})
+
+// ─── Multi-seed completability sweep ─────────────────────────────────────────
+//
+// Tests 20 diverse seeds to catch surface layouts that heavily favour slow terrain
+// (e.g. 2×ICE + 2×MUD + 3×SNOW). For each seed the "aggressive" strategy must
+// complete within the time limit — it sets the hard floor.  The sweep also prints
+// a worst-case table so we can calibrate DELIVERY_TIME_LIMIT_MS realistically.
+
+describe('completability — multi-seed sweep (20 seeds)', () => {
+  type SeedResult = {
+    seed: number
+    surfaces: string
+    best: SimResult
+    allResults: SimResult[]
+  }
+
+  const sweep: SeedResult[] = MULTI_SEEDS.map(seed => {
+    const allResults = Object.entries(STRATEGIES).map(([name, s]) => runSim(name, s, seed))
+    const best = allResults.reduce((a, b) =>
+      (b.completed && !a.completed) ? b :
+      (a.completed && !b.completed) ? a :
+      b.distanceM > a.distanceM ? b : a
+    )
+    resetRoad(seed)
+    const surfSet = new Set<string>()
+    for (let d = 0; d < FIRST_TARGET_DIST_M; d += 50) surfSet.add(getSurfaceAt(d))
+    return { seed, surfaces: [...surfSet].sort().join('+'), best, allResults }
+  })
+
+  it('prints per-seed summary table', () => {
+    const limitS = DELIVERY_TIME_LIMIT_MS / 1000
+    console.log(`\n${'Seed'.padEnd(8)} ${'Surfaces'.padEnd(32)} ${'Best strategy'.padEnd(14)} ${'Time(s)'.padStart(8)} ${'Fuel%'.padStart(6)} ${'OK?'.padStart(4)}`)
+    console.log('─'.repeat(76))
+    for (const { seed, surfaces, best } of sweep) {
+      const timeS = (best.elapsedMs / 1000).toFixed(0)
+      const fuel  = (best.fuelRemaining * 100).toFixed(1)
+      const ok    = best.completed ? '✓' : `✗ ${best.failReason}@${best.distanceM}m`
+      console.log(`${String(seed).padEnd(8)} ${surfaces.padEnd(32)} ${best.strategy.padEnd(14)} ${timeS.padStart(8)} ${fuel.padStart(6)} ${ok.padStart(4)}`)
+    }
+    console.log(`\nTime limit: ${limitS}s (${(limitS/60).toFixed(1)} min)`)
+    const failed = sweep.filter(s => !s.best.completed)
+    if (failed.length > 0) {
+      console.log(`\n⚠️  ${failed.length}/${sweep.length} seeds failed with ALL strategies:`)
+      for (const f of failed) {
+        console.log(`  seed ${f.seed} (${f.surfaces}): best=${f.best.strategy} reached ${f.best.distanceM}m`)
+      }
+    } else {
+      console.log(`\n✓ All ${sweep.length} seeds completable by at least one strategy.`)
+    }
+    expect(sweep.length).toBe(MULTI_SEEDS.length)
+  })
+
+  it('aggressive strategy never times out (may run dry on fuel, but never hits 8 min wall)', () => {
+    // Aggressive may run out of fuel on heavy-surface seeds — that is by design.
+    // What we forbid is a TIMEOUT: if it times out, the time limit is too tight.
+    const timedOut = sweep.filter(s => {
+      const agg = s.allResults.find(r => r.strategy === 'aggressive')!
+      return agg.failReason === 'timeout'
+    })
+    if (timedOut.length > 0) {
+      console.log(`\n❌ Aggressive TIMED OUT on ${timedOut.length} seed(s) — consider raising DELIVERY_TIME_LIMIT_MS:`)
+      for (const f of timedOut) {
+        const agg = f.allResults.find(r => r.strategy === 'aggressive')!
+        console.log(`  seed ${f.seed} (${f.surfaces}): reached ${agg.distanceM}m in ${(agg.elapsedMs/1000).toFixed(0)}s`)
+      }
+    }
+    expect(timedOut.length).toBe(0)
+  })
+
+  it('at least one strategy completes every seed', () => {
+    const failed = sweep.filter(s => !s.best.completed)
+    expect(failed.length).toBe(0)
   })
 })

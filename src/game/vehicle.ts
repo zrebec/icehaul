@@ -117,7 +117,7 @@ function startableGear(speed: number): number {
 function gearTorqueMult(rpm: number): number {
   if (rpm >= 1) return 0
   const r = Math.max(0, rpm)
-  if (r < BOG_RPM) return BOG_FLOOR + (r / BOG_RPM) * (1 - BOG_FLOOR)
+  if (r < BOG_RPM) return BOG_FLOOR + (r / BOG_RPM) ** 2 * (1 - BOG_FLOOR)
   if (r <= POWER_RPM) return 1
   return 1 - ((r - POWER_RPM) / (1 - POWER_RPM)) * (1 - REDLINE_FLOOR)
 }
