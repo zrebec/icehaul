@@ -5,9 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased] — 2026-06-02
+## [Unreleased] — 2026-06-03
 
 ### Added
+
+#### Engine redline burn-out (over-rev warning)
+Symmetric twin of the stall warning, for the *upper* end of the band. Sit on the
+**redline** under throttle without upshifting and the engine over-revs: an
+`ENGINE REDLINE / SHIFT UP D` overlay + an insistent buzzer (after
+`REDLINE_WARN_DELAY_MS = 900` ms), then it **burns out** and stalls after
+`REDLINE_BURN_MS = 6000` ms. It only applies in gears you can upshift out of —
+the top gear's redline is just the speed limiter, with no recourse, so it never
+burns out. To keep the top-gear cruise off the red, 5th gear's band was widened
+to `to: 130` and engine force is now clamped to `MAX_SPEED` (`speedCap`), so
+120 km/h in 5th reads ~0.75 RPM instead of pinned redline. `v.stallCause` now
+records `'lug'` vs `'overrev'` so a future damage model can treat them
+differently. New `vehicle.test.ts` cases cover warn → burn-out, upshift-avoids-it,
+coasting-at-the-limiter-is-safe, and the top-gear exemption.
+
+**Controls note:** gear shifting was remapped to **A = shift down, D = shift up**;
+the stall overlay (`SHIFT DOWN A`), the new redline overlay (`SHIFT UP D`),
+`README.md`, and `CLAUDE.md` were all updated to match.
 
 #### Manual 5-speed gearbox
 The truck now has a manual gearbox (`GEARS` table in `config.ts`, logic in

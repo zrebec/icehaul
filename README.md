@@ -22,10 +22,10 @@ npm run dev       # http://localhost:5173
 | Arrow Up | Throttle |
 | Arrow Down | Brake |
 | Arrow Left / Right | Steer |
-| A / D | Shift up / down (manual gearbox) |
+| D / A | Shift up / down (manual gearbox) |
 | Enter | Start engine · restart after a stall · start the game |
 
-**Manual 5-speed gearbox.** Each gear has its own top speed — **1st gear caps at ~28 km/h, so you can't reach 120 in a low gear** — and a power band shown on the **RPM** gauge (green → red toward redline). Acceleration is slow and heavy: climb through the gears with **A / D**, watching the revs.
+**Manual 5-speed gearbox.** Each gear has its own top speed — **1st gear caps at ~28 km/h, so you can't reach 120 in a low gear** — and a power band shown on the **RPM** gauge (green → red toward redline). Acceleration is slow and heavy: climb through the gears with **D** (up) / **A** (down), watching the revs. Sit on the **redline** (red RPM) under throttle without upshifting and the engine over-revs and **burns out** — an `ENGINE REDLINE / SHIFT UP` warning gives you a few seconds before it stalls (the top gear is safe — its redline is just the speed limiter).
 
 **Don't stall it.** Slow down or brake without downshifting and the revs fall below the gear's band — the engine **stalls** and dies (1st gear is the exception; it always idles). You get a few seconds of an **ENGINE STALLING** warning (the motor coughs) to drop a gear before it actually dies; miss it and the truck freewheels with no power until you press **Enter** to re-ignite. So as you slow for ice or traffic, **downshift** — that's the loop.
 
@@ -49,7 +49,7 @@ Every game is **randomly generated** — different surfaces, curves, traffic, an
 2. **Brake 200m BEFORE the warning.** "SNOW AHEAD" appears 120m out. At 60 km/h you need ~70m to stop. Start early.
 3. **On ice: 20-30 km/h MAX.** Anything higher = skid in the first curve. No exceptions.
 4. **Tap, never hold** — both steering and brakes on ice. Each tap = controlled impulse. Holding = locked wheels or oversteer.
-5. **Downshift as you slow.** Braking toward ice or traffic? Drop a gear (**D**) before the revs die — a **stall** costs you an Enter restart and all your momentum.
+5. **Shift to stay in the band.** Braking toward ice or traffic? Drop a gear (**A**) before the revs die. Pinned on the redline? Shift up (**D**) before it burns out. Either stall costs you an Enter restart and all your momentum.
 6. **Collect every canister on asphalt.** They're free. On other surfaces, only grab centre-road ones.
 7. **Recovery asphalt comes after 85% of danger zones.** Use it to stabilise speed and breathe.
 

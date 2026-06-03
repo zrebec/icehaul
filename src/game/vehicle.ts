@@ -35,7 +35,7 @@ import {
   SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT,
   SURFACE_SLIP_PEAK,
   GEARS, GEAR_COUNT, BOG_RPM, BOG_FLOOR, POWER_RPM, REDLINE_FLOOR, OVERREV_ENGINE_BRAKE,
-  STALL_RPM, STALL_GRACE_MS,
+  STALL_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
   type Surface,
 } from '../config.ts'
 
@@ -57,6 +57,12 @@ export interface Vehicle {
   stallWarnMs: number
   /** True while the "ENGINE STALLING" warning shows — lugging, not dead yet. */
   stallWarning: boolean
+  /** Milliseconds held at the redline under throttle (burn-out countdown). */
+  redlineMs: number
+  /** True while the "REDLINE / SHIFT UP" warning shows — over-revving, not dead yet. */
+  redlineWarning: boolean
+  /** Why the engine last stalled — kept so a future damage model can differentiate. */
+  stallCause: 'lug' | 'overrev' | null
 }
 
 export interface VehicleInput {
@@ -76,6 +82,7 @@ export function createVehicle(): Vehicle {
   return {
     x: 0, vx: 0, speed: 0, distance: 0, fuel: 1.0,
     gear: 1, rpm: 0, stalled: false, stallWarnMs: 0, stallWarning: false,
+    redlineMs: 0, redlineWarning: false, stallCause: null,
   }
 }
 
@@ -138,6 +145,8 @@ export function tickVehicle(
   if (v.stalled && input.restart) {
     v.stalled = false
     v.stallWarnMs = 0
+    v.redlineMs = 0
+    v.stallCause = null
     v.gear = startableGear(v.speed)
   }
 
@@ -154,6 +163,7 @@ export function tickVehicle(
     v.stallWarnMs += dtMs
     if (v.stallWarnMs >= STALL_GRACE_MS) {
       v.stalled = true
+      v.stallCause = 'lug'
       v.stallWarnMs = 0
     }
   } else {
@@ -161,15 +171,32 @@ export function tickVehicle(
   }
   v.stallWarning = !v.stalled && v.stallWarnMs > 0
 
+  // Redline burn-out — sitting on the limiter under throttle without upshifting
+  // cooks the engine. Only in gears you can upshift out of: the top gear's redline
+  // is just the speed limiter (no recourse), so it never burns out.
+  const atRedline = !v.stalled && rpmRaw >= REDLINE_RPM && v.gear < GEAR_COUNT
+  if (atRedline && input.throttle) {
+    v.redlineMs += dtMs
+    if (v.redlineMs >= REDLINE_BURN_MS) {
+      v.stalled = true
+      v.stallCause = 'overrev'
+      v.redlineMs = 0
+    }
+  } else {
+    v.redlineMs = 0
+  }
+  v.redlineWarning = !v.stalled && atRedline && input.throttle && v.redlineMs >= REDLINE_WARN_DELAY_MS
+
   v.rpm = v.stalled ? 0 : Math.max(0, Math.min(1, rpmRaw))
   const torque = v.stalled ? 0 : gearTorqueMult(rpmRaw)
 
   // ── Longitudinal forces ────────────────────────────────────────────────
 
-  // Engine force (throttle) — torque-scaled, capped at the current gear's top.
-  // A stalled engine produces nothing; the truck just freewheels.
-  if (!v.stalled && input.throttle && v.fuel > 0 && v.speed < gear.to) {
-    v.speed = Math.min(gear.to, v.speed + gear.accel * torque * accelMult * dt)
+  // Engine force (throttle) — torque-scaled, capped at the current gear's top
+  // (and never above MAX_SPEED). A stalled engine produces nothing; freewheels.
+  const speedCap = Math.min(gear.to, MAX_SPEED)
+  if (!v.stalled && input.throttle && v.fuel > 0 && v.speed < speedCap) {
+    v.speed = Math.min(speedCap, v.speed + gear.accel * torque * accelMult * dt)
   }
 
   // Over-rev engine braking — too low a gear for this speed (e.g. after a

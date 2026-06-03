@@ -16,14 +16,20 @@ Date: 2026-06-02.
 - **RPM model + gauge.** `rpm = (speed - gear.from) / gear.span`. Lugging below the band
   = weak torque; redline (`rpm ≥ 1`) = no pull, must upshift. Shown as the left-panel
   RPM bar (green → red).
-- **Controls.** `A` = shift up, `D` = shift down (edge-triggered); `ENTER` = ignition.
+- **Controls.** `D` = shift up, `A` = shift down (edge-triggered); `ENTER` = ignition.
 - **Stall mechanic** (`STALL_RPM = -0.35`). Brake/slow without downshifting and revs fall
   below the gear band → engine dies. 1st gear (`from = 0`) is immune. A stalled engine
   **freewheels** (no power, no fuel burn) until restarted with **ENTER**, which re-engages
   a sensible gear (`startableGear`).
 - **Stall warning + grace** (`STALL_GRACE_MS = 3500`). Before the engine actually dies it
-  lugs and **coughs** for ~3.5 s with an `ENGINE STALLING / SHIFT DOWN D` overlay —
+  lugs and **coughs** for ~3.5 s with an `ENGINE STALLING / SHIFT DOWN A` overlay —
   enough time to react mid-corner on snow. Downshifting in time cancels it.
+- **Redline burn-out** (`REDLINE_RPM = 0.95`, `REDLINE_BURN_MS = 6000`). Sit on the redline
+  under throttle without upshifting and the engine over-revs: an `ENGINE REDLINE / SHIFT UP D`
+  overlay + buzzer (after `REDLINE_WARN_DELAY_MS = 900`), then it stalls after ~6 s. Only in
+  gears you can upshift out of — the top gear's redline is just the limiter (5th's band tops
+  at 130 km/h so the 120 km/h cap sits below redline). `v.stallCause` = `'lug'` | `'overrev'`
+  for the future damage model.
 - **RPM-driven engine audio** (`audio/engine.ts`). Engine pitch follows RPM within the
   gear, so revs **drop on an upshift** and climb as you accelerate. Silent when stalled
   (tyres roll on). Shift blip, stall "dying" sound, ignition crank.
@@ -93,9 +99,12 @@ already exists — point it at `rpm`).
 
 ## 3. Agent-proposed ideas (easiest → hardest)
 
-1. **Redline upshift warning (easiest).** The symmetric twin of the new stall/downshift
-   warning: when `rpm` pins at redline, flash the RPM bar + a buzzer + a `SHIFT UP` hint.
-   Teaches both ends of the band. Pure UI + audio off the existing `rpm`. ~30 min.
+1. **Redline upshift warning — ✓ IMPLEMENTED (2026-06-03).** The symmetric twin of the
+   stall/downshift warning: at the redline a buzzer + an `ENGINE REDLINE / SHIFT UP D`
+   overlay, and — by the owner's request — the engine **burns out** (stalls) after ~6 s if
+   you keep flooring it without upshifting. Safe in the top gear. `v.stallCause`
+   distinguishes `'lug'` vs `'overrev'` for the future damage model. (Burn-out → stall now;
+   later it can feed damage instead.)
 
 2. **Downshift rev-protection / no money-shifts (easy).** Refuse a downshift that would slam
    revs past redline at the current speed (e.g. 5th→2nd at 90): play a "grind/clunk" reject
@@ -120,8 +129,8 @@ already exists — point it at `rpm`).
 Cheap feel-wins first, the economy layer last:
 
 ```
-1. Redline upshift warning            (agent #1)   — easiest, complements stall warning
-2. Downshift rev-protection           (agent #2)
+1. Redline upshift warning + burn-out  (agent #1)   — ✓ DONE (2026-06-03)
+2. Downshift rev-protection           (agent #2)   — next cheap feel-win
 3. Non-instant engine start           (owner 2.1)  — deepens the stall penalty
 4. Weight-based acceleration          (owner 2.2)  — small; enables cargo variety
 5. Tach dial + prominent speed number (owner 2.5, middle-ground form)

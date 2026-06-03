@@ -250,7 +250,7 @@ export const GEARS: readonly GearSpec[] = [
   { from: 22, to: 52,  accel: 4.2 },  // 2
   { from: 44, to: 76,  accel: 3.2 },  // 3 — main cruising gear
   { from: 68, to: 100, accel: 2.4 },  // 4
-  { from: 90, to: 120, accel: 1.8 },  // 5 — top speed, weak acceleration
+  { from: 90, to: 130, accel: 1.8 },  // 5 — top gear; MAX_SPEED caps real speed at 120, so cruise sits below redline
 ]
 
 /** Number of forward gears. */
@@ -288,6 +288,21 @@ export const STALL_RPM = -0.35
  * enough to react mid-corner on snow while braking (≈ 3.5 s).
  */
 export const STALL_GRACE_MS = 3500
+
+/** rpm at/above which the engine is on the redline (sitting at the gear's ceiling). */
+export const REDLINE_RPM = 0.95
+/**
+ * Milliseconds held at the redline UNDER THROTTLE before the engine burns out
+ * (stalls). At redline you're already at the gear's top and not accelerating, so
+ * this is the backstop for refusing to upshift, not a twitch timer. Only applies
+ * in gears you can upshift out of — the top gear's redline is just the limiter.
+ */
+export const REDLINE_BURN_MS = 6000
+/**
+ * Delay (ms) at the redline before the audible "SHIFT UP" buzzer starts, so normal
+ * quick upshifts through the gears don't blare an alarm every time.
+ */
+export const REDLINE_WARN_DELAY_MS = 900
 
 // ── Fuel ────────────────────────────────────────────────────────────────────
 

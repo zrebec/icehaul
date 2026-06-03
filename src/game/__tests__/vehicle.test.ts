@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createVehicle, tickVehicle, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
-import { STALL_GRACE_MS } from '../../config.ts'
+import { STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, GEAR_COUNT } from '../../config.ts'
 
 const noInput: VehicleInput = { throttle: false, brake: false, steerLeft: false, steerRight: false }
 const dt16 = 16
@@ -247,5 +247,45 @@ describe('tickVehicle — manual gearbox + stall', () => {
     tickVehicle(v, { ...noInput, restart: true }, 'asphalt', 1.0, 1.0, dt16)
     expect(v.stalled).toBe(false)
     expect(v.gear).toBe(1)                               // startableGear(0) → 1st
+  })
+})
+
+describe('tickVehicle — redline burn-out', () => {
+  it('holding the redline under throttle warns, then burns the engine out', () => {
+    const v = freshVehicle({ speed: 76, gear: 3 })  // gear 3 tops out at 76 → redline
+    tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.redlineWarning).toBe(false)            // warn delay not elapsed yet
+    expect(v.stalled).toBe(false)
+    tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, REDLINE_WARN_DELAY_MS)
+    expect(v.redlineWarning).toBe(true)             // buzzer nag
+    tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, REDLINE_BURN_MS)
+    expect(v.stalled).toBe(true)
+    expect(v.stallCause).toBe('overrev')
+  })
+
+  it('upshifting in time avoids the burn-out', () => {
+    const v = freshVehicle({ speed: 76, gear: 3 })
+    tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, REDLINE_WARN_DELAY_MS + 100)
+    expect(v.redlineWarning).toBe(true)
+    tickVehicle(v, { ...noInput, throttle: true, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)  // 3 → 4
+    expect(v.redlineWarning).toBe(false)
+    expect(v.stalled).toBe(false)
+    expect(v.redlineMs).toBe(0)
+  })
+
+  it('coasting at the limiter (no throttle) never burns out', () => {
+    const v = freshVehicle({ speed: 76, gear: 3 })
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, REDLINE_BURN_MS + 1000)
+    expect(v.stalled).toBe(false)
+    expect(v.redlineMs).toBe(0)
+  })
+
+  it('the top gear never burns out at max speed (no higher gear to shift to)', () => {
+    const v = freshVehicle({ speed: 120, gear: GEAR_COUNT })
+    for (let i = 0; i < 600; i++) {
+      tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, dt16)
+    }
+    expect(v.stalled).toBe(false)
+    expect(v.redlineWarning).toBe(false)
   })
 })

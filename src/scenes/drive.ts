@@ -122,6 +122,7 @@ export function createDriveScene(
   let restartQueued = false
   let wasStalled = false
   let lastCoughS = -1
+  let lastBuzzS = -1
 
   // Only Enter or S starts the game — not Command, not any random key.
   // While playing, A/D queue a gear shift; ENTER re-ignites a stalled engine.
@@ -258,6 +259,15 @@ export function createDriveScene(
         if (now - lastCoughS > 0.4) {
           beep(60 + Math.random() * 30, 55, now)
           lastCoughS = now
+        }
+      }
+
+      // Redline — insistent high buzzer while over-revving (before burn-out)
+      if (v.redlineWarning && ctxAudio) {
+        const now = ctxAudio.currentTime
+        if (now - lastBuzzS > 0.16) {
+          beep(540, 35, now)
+          lastBuzzS = now
         }
       }
 
@@ -495,7 +505,10 @@ export function createDriveScene(
         if (blinkPhase) drawTextCentered(ctx, 'PRESS ENTER', 60, COLS, C.B_YELLOW, C.BLACK)
       } else if (driveState === 'playing' && v.stallWarning && blinkPhase) {
         drawTextCentered(ctx, 'ENGINE STALLING', 44, COLS, C.B_YELLOW, C.BLACK)
-        drawTextCentered(ctx, 'SHIFT DOWN  D', 60, COLS, C.B_YELLOW, C.BLACK)
+        drawTextCentered(ctx, 'SHIFT DOWN  A', 60, COLS, C.B_YELLOW, C.BLACK)
+      } else if (driveState === 'playing' && v.redlineWarning && blinkPhase) {
+        drawTextCentered(ctx, 'ENGINE REDLINE', 44, COLS, C.B_RED, C.BLACK)
+        drawTextCentered(ctx, 'SHIFT UP  D', 60, COLS, C.B_YELLOW, C.BLACK)
       }
       if (driveState === 'paused' && blinkPhase) {
         drawTextCentered(ctx, 'PAUSED', 56, COLS, C.B_RED, C.B_YELLOW)

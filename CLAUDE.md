@@ -142,10 +142,14 @@ node scripts/drive-shot.mjs out.png 5      # boots, holds ArrowUp+ArrowRight for
 - **ArrowUp** — throttle
 - **ArrowDown** — brake
 - **ArrowLeft / ArrowRight** — steer
-- **A** — shift up · **D** — shift down (manual 5-speed gearbox)
+- **D** — shift up · **A** — shift down (manual 5-speed gearbox)
 - **ENTER** — start the engine / restart a stalled engine (also starts the game from the title)
 
-**The manual gearbox is core.** Each gear has a top speed — **1st caps at ~28 km/h, so you physically cannot reach 120 in a low gear** — and a torque band shown on the **RPM** gauge. Acceleration is deliberately slow and heavy: you climb through the gears with **A/D**. The engine dies if you **stall** it by braking/slowing without downshifting (revs fall below the gear's band; 1st gear is immune): a ~3.5 s **ENGINE STALLING** warning (the engine coughs) precedes the actual stall so you can downshift in time — miss it and the truck freewheels with no power until you press **ENTER** to re-ignite. The model lives in `config.ts` (`GEARS`, `STALL_RPM`, `OVERREV_ENGINE_BRAKE`, …) and `game/vehicle.ts`; RPM also drives engine pitch in `audio/engine.ts`.
+**The manual gearbox is core.** Each gear has a top speed — **1st caps at ~28 km/h, so you physically cannot reach 120 in a low gear** — and a torque band shown on the **RPM** gauge. Acceleration is deliberately slow and heavy: you climb through the gears with **D** (up) / **A** (down). The engine dies two ways, each after a short warning + ENTER restart:
+- **Stall (lug):** brake/slow without downshifting → revs fall below the gear's band (1st gear is immune). A ~3.5 s `ENGINE STALLING / SHIFT DOWN A` cough warning precedes it.
+- **Burn-out (over-rev):** sit on the **redline** under throttle without upshifting → `ENGINE REDLINE / SHIFT UP D`, then it cooks (≈6 s). Only in gears you can upshift out of — the top gear's redline is just the speed limiter, so it's safe (5th's band tops at 130 km/h so the 120 km/h cap sits below redline).
+
+The model lives in `config.ts` (`GEARS`, `STALL_RPM`, `STALL_GRACE_MS`, `REDLINE_RPM`, `REDLINE_BURN_MS`, `OVERREV_ENGINE_BRAKE`, …) and `game/vehicle.ts` (`v.stalled`, `v.stallWarning`, `v.redlineWarning`, `v.stallCause`); RPM also drives engine pitch in `audio/engine.ts`.
 
 **First-person view** — no truck visible; the road scrolls toward you. Manage speed *before* ice, where grip is brutally low (`SURFACE_GRIP.ice` in `config.ts`): steering barely responds and lateral velocity persists → drift. Watch the blinking `ICE AHEAD` strip in the top bar — your cue to slow down (and downshift).
 
