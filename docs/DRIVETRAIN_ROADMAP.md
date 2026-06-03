@@ -4,7 +4,7 @@ Status doc for Ice Haul's manual-drivetrain line of work. Captures what is **don
 the owner's **future ideas** (with an honest assessment of each), and a handful of
 **agent-proposed ideas**. This is a planning doc — backlog, not committed work.
 
-Date: 2026-06-02.
+Date: 2026-06-03.
 
 ---
 
@@ -48,6 +48,24 @@ Date: 2026-06-02.
   static compass + double GRIP bar were removed).
 - **Delivery time budget 7 → 8 min** to suit the slower acceleration (a careful driver
   must still finish 5 km on time; verified by `completability.test.ts`).
+- **Non-instant crank start** (`CRANK_NEEDED_MS = 1800`, `scenes/drive.ts`). Hold **ENTER**
+  for ~1.8 s to crank the engine — both on the initial start screen and after a stall.
+  Releasing early resets the crank; you must try again. `STARTING...` overlay while cranking;
+  irregular beeper pulses simulate the diesel starter; a short rising beep on ignition. The
+  vehicle physics restart path is unchanged — `input.restart` is only sent to `tickVehicle`
+  after the crank completes. `PRESS ENTER` overlays renamed to `HOLD ENTER`.
+- **Harder torque curve** (`BOG_FLOOR = 0.12`, `BOG_RPM = 0.50`, `game/vehicle.ts`). The
+  multiplier below the power band changed from linear to **quadratic** and the floor was
+  lowered from 0.40 to 0.12. 5th gear at 30 km/h now stalls: torque is too low to escape
+  the 3.5 s grace period (~5.1 s needed to build enough revs). 5th at 40 km/h pulls at
+  ~0.72 km/h/s vs 4th's ~1.54 km/h/s — clearly slower, RPM bar visibly low.
+- **Surface drag double-penalty fix** (`SURFACE_DRAG` in `config.ts`). The old values
+  (mud=8, sand=7) combined with `SURFACE_ACCEL=0.35` made 2nd gear drag-limited to ~22 km/h
+  on mud and ~25 km/h on sand — the engine could not overcome surface resistance at any
+  normal speed. Fixed: **mud 8→4, sand 7→3**. 2nd gear equilibrium is now ~44 km/h (mud)
+  and ~59 km/h (sand). Higher gears remain drag-limited (3rd→~34/~45 km/h). `SURFACE_DRAG`
+  now carries a full in-code reference comment with formula, per-gear equilibrium tables,
+  double-penalty invariant, coasting behaviour, and per-surface tuning bounds.
 
 ---
 
@@ -56,6 +74,8 @@ Date: 2026-06-02.
 > Verdicts are objective: endorse where it's good, push back where there's a real reason.
 
 ### 2.1 Non-instant engine start (few seconds + AY/beeper crank sound)
+**✓ IMPLEMENTED (2026-06-03) — crank starter, `CRANK_NEEDED_MS = 1800` ms, hold ENTER.**
+
 **Verdict: do it. Low effort, good payoff.** A 1.5–2.5 s "STARTING…" crank (no throttle
 during cranking) makes stalling genuinely costly — you can't instantly recover mid-corner,
 which is exactly the discouragement intended. The AY/beeper crank is very ZX. Pairs
@@ -148,7 +168,8 @@ Cheap feel-wins first, the economy layer last:
 1. Redline upshift warning + burn-out  (agent #1)   — ✓ DONE (2026-06-03)
 2. Synchro downshift limits           (agent #2)   — ✓ DONE (2026-06-03)
 3. Tach dial + prominent speed number (owner 2.5)   — ✓ DONE (2026-06-03)
-4. Non-instant engine start           (owner 2.1)  — next; deepens the stall penalty
+4. Non-instant engine start           (owner 2.1)   — ✓ DONE (2026-06-03)
+4a. Surface drag / torque curve tune  (B45–B46)    — ✓ DONE (2026-06-03)
 5. Weight-based acceleration          (owner 2.2)  — small; enables cargo variety
 6. Damage accumulators + % display    (owner 2.3a)
 7. Low-speed bump = damage + continue (owner 2.4)  — needs #6
