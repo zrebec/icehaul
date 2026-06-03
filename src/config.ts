@@ -52,16 +52,120 @@ export const SURFACE_GRIP: Record<Surface, number> = {
 }
 
 /**
- * Per-surface passive speed drag in km/h lost per second.
- * 0 = no drag (asphalt — heavy truck, rolls freely).
- * Sand has strong drag (wheels dig in), snow mild, ice none.
+ * Per-surface passive speed drag — km/h lost per second (velocity-proportional).
+ *
+ * ── HOW IT WORKS ────────────────────────────────────────────────────────────
+ * Applied every physics tick regardless of throttle, in vehicle.ts:
+ *
+ *   Δspeed = −SURFACE_DRAG[s] × (speed / MAX_SPEED) × dt
+ *
+ * Linear drag: proportional to current speed. Think of it as wheel-ploughing
+ * (mud, sand) or surface compaction resistance (snow). It is separate from and
+ * stacks with the other resistive forces:
+ *   • AERO_DRAG        quadratic, all surfaces, dominates at high speed
+ *   • ROLLING_RESISTANCE  linear, all surfaces, small
+ *   • ENGINE_BRAKE     throttle released — engine compression, all surfaces
+ *   • SURFACE_ACCEL    scales engine OUTPUT (not drag); see below
+ *
+ * ── DOUBLE-PENALTY INTERACTION WITH SURFACE_ACCEL ───────────────────────────
+ * SURFACE_ACCEL reduces how much force the engine can produce on that surface.
+ * SURFACE_DRAG adds how much resistance the surface imposes passively.
+ * Both stack multiplicatively, creating a strong "terrain difficulty" effect.
+ *
+ * At full throttle in the power band, drag and engine force balance at:
+ *
+ *   v_eq = GEARS[G].accel × SURFACE_ACCEL[S] × MAX_SPEED / SURFACE_DRAG[S]
+ *
+ *   v_eq ≥ GEARS[G].to  → gear is drag-free: top speed is gear-limited.
+ *   v_eq < GEARS[G].to  → gear is drag-limited: you never reach the gear's
+ *                          rated top speed on this surface.
+ *
+ * CRITICAL WARNING — if SURFACE_DRAG is set too high, the double-penalty
+ * overwhelms all gears except 1st. The pre-fix values (mud=8, sand=7)
+ * produced the following drag-limited tops in 2nd gear:
+ *   mud: 4.2 × 0.35 × 120 / 8  = 22 km/h   ← below any usable speed
+ *   sand: 4.2 × 0.35 × 120 / 7 = 25 km/h   ← same trap
+ * With mud=4 and sand=3, 2nd gear equilibrium is now ~44 and ~59 km/h
+ * respectively — 2nd/3rd work, 4th/5th are meaningfully drag-limited.
+ * The invariant to preserve: 2nd gear must be able to sustain its lower
+ * speed range. Safe upper bound: SURFACE_DRAG < GEARS[1].accel ×
+ * SURFACE_ACCEL × MAX_SPEED / GEARS[1].to  (i.e. drag-free threshold for
+ * 2nd). For mud that is 4.2 × 0.35 × 120 / 52 ≈ 3.4; mud=4 deliberately
+ * exceeds it slightly (drag-limited at 44 km/h) for realism.
+ *
+ * ── BALLISTIC TRAJECTORY (coasting behaviour) ───────────────────────────────
+ * SURFACE_DRAG is active whether you are on throttle or not. On asphalt and
+ * ice (drag=0) the truck coasts freely — its trajectory is shaped only by
+ * AERO_DRAG and ENGINE_BRAKE, and it barely slows over a few seconds. On mud
+ * and sand you cannot glide: releasing the throttle at 60 km/h on mud loses
+ * ~2.0 km/h/s from surface drag alone (4 × 60/120 = 2.0), so the truck sheds
+ * ~10 km/h in 5 seconds of coasting. This creates a "keep the power on"
+ * commitment feel on heavy terrain, especially approaching corners.
+ *
+ * ── ENGINE LOAD AND TORQUE (RPM BAR BEHAVIOUR) ──────────────────────────────
+ * SURFACE_DRAG does not raise engine RPM directly (RPM is always speed/gear.to).
+ * However, drag lowers equilibrium speed → the truck sits at a lower rpm fraction
+ * → deeper in the bog zone → torque multiplier is weaker → the engine strains
+ * without actually showing high RPM. The RPM bar reading low on mud/sand is the
+ * correct read-out of this state: surface drag is pulling the truck back faster
+ * than the engine can push it forward in a tall gear, and the engine is doing all
+ * it can. Downshifting raises rpm into the power band, restoring torque.
+ *
+ * ── PER-SURFACE VALUES AND RATIONALE ────────────────────────────────────────
+ *
+ * asphalt  0   Hard, sealed road. No wheel-ploughing, no surface deformation.
+ *              Rolling resistance and aero drag are already modelled separately
+ *              (ROLLING_RESISTANCE, AERO_DRAG). The truck coasts freely — a 20 t
+ *              vehicle on asphalt genuinely does. Do not add drag here; it would
+ *              fight the existing resistance model.
+ *
+ * snow     4   Compacted snow packs under the tyres but offers real resistance from
+ *              surface deformation and small ploughing effect. Paired with
+ *              SURFACE_ACCEL=0.55 the combined effect feels "slowed but manageable."
+ *              Equilibrium by gear at full throttle (power band):
+ *                1st  28 km/h (drag-free, gear-limited)
+ *                2nd  52 km/h (drag-free: v_eq = 4.2 × 0.55 × 120/4 = 69)
+ *                3rd  ~53 km/h (drag-limited: v_eq = 3.2 × 0.55 × 120/4 = 52.8)
+ *                4th  ~40 km/h    5th  ~30 km/h
+ *              Raise toward 6–8 for loose deep powder; lower toward 2 for
+ *              hard-packed ice-road snow.
+ *
+ * ice      0   Frictionless rolling surface — ice roads have very low tyre
+ *              rolling resistance. No drag. The hazard on ice is SURFACE_GRIP=0.25
+ *              (steering nearly gone) and SURFACE_ACCEL=1.8 (engine pulls hard —
+ *              wheel-spin, fast acceleration). You zoom and cannot steer. Intentional
+ *              asymmetry: ice is fast and uncontrollable, not slow and slippery.
+ *              Adding drag here would contradict the "grip is the danger" design.
+ *
+ * sand     3   Dry sand lets wheels sink slightly and displaces easily. Less viscous
+ *              suction than mud (drier, non-cohesive), so drag is lower. Paired with
+ *              SURFACE_ACCEL=0.35:
+ *                1st  28 km/h (gear-limited)
+ *                2nd  52 km/h (drag-free: v_eq = 4.2 × 0.35 × 120/3 = 58.8)
+ *                3rd  ~45 km/h (v_eq = 3.2 × 0.35 × 120/3 = 44.8)
+ *                4th  ~34 km/h    5th  ~25 km/h
+ *              Raise toward 5 for deep loose dunes; lower toward 1 for
+ *              hard-packed desert track.
+ *
+ * mud      4   Most punishing surface. Wet clay/silt causes deep wheel-ploughing and
+ *              viscous suction when the wheel lifts. Combined with SURFACE_ACCEL=0.35
+ *              (weakest engine output) this is the hardest terrain in the game.
+ *              Equilibrium by gear at full throttle (power band):
+ *                1st  28 km/h (gear-limited: v_eq = 5.5 × 0.35 × 120/4 = 57.8)
+ *                2nd  ~44 km/h (drag-limited: v_eq = 4.2 × 0.35 × 120/4 = 44.1)
+ *                3rd  ~34 km/h    4th  ~25 km/h    5th  ~19 km/h
+ *              Optimal strategy: stay in 2nd on mud. 3rd is possible but slow;
+ *              4th+ drain speed. Raising toward 6+ risks the double-penalty trap
+ *              (1st-gear-only). Never set above ~5 with SURFACE_ACCEL=0.35.
+ * Values before: 0, 4, 0, 7, 8
+ * New values: 0, 4, 0, 3, 4
  */
 export const SURFACE_DRAG: Record<Surface, number> = {
   asphalt: 0,
   snow: 4,
   ice: 0,
-  sand: 7,
-  mud: 8,
+  sand: 3,
+  mud: 4,
 }
 
 /**
@@ -253,9 +357,9 @@ export interface GearSpec {
 }
 
 export const GEARS: readonly GearSpec[] = [
-  { to: 28,  accel: 5.5, maxSpeedToShift: 35 },   // 1 — pull away; synchro: engage only below 35
-  { to: 52,  accel: 4.2, maxSpeedToShift: 60 },   // 2 — synchro: engage only below 60
-  { to: 76,  accel: 3.2, maxSpeedToShift: 85 },   // 3 — main cruising gear; synchro: below 85
+  { to: 28, accel: 5.5, maxSpeedToShift: 35 },   // 1 — pull away; synchro: engage only below 35
+  { to: 52, accel: 4.2, maxSpeedToShift: 60 },   // 2 — synchro: engage only below 60
+  { to: 76, accel: 3.2, maxSpeedToShift: 85 },   // 3 — main cruising gear; synchro: below 85
   { to: 100, accel: 2.4, maxSpeedToShift: null }, // 4 — non-synchro, engage at any speed
   { to: 130, accel: 1.8, maxSpeedToShift: null }, // 5 — top gear; MAX_SPEED caps real speed at 120
 ]

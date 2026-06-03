@@ -7,6 +7,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased] — 2026-06-03
 
+### Fixed
+
+#### Surface drag double-penalty — mud/sand gear-trap (B46)
+`SURFACE_DRAG` for mud and sand was so high that the combined effect with
+`SURFACE_ACCEL` made every gear above 1st decelerate at any realistic driving
+speed — the engine could not overcome the passive drag. Root cause: at the old
+values (mud=8, sand=7) the maximum achievable speed in 2nd gear was ~22 and
+~25 km/h respectively, well below any speed a player would arrive at from
+asphalt. Symptoms: enter mud in 2nd → speed falls despite full throttle; shift
+to 1st → speed rises; RPM and speed appear decoupled.
+
+Fixed by reducing `SURFACE_DRAG`: **mud 8→4, sand 7→3**. The invariant is now
+met: 2nd gear equilibrium (engine force = surface drag at power band) is ~44
+km/h on mud and ~59 km/h on sand — both within or above 2nd gear's 52 km/h
+ceiling. Higher gears remain drag-limited (3rd→~34 and ~45 km/h) which creates
+the "pick your gear for the terrain" pressure. `SURFACE_ACCEL` (0.35 for both)
+is unchanged — the "weak engine on heavy terrain" feel is preserved.
+
+`SURFACE_DRAG` now carries a full in-code reference comment: formula, per-gear
+equilibrium table, double-penalty warning, ballistic (coasting) behaviour,
+tuning bounds for each surface, and why ice=0/asphalt=0.
+
 ### Added
 
 #### Non-instant engine start — crank starter
