@@ -138,7 +138,7 @@ function runSim(strategyName: string, targetKph: Strategy): SimResult {
     const spec = GEARS[v.gear - 1]!
     const rpm  = spec.to > 0 ? v.speed / spec.to : 0
     const shiftUp   = throttle && rpm > 0.9 && v.gear < GEAR_COUNT
-    const shiftDown = rpm < 0.15 && v.gear > 1   // downshift before lugging
+    const shiftDown = rpm < 0.33 && v.gear > 1   // downshift well before lugging (LUG_RPM 0.25)
 
     tickVehicle(
       v,

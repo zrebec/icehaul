@@ -35,7 +35,7 @@ import {
   SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT,
   SURFACE_SLIP_PEAK,
   GEARS, GEAR_COUNT, BOG_RPM, BOG_FLOOR, POWER_RPM, REDLINE_FLOOR, OVERREV_ENGINE_BRAKE,
-  LUG_RPM, IDLE_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
+  LUG_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
   type Surface,
 } from '../config.ts'
 
@@ -201,9 +201,9 @@ export function tickVehicle(
   }
   v.redlineWarning = !v.stalled && atRedline && input.throttle && v.redlineMs >= REDLINE_WARN_DELAY_MS
 
-  // Dashboard RPM idles at IDLE_RPM while running (no dead zero in a moving gear),
-  // clamped to redline at the top. Zero only when actually stalled.
-  v.rpm = v.stalled ? 0 : Math.min(1, Math.max(IDLE_RPM, rpmRaw))
+  // Dashboard RPM is the raw ratio (it CAN drop to 0 bars when lugging), clamped to
+  // redline at the top. Zero only when actually stalled.
+  v.rpm = v.stalled ? 0 : Math.min(1, rpmRaw)
   const torque = v.stalled ? 0 : gearTorqueMult(rpmRaw)
 
   // ── Longitudinal forces ────────────────────────────────────────────────

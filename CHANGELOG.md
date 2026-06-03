@@ -95,6 +95,25 @@ convention.)
 
 ### Changed
 
+#### Realistic lugging in tall gears + tachometer HUD (feel pass)
+Playtest follow-up: in a high gear the truck pulled fine at low speed (e.g. cruising
+30 km/h in 5th, with no pressure to downshift), which felt wrong. Three tied changes:
+- **Lug line raised to a realistic point** — `LUG_RPM` 0.06 → **0.25** (≈ 650 rpm). Too-tall
+  gears now lug at real speeds (5th below ~32 km/h, 4th below ~25, …), so cruising 30 in 5th
+  builds the `ENGINE STALLING` warning and you must downshift.
+- **Weaker low-end torque** — `BOG_RPM` 0.22 → **0.45**: the power band starts higher, so a
+  too-tall gear is *sluggish* (5th at 30 ≈ 0.7 torque vs full), not just stall-pressured.
+  Pulling away in a low gear still works (low-end is weak but enough; the 3.5 s grace covers
+  the brief lug as you accelerate out).
+- **RPM gauge reads raw** — the dashboard idle-floor (`IDLE_RPM`) was removed, so the left
+  RPM bar can drop to **0 bars** when lugging.
+
+**Tachometer HUD.** The centre panel's speed dial became a **tachometer** (needle = real
+engine revs, reddens at redline) with numeric **RPM** (real revs via `RPM_DISPLAY_REDLINE`
+= 2600, so the lug line reads ~650) and numeric **SPD**. Realises owner idea 2.5 (tach dial
++ prominent speed number). The completability sim's auto-gearbox downshifts earlier
+(`rpm < 0.33`) to stay off the lug; all three strategies now complete with margin.
+
 #### RPM model reworked to be proportional to road speed (feel fix)
 The original `rpm = (speed − gear.from) / gear.span` modelled *position within the
 gear's band*, which fell to zero — and negative — below the band. That made an

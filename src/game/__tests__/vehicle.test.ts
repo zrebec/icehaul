@@ -205,7 +205,7 @@ describe('tickVehicle — manual gearbox + stall', () => {
   })
 
   it('lugging a high gear warns first, then stalls after the grace period', () => {
-    const v = freshVehicle({ speed: 4, gear: 4 })   // 4th lugs below ~6 km/h
+    const v = freshVehicle({ speed: 20, gear: 5 })  // 5th lugs below ~32 km/h
     tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
     expect(v.stallWarning).toBe(true)               // coughing, not dead yet
     expect(v.stalled).toBe(false)
@@ -215,11 +215,11 @@ describe('tickVehicle — manual gearbox + stall', () => {
   })
 
   it('downshifting during the warning avoids the stall', () => {
-    const v = freshVehicle({ speed: 4, gear: 4 })
+    const v = freshVehicle({ speed: 20, gear: 5 })
     tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
     expect(v.stallWarning).toBe(true)
-    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 4→3
-    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 3→2 recovers
+    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 5→4 (still lugging)
+    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 4→3 recovers
     expect(v.stallWarning).toBe(false)
     expect(v.stalled).toBe(false)
   })
@@ -232,7 +232,7 @@ describe('tickVehicle — manual gearbox + stall', () => {
   })
 
   it('a stalled engine produces no throttle power', () => {
-    const v = freshVehicle({ speed: 4, gear: 4 })
+    const v = freshVehicle({ speed: 20, gear: 5 })
     tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, STALL_GRACE_MS + 100)  // lug past grace → stall
     expect(v.stalled).toBe(true)
     const before = v.speed

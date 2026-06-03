@@ -2,12 +2,12 @@ import {
   C, CELL,
   drawText, drawDial, drawSegmentedBar,
 } from 'zx-kit'
-import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, MAX_SPEED, TRUCK_WEIGHT_T, GEAR_COUNT } from '../config.ts'
+import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, TRUCK_WEIGHT_T, GEAR_COUNT, RPM_DISPLAY_REDLINE, REDLINE_RPM } from '../config.ts'
 
 /**
  * Bottom instrument cluster — 3 equal-width panels in 9 rows (72 px):
- *   Left:   FUEL + RPM + GEAR + GRIP (drivetrain readouts, short labels)
- *   Centre: speed dial
+ *   Left:   FUEL + RPM bar + GEAR + GRIP (drivetrain readouts, short labels)
+ *   Centre: tachometer (rpm dial) + numeric real rpm + numeric speed
  *   Right:  mission info (placeholder for phase 1)
  */
 export function drawHUD(
@@ -36,7 +36,7 @@ export function drawHUD(
   ctx.fillRect(0, hudY, GAME_WIDTH, hudH)
 
   drawInstrumentsPanel(ctx, x0, hudY, panelW, hudH, state)
-  drawSpeedPanel(ctx, x1, hudY, panelW, hudH, state.speed)
+  drawTachPanel(ctx, x1, hudY, panelW, hudH, state.speed, state.rpm ?? 0)
   drawMissionPanel(ctx, x2, hudY, GAME_WIDTH - x2, hudH, state)
 
   // Panel dividers + top border
@@ -99,31 +99,35 @@ function drawInstrumentsPanel(
   })
 }
 
-// ── Centre panel: speed dial ────────────────────────────────────────────────
+// ── Centre panel: tachometer (rpm dial) + numeric rpm + speed ───────────────
 
-function drawSpeedPanel(
+function drawTachPanel(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
-  speed: number,
+  speed: number, rpm: number,   // rpm is the 0..1 ratio (0 = stalled/standstill, 1 = redline)
 ): void {
   const cx = x + Math.floor(w / 2)
-  const cy = y + Math.floor(h / 2) + 4
-  const radius = 20
+  const cy = y + 22
+  const radius = 16
+  const ratio = Math.min(1, Math.max(0, rpm))
+  const realRpm = Math.round(ratio * RPM_DISPLAY_REDLINE)
+  const needle = rpm >= REDLINE_RPM ? C.B_RED : C.B_YELLOW
 
+  // Tachometer — needle tracks real engine revs (0 .. redline).
   drawDial(ctx, {
     cx, cy, radius,
-    value: speed, min: 0, max: MAX_SPEED,
-    needleColor: C.B_YELLOW, rimColor: C.B_WHITE,
+    value: realRpm, min: 0, max: RPM_DISPLAY_REDLINE,
+    needleColor: needle, rimColor: C.B_WHITE,
     tickColor: C.B_WHITE, ticks: 5, faceColor: C.BLACK,
   })
 
-  drawText(ctx, '0',   cx - radius - 4,  cy + radius - 2, C.B_WHITE, C.BLACK)
-  drawText(ctx, '30',  cx - radius - 8,  cy - radius / 2, C.B_WHITE, C.BLACK)
-  drawText(ctx, '60',  cx - 8,           cy - radius - 6, C.B_WHITE, C.BLACK)
-  drawText(ctx, '90',  cx + radius - 4,  cy - radius / 2, C.B_WHITE, C.BLACK)
-  drawText(ctx, '120', cx + radius - 10, cy + radius - 2, C.B_WHITE, C.BLACK)
+  // Real revs (number) — reddens at the redline; drops toward 0 when you lug.
+  drawText(ctx, 'RPM', x + 6, y + 46, C.B_WHITE, C.BLACK)
+  drawText(ctx, `${realRpm}`.padStart(4, '0'), x + 34, y + 46, needle, C.BLACK)
 
-  drawText(ctx, 'km/h', cx - 16, cy + 6, C.B_WHITE, C.BLACK)
+  // Real speed (number, km/h implied by the SPD label).
+  drawText(ctx, 'SPD', x + 6, y + 60, C.B_WHITE, C.BLACK)
+  drawText(ctx, `${Math.round(speed)}`, x + 34, y + 60, C.B_YELLOW, C.BLACK)
 }
 
 // ── Right panel: mission info (placeholder) ─────────────────────────────────

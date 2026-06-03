@@ -226,9 +226,10 @@ export const SURFACE_SLIP_PEAK: Record<Surface, number> = {
  *
  * RPM is proportional to road speed within the gear, exactly like a real engine:
  *   rpm = speed / gear.to     (0 at standstill, 1.0 = redline at the gear's top)
- * It never goes negative, and on the dashboard it idles at IDLE_RPM while running
- * (so a moving gear never shows a dead zero). Torque over rpm:
- *     rpm < BOG_RPM       low end → grunt floored at BOG_FLOOR (pull away in a tall gear)
+ * It never goes negative; the dashboard shows it raw, so it CAN drop to 0 bars when you
+ * lug. Torque over rpm — the power band starts high (BOG_RPM), so a too-tall gear pulls
+ * weakly even before it lugs:
+ *     rpm < BOG_RPM       low end → weak; floored at BOG_FLOOR. A too-tall gear is sluggish.
  *     BOG_RPM..POWER_RPM  power band → full torque
  *     POWER_RPM..1        approaching redline → torque tapers
  *     rpm >= 1            redline → no pull, must upshift
@@ -262,10 +263,16 @@ export const GEARS: readonly GearSpec[] = [
 /** Number of forward gears. */
 export const GEAR_COUNT = GEARS.length
 
-/** Dashboard idle floor — while running the RPM gauge never drops below this (~1 segment). */
-export const IDLE_RPM = 0.14
-/** Below this rpm the engine lugs (too-tall gear); torque is floored at BOG_FLOOR. */
-export const BOG_RPM = 0.22
+/**
+ * Real engine revs shown on the tachometer at redline (`rpm` fraction 1.0). Display only.
+ * With 2600 the lug line (LUG_RPM 0.25) reads ~650 rpm — matching "below ~800 you lug".
+ */
+export const RPM_DISPLAY_REDLINE = 2600
+/**
+ * Below this rpm the engine is off the power band → weak torque (floored at BOG_FLOOR).
+ * Raised so a too-tall gear (5th at 30 km/h ≈ 0.23) pulls sluggishly, not at full power.
+ */
+export const BOG_RPM = 0.45
 /** Torque multiplier floor at idle / when lugging — diesel low-end grunt. */
 export const BOG_FLOOR = 0.40
 /** Top of the flat power band; above this, torque tapers toward redline. */
@@ -279,13 +286,13 @@ export const REDLINE_FLOOR = 0.10
 export const OVERREV_ENGINE_BRAKE = 7
 
 /**
- * Lug threshold on rpm (`speed / gear.to`). When revs fall below this in a gear the
- * engine lugs toward a stall — i.e. you slowed/braked without downshifting. First
- * gear is exempt (you can always idle and pull away in 1st). With `LUG_RPM = 0.06`:
- * 2nd lugs below ~3 km/h, 3rd below ~5, 4th below ~6, 5th below ~8. A stalled engine
- * must be restarted with ENTER (ignition).
+ * Lug threshold on rpm (`speed / gear.to`). Below this in a gear the engine lugs toward a
+ * stall — you slowed/braked or sat in too tall a gear without downshifting. First gear is
+ * exempt (you can always idle and pull away in 1st). With `LUG_RPM = 0.25` (≈ 650 rpm):
+ * 2nd lugs below ~13 km/h, 3rd below ~19, 4th below ~25, 5th below ~32 — so cruising 30 in
+ * 5th lugs and pressures you to downshift. A stalled engine must be restarted with ENTER.
  */
-export const LUG_RPM = 0.06
+export const LUG_RPM = 0.25
 
 /**
  * Grace period (ms) the engine lugs and **coughs** with an "ENGINE STALLING"

@@ -13,11 +13,12 @@ Date: 2026-06-02.
 - **Manual 5-speed gearbox** (`config.ts: GEARS`, `game/vehicle.ts`). Each gear is its top
   speed `to` + a torque value. **1st caps at ~28 km/h — you cannot reach 120 in a low
   gear.** Acceleration is deliberately slow (0→120 ≈ 30 s through the gears).
-- **RPM model + gauge.** `rpm = speed / gear.to` — proportional to road speed like a real
-  engine (0 at standstill, 1.0 = redline at the gear's top); it never goes negative and
-  **idles at `IDLE_RPM` on the dashboard** while running, so a moving gear never shows a
-  dead zero. Strong diesel low-end (`BOG_FLOOR`) means a slightly-too-tall gear still pulls,
-  just slowly. Shown as the left-panel RPM bar (green → red).
+- **RPM model + gauges.** `rpm = speed / gear.to` — proportional to road speed like a real
+  engine (0 at standstill, 1.0 = redline at the gear's top); never negative, shown **raw**
+  so a too-tall gear reads low and the left RPM bar can drop to **0 bars** (the lugging cue).
+  The power band starts high (`BOG_RPM = 0.45`), so a too-tall gear is *sluggish* (weak pull)
+  before it lugs. Shown two ways: the left **RPM bar** (green → red) and the centre
+  **tachometer** (dial needle = real revs via `RPM_DISPLAY_REDLINE`, plus numeric RPM + SPD).
 - **Controls.** `D` = shift up, `A` = shift down (edge-triggered); `ENTER` = ignition.
 - **Synchro shift limits** (per-gear `GEARS[].maxSpeedToShift`). You can only **downshift
   into** a gear below its limit (1st < 35 km/h, 2nd < 60, 3rd < 85; 4th/5th `null` = no
@@ -26,10 +27,11 @@ Date: 2026-06-02.
   limits to `null` to remove synchro, or all to numbers for a fully synchro'd box. This lets
   you walk down the gears as you brake for ice (low gears unlock as you slow), without ever
   being able to slam into a gear that would over-rev.
-- **Stall mechanic** (`LUG_RPM = 0.06`). Lug the engine far below idle in a gear it can't
-  sustain (too tall for the speed) → it dies. **1st gear is exempt** (`v.gear > 1` guard) so
-  you can always idle and pull away in 1st. A stalled engine **freewheels** (no power, no
-  fuel burn) until restarted with **ENTER**, which re-engages a sensible gear (`startableGear`).
+- **Stall mechanic** (`LUG_RPM = 0.25` ≈ 650 rpm). Lug the engine below idle in a gear it
+  can't sustain (too tall for the speed) → it dies. Realistic: e.g. **cruising 30 km/h in 5th
+  lugs**. **1st gear is exempt** (`v.gear > 1` guard) so you can always idle and pull away in
+  1st. A stalled engine **freewheels** (no power, no fuel burn) until restarted with **ENTER**,
+  which re-engages a sensible gear (`startableGear`).
 - **Stall warning + grace** (`STALL_GRACE_MS = 3500`). Before the engine actually dies it
   lugs and **coughs** for ~3.5 s with an `ENGINE STALLING / SHIFT DOWN A` overlay —
   enough time to react mid-corner on snow. Downshifting in time cancels it.
@@ -93,6 +95,10 @@ model** (needs a damage sink). Interim without economy: bump = stall + damage fl
 loss. **Rebuild: medium** once damage exists. Big feel improvement.
 
 ### 2.5 Swap speed dial ↔ tachometer (RPM = dial, speed = bar + text)
+**✓ IMPLEMENTED (2026-06-03) as the middle ground below.** The centre dial is now a
+tachometer (needle = real revs) with numeric RPM + numeric SPD; the left RPM bar stayed.
+Speed is a clear number, not a thin bar.
+
 **Verdict: don't do the full swap — but the instinct is half-right.** In a driving game the
 player *acts on speed*: every surface rule is a speed ("ice = 20–30 km/h"), braking points
 are speed-based. RPM drives the shift/stall layer, which is secondary. Burying speed in a
@@ -141,9 +147,9 @@ Cheap feel-wins first, the economy layer last:
 ```
 1. Redline upshift warning + burn-out  (agent #1)   — ✓ DONE (2026-06-03)
 2. Synchro downshift limits           (agent #2)   — ✓ DONE (2026-06-03)
-3. Non-instant engine start           (owner 2.1)  — next; deepens the stall penalty
-4. Weight-based acceleration          (owner 2.2)  — small; enables cargo variety
-5. Tach dial + prominent speed number (owner 2.5, middle-ground form)
+3. Tach dial + prominent speed number (owner 2.5)   — ✓ DONE (2026-06-03)
+4. Non-instant engine start           (owner 2.1)  — next; deepens the stall penalty
+5. Weight-based acceleration          (owner 2.2)  — small; enables cargo variety
 6. Damage accumulators + % display    (owner 2.3a)
 7. Low-speed bump = damage + continue (owner 2.4)  — needs #6
 8. Money + repair + pit-stop          (owner 2.3c) — career layer

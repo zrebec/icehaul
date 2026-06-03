@@ -29,24 +29,24 @@ GitHub repo: `zrebec/ice-haul`. Built on **[zx-kit](https://github.com/zrebec/zx
 │     <pseudo-3D road scene>     │   sky ~25%, road ~75%
 │                                │
 ├────────────────────────────────┤
-│E▮▮▮▮F   │       80    │ FREE  │ rows 15–23 (HUD, 9 cells / 72 px)
-│RPM ▮▮▮▮▮│  ◯  km/h   │ DRIVE │ 3 equal panels: drivetrain | speed | mission
-│GEAR 3/5 │  0    120  │       │
+│E▮▮▮▮F   │    ◯ RPM    │ FREE  │ rows 15–23 (HUD, 9 cells / 72 px)
+│RPM ▮▮▮▮▮│   RPM 0850  │ DRIVE │ 3 equal panels: drivetrain | tach+speed | mission
+│GEAR 3/5 │   SPD  47    │       │
 │GRIP ▮▮▮▮│             │       │
 └────────────────────────────────┘
    85 px      85 px     86 px
 ```
 
-HUD has **3 equal-width panels** (256/3). Left ("drivetrain") panel, top→bottom: **FUEL** bar, **RPM** bar, **GEAR** (current/total), **GRIP** bar — with short labels. Centre: speed dial (radius 20, range 0–120). Right: mission info placeholder. Status bar is **4 rows** — no "ICE TRUCKER" title.
+HUD has **3 equal-width panels** (256/3). Left ("drivetrain") panel, top→bottom: **FUEL** bar, **RPM** bar, **GEAR** (current/total), **GRIP** bar — with short labels. Centre ("tachometer") panel: an **rpm dial** (needle = real engine revs, reddens at redline) plus a numeric **RPM** (real revs) and numeric **SPD** (km/h). Right: mission info placeholder. Status bar is **4 rows** — no "ICE TRUCKER" title.
 
-> The original "no text labels / 3-dir compass / double vertical GRIP" left panel was replaced when the manual gearbox landed: RPM and GEAR readouts need labels, and the static compass was dropped to make room. If `heading` ever becomes dynamic, restore the compass in the top status bar instead.
+> The centre panel was the **speed dial** until the lugging rework — it became a **tachometer** (owner idea 2.5, the "tach dial + prominent speed number" middle ground) so you can read real revs and see when you're lugging a too-tall gear. The left **RPM bar** now shows the raw ratio and CAN drop to 0 bars when lugging.
 
 | Widget | zx-kit function |
 |--------|-----------------|
-| SPEED | `drawDial` with `ticks: 5`, `rimColor`, `tickColor`. `km/h` label rendered inside dial face below pivot. Range 0–120. |
+| TACH | `drawDial` value = real rpm (`rpm × RPM_DISPLAY_REDLINE`), `min 0 max 2600`, `ticks: 5`. Needle `B_RED` at/above `REDLINE_RPM`, else `B_YELLOW`. Numeric RPM + SPD via `drawText`. |
 | FUEL | `drawSegmentedBar` (horizontal). E in `B_RED`, F in `B_GREEN`, segments `B_YELLOW`. |
-| RPM | `drawSegmentedBar` (horizontal, 7 seg). 3-stop gradient `[B_GREEN, B_YELLOW, B_RED]` — reddens toward redline. |
-| GEAR | `drawText` — current gear in `B_CYAN`, `/N` total in `WHITE`. |
+| RPM bar | `drawSegmentedBar` (horizontal, 7 seg). 3-stop gradient `[B_GREEN, B_YELLOW, B_RED]`; drops to 0 bars when lugging. |
+| GEAR | `drawText` — current gear in `B_CYAN` (`B_RED` flash on a synchro-refused shift), `/N` total in `WHITE`. |
 | GRIP | `drawSegmentedBar` (horizontal, single 6-seg bar). 3-stop gradient `[B_RED, B_YELLOW, B_GREEN]`. |
 | Star field | Hand-plotted `STAR_POSITIONS` table (~17 points for compact sky). |
 | Warning text `ICE AHEAD` | `drawTextCentered` + blink toggle in drive scene. |
@@ -146,12 +146,12 @@ node scripts/drive-shot.mjs out.png 5      # boots, holds ArrowUp+ArrowRight for
 - **ENTER** — start the engine / restart a stalled engine (also starts the game from the title)
 
 **The manual gearbox is core.** Each gear has a top speed — **1st caps at ~28 km/h, so you physically cannot reach 120 in a low gear** — and a torque band shown on the **RPM** gauge. Acceleration is deliberately slow and heavy: you climb through the gears with **D** (up) / **A** (down). The engine dies two ways, each after a short warning + ENTER restart:
-- **Stall (lug):** brake/slow without downshifting → revs fall below the gear's band (1st gear is immune). A ~3.5 s `ENGINE STALLING / SHIFT DOWN A` cough warning precedes it.
+- **Stall (lug):** revs fall below `LUG_RPM` (0.25 ≈ 650 rpm) — you braked/slowed or sat in too tall a gear without downshifting (1st gear is immune). Realistic: e.g. **cruising 30 km/h in 5th lugs** (you must downshift). The RPM bar drops toward 0 bars and a ~3.5 s `ENGINE STALLING / SHIFT DOWN A` cough warning precedes the stall. RPM is proportional to speed (`rpm = speed / gear.to`) and is shown raw — it CAN read 0.
 - **Burn-out (over-rev):** sit on the **redline** under throttle without upshifting → `ENGINE REDLINE / SHIFT UP D`, then it cooks (≈6 s). Only in gears you can upshift out of — the top gear's redline is just the speed limiter, so it's safe (5th's band tops at 130 km/h so the 120 km/h cap sits below redline).
 
 **Synchro shift limits** (per-gear `GEARS[].maxSpeedToShift`, `number | null`): you can only **downshift into** a gear below its limit — **1st < 35 km/h, 2nd < 60, 3rd < 85**; 4th/5th are `null` (no limit). A refused downshift keeps the gear, plays a grind/clunk, and flashes the GEAR readout red (`v.shiftBlocked`). Upshifts are never blocked. Logic is fully config-driven — set all to `null` to drop synchro, all to numbers for a fully synchro'd box. This lets you walk the gears down while braking for ice (low gears unlock as you slow) without ever slamming into an over-revving gear.
 
-RPM is **proportional to road speed** (`rpm = speed / gear.to`, like a real engine) and idles on the dashboard, so a moving gear never reads a dead zero. The model lives in `config.ts` (`GEARS`, `LUG_RPM`, `IDLE_RPM`, `BOG_FLOOR`, `STALL_GRACE_MS`, `REDLINE_RPM`, `REDLINE_BURN_MS`, `OVERREV_ENGINE_BRAKE`, …) and `game/vehicle.ts` (`v.stalled`, `v.stallWarning`, `v.redlineWarning`, `v.stallCause`); RPM also drives engine pitch in `audio/engine.ts`.
+RPM is **proportional to road speed** (`rpm = speed / gear.to`, like a real engine) and shown raw, so a too-tall gear reads low (down to 0 bars) and the engine lugs. The model lives in `config.ts` (`GEARS`, `LUG_RPM`, `BOG_RPM`, `BOG_FLOOR`, `RPM_DISPLAY_REDLINE`, `STALL_GRACE_MS`, `REDLINE_RPM`, `REDLINE_BURN_MS`, `OVERREV_ENGINE_BRAKE`, …) and `game/vehicle.ts` (`v.stalled`, `v.stallWarning`, `v.redlineWarning`, `v.stallCause`); RPM also drives engine pitch in `audio/engine.ts`.
 
 **First-person view** — no truck visible; the road scrolls toward you. Manage speed *before* ice, where grip is brutally low (`SURFACE_GRIP.ice` in `config.ts`): steering barely responds and lateral velocity persists → drift. Watch the blinking `ICE AHEAD` strip in the top bar — your cue to slow down (and downshift).
 
