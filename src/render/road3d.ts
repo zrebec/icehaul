@@ -258,24 +258,18 @@ export interface TrafficProjection {
 }
 
 const TRAFFIC_PASS_BEHIND_M = 5
-const TRAFFIC_PERSPECTIVE_GAMMA = 1.55
-const TRAFFIC_SCALE_GAMMA = 1.1
 
+// Same inverse-perspective formula as canisters and roadside objects:
+//   i = round(PERSPECTIVE_K / worldZ) - 1
+// This maps worldZ correctly to scanline: distant objects cluster near the
+// horizon (scanline 0) and rush downward in the final metres — giving true
+// perspective acceleration and ensuring canisters + traffic share the same
+// depth ordering on screen.
 function trafficDepthToScanline(worldZ: number, scanlines: number): number | null {
   if (worldZ <= 0) return scanlines - 1
   if (worldZ > TRAFFIC_VIEW_DISTANCE_M) return null
-
-  const nearZ = 1
-  const farZ = TRAFFIC_VIEW_DISTANCE_M
-  const closeness = Math.max(0, Math.min(1, (farZ - worldZ) / (farZ - nearZ)))
-  return Math.round(Math.pow(closeness, TRAFFIC_PERSPECTIVE_GAMMA) * (scanlines - 1))
-}
-
-function trafficDepthToScale(worldZ: number): number {
-  const nearZ = 1
-  const farZ = TRAFFIC_VIEW_DISTANCE_M
-  const closeness = Math.max(0, Math.min(1, (farZ - worldZ) / (farZ - nearZ)))
-  return 0.28 + Math.pow(closeness, TRAFFIC_SCALE_GAMMA) * 1.15
+  const i = Math.round(PERSPECTIVE_K / worldZ) - 1
+  return Math.max(0, Math.min(scanlines - 1, i))
 }
 
 export function projectTrafficVehicle(
@@ -329,7 +323,10 @@ export function projectTrafficVehicle(
   const t = (i + 1) / roadHeight
   const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
   const x = Math.round(baseVanX + curveOffset + vehicle.x * half)
-  const scale = trafficDepthToScale(worldZ)
+  // Scale from true world depth (1/z), not clamped scanline — stays monotonic
+  // even for vehicles beyond PERSPECTIVE_K where multiple worldZ values share scanline 0.
+  const tScale = Math.min(1, (PERSPECTIVE_K / worldZ) / roadHeight)
+  const scale = 0.28 + Math.pow(tScale, 0.5) * 1.15
   const dims = trafficSpriteSize(vehicle.type)
   const w = Math.max(3, Math.round(dims.w * scale))
   const h = Math.max(3, Math.round(dims.h * scale))
