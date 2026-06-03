@@ -10,17 +10,19 @@ Date: 2026-06-02.
 
 ## 1. Implemented
 
-- **Manual 5-speed gearbox** (`config.ts: GEARS`, `game/vehicle.ts`). Each gear has a
-  speed band `[from, to]` and a torque value. **1st caps at ~28 km/h — you cannot reach
-  120 in a low gear.** Acceleration is deliberately slow (0→120 ≈ 30 s through the gears).
-- **RPM model + gauge.** `rpm = (speed - gear.from) / gear.span`. Lugging below the band
-  = weak torque; redline (`rpm ≥ 1`) = no pull, must upshift. Shown as the left-panel
-  RPM bar (green → red).
+- **Manual 5-speed gearbox** (`config.ts: GEARS`, `game/vehicle.ts`). Each gear is its top
+  speed `to` + a torque value. **1st caps at ~28 km/h — you cannot reach 120 in a low
+  gear.** Acceleration is deliberately slow (0→120 ≈ 30 s through the gears).
+- **RPM model + gauge.** `rpm = speed / gear.to` — proportional to road speed like a real
+  engine (0 at standstill, 1.0 = redline at the gear's top); it never goes negative and
+  **idles at `IDLE_RPM` on the dashboard** while running, so a moving gear never shows a
+  dead zero. Strong diesel low-end (`BOG_FLOOR`) means a slightly-too-tall gear still pulls,
+  just slowly. Shown as the left-panel RPM bar (green → red).
 - **Controls.** `D` = shift up, `A` = shift down (edge-triggered); `ENTER` = ignition.
-- **Stall mechanic** (`STALL_RPM = -0.35`). Brake/slow without downshifting and revs fall
-  below the gear band → engine dies. 1st gear (`from = 0`) is immune. A stalled engine
-  **freewheels** (no power, no fuel burn) until restarted with **ENTER**, which re-engages
-  a sensible gear (`startableGear`).
+- **Stall mechanic** (`LUG_RPM = 0.06`). Lug the engine far below idle in a gear it can't
+  sustain (too tall for the speed) → it dies. **1st gear is exempt** (`v.gear > 1` guard) so
+  you can always idle and pull away in 1st. A stalled engine **freewheels** (no power, no
+  fuel burn) until restarted with **ENTER**, which re-engages a sensible gear (`startableGear`).
 - **Stall warning + grace** (`STALL_GRACE_MS = 3500`). Before the engine actually dies it
   lugs and **coughs** for ~3.5 s with an `ENGINE STALLING / SHIFT DOWN A` overlay —
   enough time to react mid-corner on snow. Downshifting in time cancels it.

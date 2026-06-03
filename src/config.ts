@@ -216,50 +216,50 @@ export const SURFACE_SLIP_PEAK: Record<Surface, number> = {
 // ── Gearbox (manual) ─────────────────────────────────────────────────────────
 
 /**
- * Manual 5-speed gearbox. Each gear has a speed band [from, to] in km/h and a
- * peak throttle torque (km/h/s at full power inside its band).
+ * Manual 5-speed gearbox. Each gear is defined by its top speed `to` (km/h) and a
+ * peak throttle torque `accel` (km/h/s at full power).
  *
  * Design intent:
  *   - Low gears: strong pull, low top speed. You MUST shift up to go fast.
- *   - High gears: weak pull, high top speed. Bog down if engaged too early.
- *   - First gear caps at ~28 km/h — it physically cannot reach 120.
- *   - Bands overlap so there is a correct shift "sweet spot".
+ *   - High gears: high top speed, weak pull. Drivable from low speed but slow.
+ *   - First gear tops out at ~28 km/h — it physically cannot reach 120.
  *
- * RPM (for the dashboard + torque curve) is where `speed` sits in the band:
- *   rpm = (speed - from) / (to - from)
- *     rpm < BOG_RPM       lugging a too-tall gear      → weak torque
- *     BOG_RPM..POWER_RPM  power band                   → full torque
- *     POWER_RPM..1        approaching redline          → torque tapers
- *     rpm >= 1            redline                       → no pull, must upshift
+ * RPM is proportional to road speed within the gear, exactly like a real engine:
+ *   rpm = speed / gear.to     (0 at standstill, 1.0 = redline at the gear's top)
+ * It never goes negative, and on the dashboard it idles at IDLE_RPM while running
+ * (so a moving gear never shows a dead zero). Torque over rpm:
+ *     rpm < BOG_RPM       low end → grunt floored at BOG_FLOOR (pull away in a tall gear)
+ *     BOG_RPM..POWER_RPM  power band → full torque
+ *     POWER_RPM..1        approaching redline → torque tapers
+ *     rpm >= 1            redline → no pull, must upshift
  *
- * Acceleration is deliberately much slower than the old single-speed model
- * (which hit 120 in ~15 s). Reaching top speed now means shifting up through
+ * Acceleration is deliberately slow: reaching top speed means shifting up through
  * every gear and takes ~30 s of clean driving.
  */
 export interface GearSpec {
-  /** Lower edge of the gear's speed band (km/h). */
-  from: number
-  /** Upper edge / top speed reachable in this gear (km/h). */
+  /** Top speed reachable in this gear (km/h); also the redline reference for rpm. */
   to: number
   /** Peak throttle acceleration in this gear (km/h/s) at full torque. */
   accel: number
 }
 
 export const GEARS: readonly GearSpec[] = [
-  { from: 0,  to: 28,  accel: 5.5 },  // 1 — pull away, careful starts on snow/ice
-  { from: 22, to: 52,  accel: 4.2 },  // 2
-  { from: 44, to: 76,  accel: 3.2 },  // 3 — main cruising gear
-  { from: 68, to: 100, accel: 2.4 },  // 4
-  { from: 90, to: 130, accel: 1.8 },  // 5 — top gear; MAX_SPEED caps real speed at 120, so cruise sits below redline
+  { to: 28,  accel: 5.5 },  // 1 — pull away, careful starts on snow/ice
+  { to: 52,  accel: 4.2 },  // 2
+  { to: 76,  accel: 3.2 },  // 3 — main cruising gear
+  { to: 100, accel: 2.4 },  // 4
+  { to: 130, accel: 1.8 },  // 5 — top gear; MAX_SPEED caps real speed at 120, so cruise sits below redline
 ]
 
 /** Number of forward gears. */
 export const GEAR_COUNT = GEARS.length
 
+/** Dashboard idle floor — while running the RPM gauge never drops below this (~1 segment). */
+export const IDLE_RPM = 0.14
 /** Below this rpm the engine lugs (too-tall gear); torque is floored at BOG_FLOOR. */
-export const BOG_RPM = 0.18
-/** Torque multiplier floor when lugging far below the power band. */
-export const BOG_FLOOR = 0.30
+export const BOG_RPM = 0.22
+/** Torque multiplier floor at idle / when lugging — diesel low-end grunt. */
+export const BOG_FLOOR = 0.40
 /** Top of the flat power band; above this, torque tapers toward redline. */
 export const POWER_RPM = 0.82
 /** Torque multiplier just before redline (rpm → 1). */
@@ -271,16 +271,13 @@ export const REDLINE_FLOOR = 0.10
 export const OVERREV_ENGINE_BRAKE = 7
 
 /**
- * Stall threshold on raw rpm `(speed - gear.from) / gear.span`.
- * When revs fall this far BELOW a gear's lower band the engine lugs and dies —
- * i.e. if you slow down (brake) without downshifting, the motor stalls.
- *
- * First gear has `from = 0`, so its raw rpm never goes negative: you can always
- * idle and pull away in 1st. Every higher gear has a lug limit, e.g. with
- * `STALL_RPM = -0.35`: 2nd dies below ~12 km/h, 3rd below ~33, 4th below ~57,
- * 5th below ~80. A stalled engine must be restarted with ENTER (ignition).
+ * Lug threshold on rpm (`speed / gear.to`). When revs fall below this in a gear the
+ * engine lugs toward a stall — i.e. you slowed/braked without downshifting. First
+ * gear is exempt (you can always idle and pull away in 1st). With `LUG_RPM = 0.06`:
+ * 2nd lugs below ~3 km/h, 3rd below ~5, 4th below ~6, 5th below ~8. A stalled engine
+ * must be restarted with ENTER (ignition).
  */
-export const STALL_RPM = -0.35
+export const LUG_RPM = 0.06
 
 /**
  * Grace period (ms) the engine lugs and **coughs** with an "ENGINE STALLING"

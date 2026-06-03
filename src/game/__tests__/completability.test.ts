@@ -134,12 +134,11 @@ function runSim(strategyName: string, targetKph: Strategy): SimResult {
     const steerRight = v.x < -0.08 || v.vx < -0.12
 
     // Auto-gearbox — keep revs in the power band so the ideal driver can use the
-    // full speed range (mirrors what a human does with A/D shifting).
+    // full speed range (mirrors what a human does with A/D shifting). rpm = speed / to.
     const spec = GEARS[v.gear - 1]!
-    const span = spec.to - spec.from
-    const rpm  = span > 0 ? (v.speed - spec.from) / span : 0
+    const rpm  = spec.to > 0 ? v.speed / spec.to : 0
     const shiftUp   = throttle && rpm > 0.9 && v.gear < GEAR_COUNT
-    const shiftDown = rpm < 0.05 && v.gear > 1
+    const shiftDown = rpm < 0.15 && v.gear > 1   // downshift before lugging
 
     tickVehicle(
       v,

@@ -82,6 +82,31 @@ convention.)
 
 ### Changed
 
+#### RPM model reworked to be proportional to road speed (feel fix)
+The original `rpm = (speed − gear.from) / gear.span` modelled *position within the
+gear's band*, which fell to zero — and negative — below the band. That made an
+early upshift feel like the revs "dropped to zero" (harsh bog), and made a
+slightly-too-tall gear at low speed undrivable (e.g. 2nd at 6 km/h computed a
+*negative* rpm and actually began stalling).
+
+Now `rpm = speed / gear.to`, proportional to road speed like a real engine: it
+never goes negative, and the dashboard idles at `IDLE_RPM` so a moving gear never
+shows a dead zero (only a true stall reads zero). Low-end torque was strengthened
+(`BOG_FLOOR` 0.30 → 0.40) so a slightly-tall gear still pulls — slowly, but it
+moves, the way you can pull away in 2nd from a crawl in a real car. Knock-on
+changes:
+- The gear `from` field was removed; each gear is now just `{ to, accel }`.
+- `STALL_RPM` (−0.35) → `LUG_RPM` (0.06): the engine lugs toward a stall only when
+  rpm falls below idle in a gear it can't sustain, with 1st gear exempt via a
+  `v.gear > 1` guard.
+- `startableGear` (restart) now picks the lowest gear that isn't near redline.
+- The completability simulation's auto-gearbox uses the new `speed / to` rpm.
+
+**Tuning note:** with the gentler low-end the *conservative* sim strategy now
+times out by a hair (~35.7 vs 37.5 km/h required); aggressive and moderate still
+finish. The constants (`GEARS[].accel`, `BOG_FLOOR`, `BOG_RPM`, `LUG_RPM`) are
+starting points pending a real-browser playtest.
+
 #### Acceleration is now gear-limited and much slower
 The old single-speed model (`ACCEL = 8`, 0→120 in ~15 s, capped only at
 `MAX_SPEED`) was replaced by per-gear torque capped at each gear's top speed.

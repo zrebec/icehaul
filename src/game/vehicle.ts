@@ -35,7 +35,7 @@ import {
   SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT,
   SURFACE_SLIP_PEAK,
   GEARS, GEAR_COUNT, BOG_RPM, BOG_FLOOR, POWER_RPM, REDLINE_FLOOR, OVERREV_ENGINE_BRAKE,
-  STALL_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
+  LUG_RPM, IDLE_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
   type Surface,
 } from '../config.ts'
 
@@ -91,13 +91,11 @@ export function createVehicle(): Vehicle {
  * re-stall (too tall) or redline (too short). Falls back to 1st at low speed.
  */
 function startableGear(speed: number): number {
-  for (let g = GEAR_COUNT; g >= 1; g--) {
-    const spec = GEARS[g - 1]!
-    const span = spec.to - spec.from
-    const rpm = span > 0 ? (speed - spec.from) / span : 0
-    if (rpm >= 0 && rpm < 0.9) return g
+  // Lowest gear that isn't near the redline at this speed — gives the most pull.
+  for (let g = 1; g <= GEAR_COUNT; g++) {
+    if (speed / GEARS[g - 1]!.to <= 0.9) return g
   }
-  return 1
+  return GEAR_COUNT
 }
 
 /**
@@ -151,15 +149,16 @@ export function tickVehicle(
   }
 
   const gear = GEARS[v.gear - 1]!
-  const gearSpan = gear.to - gear.from
-  const rpmRaw = gearSpan > 0 ? (v.speed - gear.from) / gearSpan : 0
+  // RPM is proportional to road speed within the gear (like a real engine):
+  // 0 at standstill, 1.0 = redline at the gear's top. Never negative.
+  const rpmRaw = gear.to > 0 ? v.speed / gear.to : 0
 
-  // Stall — lugging far below a gear's band kills the engine, but only after a
-  // grace period during which an "ENGINE STALLING" warning shows, giving the
-  // driver time to downshift. First gear (from = 0) never lugs this low.
+  // Stall — lugging far below idle in a gear it can't sustain kills the engine,
+  // but only after a grace period with an "ENGINE STALLING" warning so you can
+  // downshift. First gear is exempt — you can always idle and pull away in 1st.
   if (v.stalled) {
     v.stallWarnMs = 0
-  } else if (rpmRaw < STALL_RPM) {
+  } else if (rpmRaw < LUG_RPM && v.gear > 1) {
     v.stallWarnMs += dtMs
     if (v.stallWarnMs >= STALL_GRACE_MS) {
       v.stalled = true
@@ -187,7 +186,9 @@ export function tickVehicle(
   }
   v.redlineWarning = !v.stalled && atRedline && input.throttle && v.redlineMs >= REDLINE_WARN_DELAY_MS
 
-  v.rpm = v.stalled ? 0 : Math.max(0, Math.min(1, rpmRaw))
+  // Dashboard RPM idles at IDLE_RPM while running (no dead zero in a moving gear),
+  // clamped to redline at the top. Zero only when actually stalled.
+  v.rpm = v.stalled ? 0 : Math.min(1, Math.max(IDLE_RPM, rpmRaw))
   const torque = v.stalled ? 0 : gearTorqueMult(rpmRaw)
 
   // ── Longitudinal forces ────────────────────────────────────────────────
