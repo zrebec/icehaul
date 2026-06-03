@@ -241,14 +241,22 @@ export interface GearSpec {
   to: number
   /** Peak throttle acceleration in this gear (km/h/s) at full torque. */
   accel: number
+  /**
+   * Synchro limit — the maximum road speed (km/h) at which you may DOWNSHIFT into
+   * this gear. `null` = no synchro (engage at any speed). A number engages the
+   * limiter: dropping into the gear above this speed is refused (grind). Set every
+   * gear to `null` to remove synchro entirely, or all to numbers for a fully
+   * synchro'd box — the logic is purely config-driven.
+   */
+  maxSpeedToShift: number | null
 }
 
 export const GEARS: readonly GearSpec[] = [
-  { to: 28,  accel: 5.5 },  // 1 — pull away, careful starts on snow/ice
-  { to: 52,  accel: 4.2 },  // 2
-  { to: 76,  accel: 3.2 },  // 3 — main cruising gear
-  { to: 100, accel: 2.4 },  // 4
-  { to: 130, accel: 1.8 },  // 5 — top gear; MAX_SPEED caps real speed at 120, so cruise sits below redline
+  { to: 28,  accel: 5.5, maxSpeedToShift: 35 },   // 1 — pull away; synchro: engage only below 35
+  { to: 52,  accel: 4.2, maxSpeedToShift: 60 },   // 2 — synchro: engage only below 60
+  { to: 76,  accel: 3.2, maxSpeedToShift: 85 },   // 3 — main cruising gear; synchro: below 85
+  { to: 100, accel: 2.4, maxSpeedToShift: null }, // 4 — non-synchro, engage at any speed
+  { to: 130, accel: 1.8, maxSpeedToShift: null }, // 5 — top gear; MAX_SPEED caps real speed at 120
 ]
 
 /** Number of forward gears. */

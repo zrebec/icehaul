@@ -63,6 +63,8 @@ export interface Vehicle {
   redlineWarning: boolean
   /** Why the engine last stalled — kept so a future damage model can differentiate. */
   stallCause: 'lug' | 'overrev' | null
+  /** True only on the tick a downshift was refused by a synchro speed limit. */
+  shiftBlocked: boolean
 }
 
 export interface VehicleInput {
@@ -82,8 +84,17 @@ export function createVehicle(): Vehicle {
   return {
     x: 0, vx: 0, speed: 0, distance: 0, fuel: 1.0,
     gear: 1, rpm: 0, stalled: false, stallWarnMs: 0, stallWarning: false,
-    redlineMs: 0, redlineWarning: false, stallCause: null,
+    redlineMs: 0, redlineWarning: false, stallCause: null, shiftBlocked: false,
   }
+}
+
+/**
+ * Synchro check — may you downshift INTO `targetGear` at this speed? A gear with a
+ * numeric `maxSpeedToShift` refuses engagement above it; `null` = no limit.
+ */
+function canDownshiftInto(targetGear: number, speed: number): boolean {
+  const limit = GEARS[targetGear - 1]!.maxSpeedToShift
+  return limit === null || speed <= limit
 }
 
 /**
@@ -136,8 +147,12 @@ export function tickVehicle(
   const speedRatio = v.speed / MAX_SPEED
 
   // ── Gearbox (manual) — shift, optional restart, then derive rpm + torque ──
-  if (input.shiftUp && v.gear < GEAR_COUNT) v.gear++
-  if (input.shiftDown && v.gear > 1) v.gear--
+  v.shiftBlocked = false
+  if (input.shiftUp && v.gear < GEAR_COUNT) v.gear++   // upshifts are always allowed
+  if (input.shiftDown && v.gear > 1) {
+    if (canDownshiftInto(v.gear - 1, v.speed)) v.gear--
+    else v.shiftBlocked = true                          // synchro refused the downshift
+  }
 
   // ENTER ignition — restart a stalled engine in a sensible gear.
   if (v.stalled && input.restart) {

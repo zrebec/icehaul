@@ -16,6 +16,7 @@ export function drawHUD(
     speed: number
     rpm?: number
     gear?: number
+    gearAlert?: boolean
     fuelPct?: number
     gripPct?: number
     missionText?: string
@@ -50,7 +51,7 @@ export function drawHUD(
 function drawInstrumentsPanel(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, _w: number, _h: number,
-  state: { fuelPct?: number; gripPct?: number; rpm?: number; gear?: number },
+  state: { fuelPct?: number; gripPct?: number; rpm?: number; gear?: number; gearAlert?: boolean },
 ): void {
   const fuelPct = state.fuelPct ?? 0.75
   const gripPct = state.gripPct ?? 0.87
@@ -83,7 +84,7 @@ function drawInstrumentsPanel(
   // GEAR — row 3. Label + current gear over total.
   const gearY = y + 39
   drawText(ctx, 'GEAR', x + 2, gearY, C.B_WHITE, C.BLACK)
-  drawText(ctx, String(gear), x + 42, gearY, C.B_CYAN, C.BLACK)
+  drawText(ctx, String(gear), x + 42, gearY, state.gearAlert ? C.B_RED : C.B_CYAN, C.BLACK)
   drawText(ctx, `/${GEAR_COUNT}`, x + 50, gearY, C.WHITE, C.BLACK)
 
   // GRIP — horizontal, row 4. Single bar: red (low) → yellow → green (high).

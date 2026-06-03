@@ -250,6 +250,36 @@ describe('tickVehicle — manual gearbox + stall', () => {
   })
 })
 
+describe('tickVehicle — synchro shift limits', () => {
+  it('refuses a downshift into a gear above its maxSpeedToShift', () => {
+    const v = freshVehicle({ speed: 50, gear: 2 })   // 1st engages only below 35
+    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.gear).toBe(2)             // refused — stays in 2nd
+    expect(v.shiftBlocked).toBe(true)
+  })
+
+  it('allows the same downshift once below the limit', () => {
+    const v = freshVehicle({ speed: 30, gear: 2 })   // 30 < 35
+    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.gear).toBe(1)
+    expect(v.shiftBlocked).toBe(false)
+  })
+
+  it('a null maxSpeedToShift never blocks (4th/5th)', () => {
+    const v = freshVehicle({ speed: 120, gear: 5 })
+    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 5 → 4
+    expect(v.gear).toBe(4)
+    expect(v.shiftBlocked).toBe(false)
+  })
+
+  it('upshifts are never blocked by a synchro limit', () => {
+    const v = freshVehicle({ speed: 28, gear: 1 })
+    tickVehicle(v, { ...noInput, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)  // 1 → 2
+    expect(v.gear).toBe(2)
+    expect(v.shiftBlocked).toBe(false)
+  })
+})
+
 describe('tickVehicle — redline burn-out', () => {
   it('holding the redline under throttle warns, then burns the engine out', () => {
     const v = freshVehicle({ speed: 76, gear: 3 })  // gear 3 tops out at 76 → redline

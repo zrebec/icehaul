@@ -9,6 +9,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+#### Synchro downshift limits (per-gear `maxSpeedToShift`)
+You can only **downshift into** a gear below its synchro speed: **1st < 35 km/h,
+2nd < 60, 3rd < 85**; 4th and 5th are `null` (no limit, engage at any speed). A
+refused downshift keeps the current gear and signals a **grind/clunk** plus a red
+flash on the GEAR readout (`v.shiftBlocked`). Upshifts are never blocked. The rule
+is fully config-driven via a new `GearSpec.maxSpeedToShift: number | null` — set
+every gear to `null` to remove synchro, or all to numbers for a fully synchro'd
+box, without touching the logic. Designed for the ice scenario: as you brake, the
+lower gears unlock as you slow, so you can walk the box down for engine braking
+without ever slamming into a gear that would over-rev. Four new `vehicle.test.ts`
+cases cover refuse-above-limit, allow-below, `null`-never-blocks, and
+upshift-never-blocked.
+
 #### Engine redline burn-out (over-rev warning)
 Symmetric twin of the stall warning, for the *upper* end of the band. Sit on the
 **redline** under throttle without upshifting and the engine over-revs: an

@@ -123,6 +123,7 @@ export function createDriveScene(
   let wasStalled = false
   let lastCoughS = -1
   let lastBuzzS = -1
+  let gearBlockFlashMs = 0
 
   // Only Enter or S starts the game — not Command, not any random key.
   // While playing, A/D queue a gear shift; ENTER re-ignites a stalled engine.
@@ -194,6 +195,7 @@ export function createDriveScene(
 
       if (gameOverFired) return
       elapsedMs += dt
+      gearBlockFlashMs = Math.max(0, gearBlockFlashMs - dt)
 
       if (!engineStarted && getAudioContext() != null) {
         startEngine()
@@ -241,6 +243,15 @@ export function createDriveScene(
       // Gear-shift feedback beep — only when a shift actually changed gear.
       if (v.gear !== gearBefore && !v.stalled && ctxAudio) {
         beep(v.gear > gearBefore ? 320 : 200, 35, ctxAudio.currentTime)
+      }
+
+      // Synchro refused a downshift — grind/clunk + flash the GEAR readout red.
+      if (v.shiftBlocked) {
+        gearBlockFlashMs = 300
+        if (ctxAudio) {
+          const now = ctxAudio.currentTime
+          beep(80, 70, now); beep(52, 90, now + 0.05)
+        }
       }
 
       // Engine stall / restart audio cues
@@ -488,6 +499,7 @@ export function createDriveScene(
         speed: v.speed,
         rpm: v.rpm,
         gear: v.gear,
+        gearAlert: gearBlockFlashMs > 0,
         fuelPct: v.fuel,
         gripPct: currentGrip,
         missionText: 'DELIVER',

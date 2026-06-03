@@ -19,6 +19,13 @@ Date: 2026-06-02.
   dead zero. Strong diesel low-end (`BOG_FLOOR`) means a slightly-too-tall gear still pulls,
   just slowly. Shown as the left-panel RPM bar (green → red).
 - **Controls.** `D` = shift up, `A` = shift down (edge-triggered); `ENTER` = ignition.
+- **Synchro shift limits** (per-gear `GEARS[].maxSpeedToShift`). You can only **downshift
+  into** a gear below its limit (1st < 35 km/h, 2nd < 60, 3rd < 85; 4th/5th `null` = no
+  limit). A refused downshift keeps the current gear and signals a **grind/clunk** + a red
+  GEAR flash (`v.shiftBlocked`). Upshifts are always allowed. Fully config-driven — set all
+  limits to `null` to remove synchro, or all to numbers for a fully synchro'd box. This lets
+  you walk down the gears as you brake for ice (low gears unlock as you slow), without ever
+  being able to slam into a gear that would over-rev.
 - **Stall mechanic** (`LUG_RPM = 0.06`). Lug the engine far below idle in a gear it can't
   sustain (too tall for the speed) → it dies. **1st gear is exempt** (`v.gear > 1` guard) so
   you can always idle and pull away in 1st. A stalled engine **freewheels** (no power, no
@@ -108,10 +115,11 @@ already exists — point it at `rpm`).
    distinguishes `'lug'` vs `'overrev'` for the future damage model. (Burn-out → stall now;
    later it can feed damage instead.)
 
-2. **Downshift rev-protection / no money-shifts (easy).** Refuse a downshift that would slam
-   revs past redline at the current speed (e.g. 5th→2nd at 90): play a "grind/clunk" reject
-   SFX and don't change gear. Prevents accidental engine-killing downshifts and teaches the
-   gear map. A few lines in the shift logic, reusing the gear bands.
+2. **Downshift rev-protection / synchro limits — ✓ IMPLEMENTED (2026-06-03).** Realised as
+   per-gear `maxSpeedToShift` synchros (1st < 35, 2nd < 60, 3rd < 85; 4th/5th free): a
+   downshift into a gear above its limit is refused with a grind/clunk + red GEAR flash.
+   Config-driven and universal (`null` = no limit). Designed around the ice scenario — you
+   walk the gears down as you brake, low gears unlocking as you slow.
 
 3. **Optional shift-assist / "best gear" hint (medium).** A small ▲/▼ glyph next to GEAR
    suggesting up/down when you're lugging or over-revving (toggleable in a future options
@@ -132,8 +140,8 @@ Cheap feel-wins first, the economy layer last:
 
 ```
 1. Redline upshift warning + burn-out  (agent #1)   — ✓ DONE (2026-06-03)
-2. Downshift rev-protection           (agent #2)   — next cheap feel-win
-3. Non-instant engine start           (owner 2.1)  — deepens the stall penalty
+2. Synchro downshift limits           (agent #2)   — ✓ DONE (2026-06-03)
+3. Non-instant engine start           (owner 2.1)  — next; deepens the stall penalty
 4. Weight-based acceleration          (owner 2.2)  — small; enables cargo variety
 5. Tach dial + prominent speed number (owner 2.5, middle-ground form)
 6. Damage accumulators + % display    (owner 2.3a)
