@@ -70,7 +70,7 @@ function drawInstrumentsPanel(
   })
   drawText(ctx, 'F', x + 10 + fuelSegs * 7 + 2, fuelY, C.B_GREEN, C.BLACK)
 
-  // RPM — horizontal, row 2. Green → yellow → red as revs climb to redline.
+  // RPM — horizontal, row 2. Red (lug) → green (power band) → yellow → red (redline).
   const rpmSegs = 7
   const rpmY = y + 22
   drawText(ctx, 'RPM', x + 2, rpmY, C.B_WHITE, C.BLACK)
@@ -78,7 +78,8 @@ function drawInstrumentsPanel(
     x: x + 28, y: rpmY,
     segments: rpmSegs, value: Math.round(rpm * rpmSegs), max: rpmSegs,
     segmentWidth: 6, segmentHeight: 8, gap: 1,
-    colors: [C.B_GREEN, C.B_YELLOW, C.B_RED], paper: C.BLACK, orientation: 'horizontal',
+    segmentColors: [C.B_RED, C.B_GREEN, C.B_GREEN, C.B_GREEN, C.B_GREEN, C.B_YELLOW, C.B_RED],
+    paper: C.BLACK, orientation: 'horizontal',
   })
 
   // GEAR — row 3. Label + current gear over total.
