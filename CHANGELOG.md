@@ -31,6 +31,33 @@ tuning bounds for each surface, and why ice=0/asphalt=0.
 
 ### Added
 
+#### Whole-truck steering sprite variants — cab + full body (B49)
+The truck now shows three distinct rear-view silhouettes depending on lateral
+velocity: straight (`|vx| ≤ 0.1`), turning left (`vx < −0.1`), turning right
+(`vx > 0.1`).
+
+Previously only the cab rows (0–7) were shifted in the LEFT/RIGHT bitmaps;
+the trailer body (rows 8–31) was identical across all three variants — the
+truck looked like it was tilting its hat while the body stayed put.
+
+Now `shiftRow(row, dx)` shifts all 32 pixel rows ±2 px inside the fixed
+24 px-wide frame. For full-width rows (row 8 = top beam, rows 15–16 =
+trailer rail, etc.) the shift trims the far edge — the body appears slightly
+narrower on the side it turns toward, a mild perspective foreshortening that
+matches how a broad vehicle looks when viewed from behind mid-corner. For rows
+with natural margin the X pattern just moves laterally.
+
+All `fillRect` pixel accents (opaque dark mass, windows, box seams, brake
+lights, licence plate, reflector stripe) now carry `+ o` where `o = steerDir × 2`,
+keeping every detail locked to the bitmap content. Previously only the roof
+stripe and the two cab marker lights had this offset; the body accents were at
+fixed positions and would quietly float away from the shifted sprite.
+
+Implementation: the 64-line pair of hardcoded `TRUCK_ROWS_LEFT / TRUCK_ROWS_RIGHT`
+arrays was replaced by a 6-line `shiftRow` helper and two one-liner generators
+(`TRUCK_ROWS.map(r => shiftRow(r, ±2))`). Tests verify byte-exact values for
+cab row 0 and full-width body row 8 in both variants.
+
 #### Non-instant engine start — crank starter
 Hold **ENTER** for ~1.8 s to crank the engine. Releasing before it fires resets
 the crank — you must try again. Works both for the initial game start and for

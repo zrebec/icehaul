@@ -143,9 +143,9 @@ node scripts/drive-shot.mjs out.png 5      # boots, holds ArrowUp+ArrowRight for
 - **ArrowDown** — brake
 - **ArrowLeft / ArrowRight** — steer
 - **D** — shift up · **A** — shift down (manual 5-speed gearbox)
-- **ENTER** — start the engine / restart a stalled engine (also starts the game from the title)
+- **ENTER (hold ~1.8 s)** — crank the engine to start / restart a stalled engine; releasing early resets the crank. `STARTING...` overlay while cranking (`CRANK_NEEDED_MS = 1800` in `config.ts`).
 
-**The manual gearbox is core.** Each gear has a top speed — **1st caps at ~28 km/h, so you physically cannot reach 120 in a low gear** — and a torque band shown on the **RPM** gauge. Acceleration is deliberately slow and heavy: you climb through the gears with **D** (up) / **A** (down). The engine dies two ways, each after a short warning + ENTER restart:
+**The manual gearbox is core.** Each gear has a top speed — **1st caps at ~28 km/h, so you physically cannot reach 120 in a low gear** — and a torque band shown on the **RPM** gauge. Acceleration is deliberately slow and heavy: you climb through the gears with **D** (up) / **A** (down). The engine dies two ways, each after a short warning + hold-ENTER restart:
 - **Stall (lug):** revs fall below `LUG_RPM` (0.25 ≈ 650 rpm) — you braked/slowed or sat in too tall a gear without downshifting (1st gear is immune). Realistic: e.g. **cruising 30 km/h in 5th lugs** (you must downshift). The RPM bar drops toward 0 bars and a ~3.5 s `ENGINE STALLING / SHIFT DOWN A` cough warning precedes the stall. RPM is proportional to speed (`rpm = speed / gear.to`) and is shown raw — it CAN read 0.
 - **Burn-out (over-rev):** sit on the **redline** under throttle without upshifting → `ENGINE REDLINE / SHIFT UP D`, then it cooks (≈6 s). Only in gears you can upshift out of — the top gear's redline is just the speed limiter, so it's safe (5th's band tops at 130 km/h so the 120 km/h cap sits below redline).
 
@@ -159,7 +159,7 @@ RPM is **proportional to road speed** (`rpm = speed / gear.to`, like a real engi
 
 Each phase is self-contained, ends with a runnable build, and leaves the previous scene playable. Time estimates assume part-time work with AI assistance.
 
-> **Recent (post-phase-1):** manual 5-speed gearbox — per-gear top speed, deliberately slow acceleration, RPM gauge, **A/D** shifting, engine **stall + ENTER restart**, RPM-driven engine pitch, and a reworked drivetrain HUD panel. This pulls the "gear-shift feel" of phase 3 forward; the delivery time budget was raised 7 → 8 min to suit the slower acceleration.
+> **Recent (post-phase-1, through B47 2026-06-03):** manual 5-speed gearbox, RPM gauge, **A/D** shifting, stall + redline burn-out, synchro downshift limits, tachometer HUD, RPM-driven engine pitch, **hold-ENTER crank start** (1.8 s, both initial and restart), harder torque curve (quadratic bog zone, `BOG_FLOOR=0.12`), surface drag double-penalty fix (mud/sand gears now work correctly), traffic perspective fix (1/z projection matches canisters). Delivery budget 8 min; 20-seed completability sim all pass.
 
 | Phase | Goal | Est. (h) |
 |-------|------|----------|

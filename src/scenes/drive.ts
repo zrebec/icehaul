@@ -526,7 +526,8 @@ export function createDriveScene(
         shakeX = ((hash(tick) * 8) | 0) - 4
         shakeY = ((hash(tick + 7) * 4) | 0) - 2
       }
-      drawTruck(ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5)
+      const steerDir: -1 | 0 | 1 = v.vx < -0.1 ? -1 : v.vx > 0.1 ? 1 : 0
+      drawTruck(ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5, steerDir)
 
       const timeLeftSec = Math.ceil(missionTimerMs / 1000)
       const tlMin = Math.floor(timeLeftSec / 60).toString().padStart(2, '0')

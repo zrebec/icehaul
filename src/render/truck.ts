@@ -74,6 +74,24 @@ export const TRUCK_BMP_DATA = rowsToBitmapData(TRUCK_ROWS, TRUCK_BMP_W, TRUCK_BM
 
 const TRUCK_BMP: Bitmap = createBitmap(TRUCK_BMP_DATA, TRUCK_BMP_W, TRUCK_BMP_H)
 
+// Shift every row of a sprite left (dx<0) or right (dx>0) within the fixed-width frame.
+// Pixels shifted off one edge are replaced with transparent dots on the other.
+function shiftRow(row: string, dx: number): string {
+  if (dx === 0) return row
+  if (dx < 0) return row.slice(-dx) + '.'.repeat(-dx)
+  return '.'.repeat(dx) + row.slice(0, TRUCK_BMP_W - dx)
+}
+
+export const TRUCK_BMP_LEFT_DATA = rowsToBitmapData(
+  TRUCK_ROWS.map(r => shiftRow(r, -2)), TRUCK_BMP_W, TRUCK_BMP_H,
+)
+export const TRUCK_BMP_RIGHT_DATA = rowsToBitmapData(
+  TRUCK_ROWS.map(r => shiftRow(r, 2)), TRUCK_BMP_W, TRUCK_BMP_H,
+)
+
+const TRUCK_BMP_LEFT: Bitmap = createBitmap(TRUCK_BMP_LEFT_DATA, TRUCK_BMP_W, TRUCK_BMP_H)
+const TRUCK_BMP_RIGHT: Bitmap = createBitmap(TRUCK_BMP_RIGHT_DATA, TRUCK_BMP_W, TRUCK_BMP_H)
+
 function buildCollisionData(): Uint8Array {
   const data = new Uint8Array(TRUCK_BMP_DATA)
   const bpr = TRUCK_BMP_W / 8
@@ -113,54 +131,58 @@ const TRUCK_ATTRS: AttrMap = createAttrMap(3, 4, [
 /**
  * Draw the rear-view truck at centre-bottom position.
  * `lean` shifts horizontally (body roll from lateral velocity).
+ * `steerDir` selects the whole-truck sprite variant: -1 left, 0 straight, 1 right.
  */
 export function drawTruck(
   ctx: CanvasRenderingContext2D,
   cx: number,
   baseY: number,
   lean = 0,
+  steerDir: -1 | 0 | 1 = 0,
 ): void {
   const x = Math.round(cx - 12 + lean)
   const y = Math.round(baseY - 32)
+  const o = steerDir * 2  // pixel offset matching the whole-truck sprite shift
 
   // Opaque dark mass first: the road must not show through the truck body.
   ctx.fillStyle = C.BLACK
-  ctx.fillRect(x + 5, y + 9, 5, 4)
-  ctx.fillRect(x + 14, y + 9, 5, 4)
-  ctx.fillRect(x + 6, y + 18, 12, 4)
-  ctx.fillRect(x + 4, y + 24, 16, 4)
-  ctx.fillRect(x + 2, y + 26, 5, 6)
-  ctx.fillRect(x + 17, y + 26, 5, 6)
+  ctx.fillRect(x + 5 + o, y + 9, 5, 4)
+  ctx.fillRect(x + 14 + o, y + 9, 5, 4)
+  ctx.fillRect(x + 6 + o, y + 18, 12, 4)
+  ctx.fillRect(x + 4 + o, y + 24, 16, 4)
+  ctx.fillRect(x + 2 + o, y + 26, 5, 6)
+  ctx.fillRect(x + 17 + o, y + 26, 5, 6)
 
-  drawBitmapAttrs(ctx, TRUCK_BMP, TRUCK_ATTRS, x, y)
+  const bmp = steerDir < 0 ? TRUCK_BMP_LEFT : steerDir > 0 ? TRUCK_BMP_RIGHT : TRUCK_BMP
+  drawBitmapAttrs(ctx, bmp, TRUCK_ATTRS, x, y)
 
-  // Pixel accents inspired by the concept art: frosty rear glass, box seams,
-  // red lights and a small yellow plate, all within the Spectrum palette.
+  // Pixel accents: frosty rear glass, box seams, red lights, yellow plate.
+  // All offsets follow the sprite shift so accents stay locked to the body.
   ctx.fillStyle = C.BLACK
-  ctx.fillRect(x + 11, y + 17, 1, 6)
-  ctx.fillRect(x + 6, y + 19, 12, 1)
-  ctx.fillRect(x + 6, y + 21, 12, 1)
+  ctx.fillRect(x + 11 + o, y + 17, 1, 6)
+  ctx.fillRect(x + 6 + o, y + 19, 12, 1)
+  ctx.fillRect(x + 6 + o, y + 21, 12, 1)
 
   ctx.fillStyle = C.B_CYAN
-  ctx.fillRect(x + 7, y + 9, 3, 4)
-  ctx.fillRect(x + 14, y + 9, 3, 4)
-  ctx.fillRect(x + 11, y + 8, 2, 1)
-  ctx.fillRect(x + 3, y + 15, 18, 1)
+  ctx.fillRect(x + 7 + o, y + 9, 3, 4)
+  ctx.fillRect(x + 14 + o, y + 9, 3, 4)
+  ctx.fillRect(x + 11 + o, y + 8, 2, 1)
+  ctx.fillRect(x + 3 + o, y + 15, 18, 1)
 
   ctx.fillStyle = C.B_WHITE
-  ctx.fillRect(x + 8, y + 0, 8, 1)
-  ctx.fillRect(x + 2, y + 16, 20, 1)
-  ctx.fillRect(x + 3, y + 23, 18, 1)
+  ctx.fillRect(x + 8 + o, y + 0, 8, 1)
+  ctx.fillRect(x + 2 + o, y + 16, 20, 1)
+  ctx.fillRect(x + 3 + o, y + 23, 18, 1)
 
   ctx.fillStyle = C.B_RED
-  ctx.fillRect(x + 1, y + 24, 3, 3)
-  ctx.fillRect(x + 20, y + 24, 3, 3)
-  ctx.fillRect(x + 5, y + 5, 2, 1)
-  ctx.fillRect(x + 17, y + 5, 2, 1)
+  ctx.fillRect(x + 1 + o, y + 24, 3, 3)
+  ctx.fillRect(x + 20 + o, y + 24, 3, 3)
+  ctx.fillRect(x + 5 + o, y + 5, 2, 1)
+  ctx.fillRect(x + 17 + o, y + 5, 2, 1)
 
   ctx.fillStyle = C.B_YELLOW
-  ctx.fillRect(x + 9, y + 26, 6, 2)
+  ctx.fillRect(x + 9 + o, y + 26, 6, 2)
 
   ctx.fillStyle = C.WHITE
-  ctx.fillRect(x + 7, y + 30, 10, 1)
+  ctx.fillRect(x + 7 + o, y + 30, 10, 1)
 }
