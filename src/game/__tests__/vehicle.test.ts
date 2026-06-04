@@ -319,3 +319,19 @@ describe('tickVehicle — redline burn-out', () => {
     expect(v.redlineWarning).toBe(false)
   })
 })
+
+describe('tickVehicle — fuel exhaustion chain', () => {
+  it('near-empty tank drains to zero under sustained throttle', () => {
+    const v = freshVehicle({ speed: 80, fuel: 0.001 })
+    for (let i = 0; i < 100; i++) tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.fuel).toBe(0)
+  })
+
+  it('empty tank: speed coasts to zero — satisfies drive.ts game-over precondition (fuel<=0 && speed<1)', () => {
+    // drive.ts fires triggerGameOver('fuel') when v.fuel <= 0 && v.speed < 1.
+    // Verify that physics alone brings a coasting truck to a full stop.
+    const v = freshVehicle({ speed: 60, fuel: 0 })
+    for (let i = 0; i < 600; i++) tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.speed).toBe(0)
+  })
+})

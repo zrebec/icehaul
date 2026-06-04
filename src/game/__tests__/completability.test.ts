@@ -350,4 +350,15 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
     const failed = sweep.filter(s => !s.best.completed)
     expect(failed.length).toBe(0)
   })
+
+  it('aggressive strategy is fuel-limited on at least one seed — FUEL OUT path is reachable', () => {
+    // Confirms the drive.ts triggerGameOver("fuel") path is exercisable in practice,
+    // not just theoretically wired. Aggressive burns fuel fast on heavy-surface seeds;
+    // the sim has no canister pickups, so it runs dry before finishing 5 km on those seeds.
+    const fuelOut = sweep.filter(s => {
+      const agg = s.allResults.find(r => r.strategy === 'aggressive')!
+      return agg.failReason === 'fuel'
+    })
+    expect(fuelOut.length).toBeGreaterThan(0)
+  })
 })
