@@ -2,7 +2,7 @@
 
 ZX Spectrum-flavoured ice-road trucking micro-sim. Not ETS2 — its 8-bit hallucination. The fantasy is **risk management**, not speed. Every metre is a decision: when to brake, when to crawl, when to risk the ice.
 
-Built on [zx-kit](https://github.com/zrebec/zx-kit) (`zx-kit@^0.21.0`).
+Built on [zx-kit](https://github.com/zrebec/zx-kit) (`zx-kit@^0.28.0`).
 
 ## Play
 
