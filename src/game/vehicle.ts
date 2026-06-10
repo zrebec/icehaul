@@ -56,6 +56,21 @@ export function massAccelMult(massT: number, referenceMassT = REFERENCE_MASS_T):
   return referenceMassT / massT
 }
 
+/**
+ * Mass-based braking multiplier. Manual-brake deceleration scales inversely with
+ * gross weight relative to {@link REFERENCE_MASS_T}: the 20 t reference truck
+ * returns 1.0 (today's stopping power unchanged), a 10 t empty cab ~2.0 (pulls up
+ * sharply), a 30 t load ~0.67 (carries its momentum — stops ~1.5× later). Same
+ * inertia intuition as {@link massAccelMult}, applied to the brake instead of the
+ * engine. Deliberately scoped to the *manual brake* only — aero/rolling/surface
+ * drag stay mass-independent so the SURFACE_DRAG equilibria keep their tuning.
+ *
+ * Pure → unit-testable. Threaded into {@link tickVehicle} via the `massT` param.
+ */
+export function massBrakeMult(massT: number, referenceMassT = REFERENCE_MASS_T): number {
+  return referenceMassT / massT
+}
+
 export interface Vehicle {
   x: number
   vx: number
@@ -157,6 +172,7 @@ export function tickVehicle(
   curvature = 0,
   offroadSeverity = 0,
   offroadReturnDir = 0,
+  massT: number = REFERENCE_MASS_T,
 ): void {
   const dt = dtMs / 1000
   const speedRatio = v.speed / MAX_SPEED
@@ -236,11 +252,13 @@ export function tickVehicle(
     v.speed = Math.max(gear.to, v.speed - OVERREV_ENGINE_BRAKE * dt)
   }
 
-  // Manual brake — per-surface profile with speed fade and wheel lock
+  // Manual brake — per-surface profile with speed fade and wheel lock. Heavier
+  // loads carry their momentum: massBrakeMult shrinks the deceleration so a 30 t
+  // truck needs a longer stopping distance than a 10 t cab (20 t = unchanged).
   const bp = SURFACE_BRAKE[surface]
   if (input.brake) {
     const speedFade = 1 - speedRatio * bp.speedFade
-    v.speed = Math.max(0, v.speed - bp.decel * speedFade * dt)
+    v.speed = Math.max(0, v.speed - bp.decel * speedFade * massBrakeMult(massT) * dt)
   }
 
   // Engine braking (throttle released, engine compression resists motion)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createVehicle, tickVehicle, massAccelMult, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
+import { createVehicle, tickVehicle, massAccelMult, massBrakeMult, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
 import { STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, GEAR_COUNT, REFERENCE_MASS_T } from '../../config.ts'
 
 const noInput: VehicleInput = { throttle: false, brake: false, steerLeft: false, steerRight: false }
@@ -51,6 +51,50 @@ describe('massAccelMult', () => {
     tickVehicle(light, throttle, 'asphalt', 1.0, 1.0 * massAccelMult(10), 200)
     tickVehicle(heavy, throttle, 'asphalt', 1.0, 1.0 * massAccelMult(30), 200)
     expect(light.speed).toBeGreaterThan(heavy.speed)
+  })
+})
+
+describe('massBrakeMult', () => {
+  it('is exactly 1.0 at the reference mass (today\'s braking unchanged)', () => {
+    expect(massBrakeMult(REFERENCE_MASS_T)).toBe(1.0)
+    expect(massBrakeMult(20)).toBe(1.0)
+  })
+
+  it('a light 10 t cab brakes ~2x harder (stops sooner)', () => {
+    expect(massBrakeMult(10)).toBeCloseTo(2.0, 5)
+  })
+
+  it('a heavy 30 t load brakes ~0.67x (carries momentum, stops later)', () => {
+    expect(massBrakeMult(30)).toBeCloseTo(0.667, 3)
+  })
+
+  it('is monotonic: heavier mass always means weaker braking', () => {
+    expect(massBrakeMult(10)).toBeGreaterThan(massBrakeMult(20))
+    expect(massBrakeMult(20)).toBeGreaterThan(massBrakeMult(30))
+  })
+
+  it('honours an explicit reference mass override', () => {
+    expect(massBrakeMult(15, 30)).toBe(2.0)
+  })
+
+  it('omitting massT defaults to the reference mass (no behaviour change)', () => {
+    const withDefault = freshVehicle({ speed: 100 })
+    const withRef = freshVehicle({ speed: 100 })
+    const brake: VehicleInput = { ...noInput, brake: true }
+    // No massT arg vs. explicit 20 t must produce identical speed.
+    tickVehicle(withDefault, brake, 'asphalt', 1.0, 1.0, 200)
+    tickVehicle(withRef, brake, 'asphalt', 1.0, 1.0, 200, 0, 0, 0, REFERENCE_MASS_T)
+    expect(withDefault.speed).toBe(withRef.speed)
+  })
+
+  it('a heavier truck keeps more speed under identical braking (longer stop)', () => {
+    const light = freshVehicle({ speed: 100 })
+    const heavy = freshVehicle({ speed: 100 })
+    const brake: VehicleInput = { ...noInput, brake: true }
+    // Same surface, speed and dt; only the mass differs (last arg).
+    tickVehicle(light, brake, 'asphalt', 1.0, 1.0, 200, 0, 0, 0, 10)
+    tickVehicle(heavy, brake, 'asphalt', 1.0, 1.0, 200, 0, 0, 0, 30)
+    expect(heavy.speed).toBeGreaterThan(light.speed)
   })
 })
 

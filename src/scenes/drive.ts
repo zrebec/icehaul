@@ -281,7 +281,7 @@ export function createDriveScene(
       const accel = accelFor(surface) * massAccelMult(weightT)
       const curvature = getCurvatureAt(v.distance)
       tickVehicle(v, input, surface, grip, accel, dt, curvature,
-        lastOffroad.severity, offroadReturnDir)
+        lastOffroad.severity, offroadReturnDir, weightT)
       tickParticles(surfaceParticles, dt, 0.00022)
 
       if (engineStarted) updateEngine(v.speed, v.rpm, surface, input.brake, !v.stalled)
