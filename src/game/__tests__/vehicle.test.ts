@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { createVehicle, tickVehicle, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
-import { STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, GEAR_COUNT } from '../../config.ts'
+import { createVehicle, tickVehicle, massAccelMult, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
+import { STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, GEAR_COUNT, REFERENCE_MASS_T } from '../../config.ts'
 
 const noInput: VehicleInput = { throttle: false, brake: false, steerLeft: false, steerRight: false }
 const dt16 = 16
@@ -17,6 +17,40 @@ describe('createVehicle', () => {
     expect(v.speed).toBe(0)
     expect(v.distance).toBe(0)
     expect(v.fuel).toBe(1.0)
+  })
+})
+
+describe('massAccelMult', () => {
+  it('is exactly 1.0 at the reference mass (today\'s feel unchanged)', () => {
+    expect(massAccelMult(REFERENCE_MASS_T)).toBe(1.0)
+    expect(massAccelMult(20)).toBe(1.0)
+  })
+
+  it('a light 10 t cab accelerates ~2x harder', () => {
+    expect(massAccelMult(10)).toBeCloseTo(2.0, 5)
+  })
+
+  it('a heavy 30 t load accelerates ~0.67x (a slog)', () => {
+    expect(massAccelMult(30)).toBeCloseTo(0.667, 3)
+  })
+
+  it('is monotonic: heavier mass always means less pull', () => {
+    expect(massAccelMult(10)).toBeGreaterThan(massAccelMult(20))
+    expect(massAccelMult(20)).toBeGreaterThan(massAccelMult(30))
+  })
+
+  it('honours an explicit reference mass override', () => {
+    expect(massAccelMult(15, 30)).toBe(2.0)
+  })
+
+  it('composed into accelMult, a heavier truck gains less speed per tick', () => {
+    const light = freshVehicle()
+    const heavy = freshVehicle()
+    const throttle: VehicleInput = { ...noInput, throttle: true }
+    // Same surface (asphalt accel 1.0) and grip; only the mass multiplier differs.
+    tickVehicle(light, throttle, 'asphalt', 1.0, 1.0 * massAccelMult(10), 200)
+    tickVehicle(heavy, throttle, 'asphalt', 1.0, 1.0 * massAccelMult(30), 200)
+    expect(light.speed).toBeGreaterThan(heavy.speed)
   })
 })
 
