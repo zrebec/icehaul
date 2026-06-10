@@ -5,6 +5,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased] — 2026-06-10
+
+### Added
+
+#### Mass coupling — braking distance + stall-ease (I2)
+Gross weight is now threaded into `tickVehicle` via a new trailing `massT`
+parameter (defaulting to `REFERENCE_MASS_T`, so every existing call site and
+test stays bit-identical at 20 t). Two pure, unit-tested helpers — mirroring the
+existing `massAccelMult` — couple mass into the physics:
+
+- **`massBrakeMult(massT)` (I2a):** scales the **manual brake** deceleration by
+  `REFERENCE_MASS_T / massT`. A 30 t load carries its momentum (~0.67× decel,
+  ~1.5× stopping distance); a 10 t cab pulls up sharply (~2×). Deliberately
+  scoped to the manual brake — aero/rolling/`SURFACE_DRAG` stay mass-independent
+  so the surface-drag equilibria keep their tuning.
+- **`massStallMult(massT)` (I2b):** scales `STALL_GRACE_MS`. A 30 t load lugs to
+  a stall in ~2.3 s versus the 20 t reference ~3.5 s; a 10 t cab gets a forgiving
+  ~7 s. 20 t is unchanged, so the 20-seed completability sim is untouched.
+
+13 new unit tests (helper values, monotonicity, default-mass no-op, integration
+braking/stall comparisons). 162 → 175 tests passing.
+
+Deferred on purpose: **lug-zone widening (I2c)** — making a heavier truck lug at
+a *higher rpm* — changes when lugging begins and needs the completability sim
+re-validated; see `docs/DRIVETRAIN_ROADMAP.md` §2.2. I2 is done without it.
+
+---
+
 ## [Unreleased] — 2026-06-03
 
 ### Fixed

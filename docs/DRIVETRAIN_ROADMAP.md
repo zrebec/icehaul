@@ -94,6 +94,26 @@ accelerates so slowly that it only *feels* fine once you've finally climbed into
 that's fair — just note the heavy truck still **starts in 1st** (even more so). Ties into
 cargo/damage below.
 
+**✓ IMPLEMENTED (2026-06-10):**
+- **Acceleration (I1, 2026-06-09):** `massAccelMult(massT) = REFERENCE_MASS_T / massT`, folded
+  into the engine-force term at the call site (`scenes/drive.ts`). `W` debug key cycles 10/20/30 t.
+- **(b) Braking distance (I2a):** `massBrakeMult(massT) = ref/massT` scales the **manual brake**
+  decel inside `tickVehicle` (new trailing `massT` param, defaulting to `REFERENCE_MASS_T` →
+  20 t bit-identical). 30 t ≈ 0.67× decel (~1.5× stopping distance), 10 t ≈ 2×. Scoped to the
+  manual brake only — aero/rolling/`SURFACE_DRAG` stay mass-independent so the surface-drag
+  equilibria keep their tuning. Owner playtested 2026-06-10: linear coupling feels right.
+- **(a) Stall-ease (I2b):** `massStallMult(massT) = ref/massT` scales `STALL_GRACE_MS`. A 30 t
+  load lugs to a stall in ~2.3 s vs the 20 t ~3.5 s; 10 t gets a forgiving ~7 s. 20 t unchanged,
+  so the 20-seed completability sim is untouched.
+
+**◻ DEFERRED — (a′) lug-zone widening (I2c):** make a heavier truck *lug at a higher rpm* (raise
+the effective `LUG_RPM` with mass), so the lug zone widens for heavy loads, not just the grace
+window after lugging starts. **Not done on purpose:** it changes *when* lugging begins, so it must
+be re-validated against `completability.test.ts` (the 20-seed time/fuel budget) and may need a
+small `LUG_RPM`/`STALL_GRACE_MS` re-tune. Optional polish — I2 is considered done without it.
+Reach for it only if heavy loads should feel like they need a downshift *earlier*, not just *die
+faster*.
+
 ### 2.3 Damage model — truck + cargo, money, repairs (ETS2-like)
 **Verdict: right long-term direction, but the biggest item — this is the career/economy
 layer.** Build it incrementally, not in one go.
@@ -170,7 +190,9 @@ Cheap feel-wins first, the economy layer last:
 3. Tach dial + prominent speed number (owner 2.5)   — ✓ DONE (2026-06-03)
 4. Non-instant engine start           (owner 2.1)   — ✓ DONE (2026-06-03)
 4a. Surface drag / torque curve tune  (B45–B46)    — ✓ DONE (2026-06-03)
-5. Weight-based acceleration          (owner 2.2)  — small; enables cargo variety
+5. Weight-based acceleration          (owner 2.2)  — ✓ DONE (I1, 2026-06-09)
+5b. Mass → braking dist + stall-ease  (owner 2.2)  — ✓ DONE (I2a/I2b, 2026-06-10)
+5c. Mass → lug-zone widening          (owner 2.2)  — ◻ DEFERRED (I2c; needs sim re-validation)
 6. Damage accumulators + % display    (owner 2.3a)
 7. Low-speed bump = damage + continue (owner 2.4)  — needs #6
 8. Money + repair + pit-stop          (owner 2.3c) — career layer
