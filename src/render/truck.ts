@@ -1,137 +1,281 @@
-import { C, createBitmap, createAttrMap, drawBitmapAttrs, type Bitmap, type AttrMap } from 'zx-kit'
+import { C, createBitmap, createAttrMap, drawBitmapAttrs, type Bitmap, type AttrMap, type SpectrumColor } from 'zx-kit'
 
 /**
- * 24x32 rear-view ice-road truck.
+ * 24x32 rear view of a black box truck.
  *
- * The base bitmap keeps to ZX rules: 3 columns x 4 rows of 8x8 attributes,
- * transparent paper, one ink per cell. Extra fillRect details use only zx-kit
- * palette colours and are mirrored in the collision mask where they are solid.
+ * Each colour is a separate 1-bit ZX bitmap layer. This keeps the sprite
+ * compatible with createBitmap/drawBitmapAttrs while allowing the dark trailer
+ * mass, frame, lamps and wheels to stay visually distinct.
  */
 
-export const TRUCK_BMP_W = 24
-export const TRUCK_BMP_H = 32
+const SOURCE_W = 24
+const SOURCE_H = 32
 
-const TRUCK_ROWS = [
-  '........XXXXXXXX........',
-  '......XXXXXXXXXXXX......',
-  '.....XXXXXXXXXXXXXX.....',
-  '....XXXXXXXXXXXXXXXX....',
-  '...XXXXXXXXXXXXXXXXXX...',
-  '...XXXX..XXXXXX..XXXX...',
-  '..XXXXXXXXXXXXXXXXXXXX..',
-  '..XXXXXXXXXXXXXXXXXXXX..',
+export const TRUCK_BMP_W = 32
+export const TRUCK_BMP_H = 40
 
-  'XXXXXXXXXXXXXXXXXXXXXXXX',
-  '.XXX....XXXXXXXX....XXX.',
-  '.XXX....XXXXXXXX....XXX.',
-  '.XXX....XXXXXXXX....XXX.',
-  '.XXXXXXXXXXXXXXXXXXXXXX.',
-  '.XX.XXXXXXXXXXXXXXXX.XX.',
-  '.XXXXXXXXXXXXXXXXXXXXXX.',
-  'XXXXXXXXXXXXXXXXXXXXXXXX',
+type PixelLayer = boolean[][]
+type TruckLayers = {
+  black: PixelLayer
+  white: PixelLayer
+  cyan: PixelLayer
+  red: PixelLayer
+  yellow: PixelLayer
+}
 
-  'XXXXXXXXXXXXXXXXXXXXXXXX',
-  'XX..XXXXXXXXXXXXXXXX..XX',
-  'XX..XX............XX..XX',
-  'XX..XX............XX..XX',
-  'XX..XX............XX..XX',
-  'XX..XXXXXXXXXXXXXXXX..XX',
-  'XXXXXXXXXXXXXXXXXXXXXXXX',
-  'XXXXXXXXXXXXXXXXXXXXXXXX',
+function emptyLayer(): PixelLayer {
+  return Array.from({ length: SOURCE_H }, () => Array<boolean>(SOURCE_W).fill(false))
+}
 
-  'XX....................XX',
-  'XXX..................XXX',
-  '....XXXXXXXXXXXXXXXX....',
-  '.....XXXXXXXXXXXXXX.....',
-  '........................',
-  '........................',
-  '........................',
-  '........................',
-] as const
+function createLayers(): TruckLayers {
+  return {
+    black: emptyLayer(),
+    white: emptyLayer(),
+    cyan: emptyLayer(),
+    red: emptyLayer(),
+    yellow: emptyLayer(),
+  }
+}
 
-function rowsToBitmapData(rows: readonly string[], width: number, height: number): Uint8Array {
-  if (rows.length !== height) throw new Error(`truck bitmap: expected ${height} rows, got ${rows.length}`)
+function pixel(layer: PixelLayer, x: number, y: number): void {
+  if (x >= 0 && x < SOURCE_W && y >= 0 && y < SOURCE_H) layer[y]![x] = true
+}
 
-  const bytesPerRow = width / 8
-  const out = new Uint8Array(bytesPerRow * height)
-  for (let row = 0; row < height; row++) {
-    const line = rows[row]!
-    if (line.length !== width) throw new Error(`truck bitmap row ${row}: expected ${width} cols, got ${line.length}`)
+function hline(layer: PixelLayer, x1: number, x2: number, y: number): void {
+  for (let x = x1; x <= x2; x++) pixel(layer, x, y)
+}
 
-    for (let col = 0; col < width; col++) {
-      const ch = line[col]
-      if (ch === '.') continue
-      if (ch !== 'X') throw new Error(`truck bitmap row ${row}: invalid char ${ch}`)
+function vline(layer: PixelLayer, x: number, y1: number, y2: number): void {
+  for (let y = y1; y <= y2; y++) pixel(layer, x, y)
+}
 
-      const byteIdx = row * bytesPerRow + Math.floor(col / 8)
-      out[byteIdx]! |= 1 << (7 - (col % 8))
+function fill(layer: PixelLayer, x1: number, y1: number, x2: number, y2: number): void {
+  for (let y = y1; y <= y2; y++) hline(layer, x1, x2, y)
+}
+
+function buildStraightLayers(): TruckLayers {
+  const l = createLayers()
+
+  // Large square trailer mass.
+  fill(l.black, 3, 1, 20, 2)
+  fill(l.black, 2, 3, 21, 22)
+  fill(l.black, 1, 23, 22, 26)
+  fill(l.black, 3, 27, 7, 31)
+  fill(l.black, 16, 27, 20, 31)
+
+  // Cold metal outer frame and rear door frame.
+  hline(l.cyan, 5, 18, 0)
+  pixel(l.cyan, 4, 1)
+  pixel(l.cyan, 19, 1)
+  vline(l.cyan, 1, 8, 14)
+  vline(l.cyan, 22, 8, 14)
+  hline(l.cyan, 1, 22, 26)
+  vline(l.cyan, 7, 24, 26)
+  vline(l.cyan, 16, 24, 26)
+
+  hline(l.white, 4, 19, 2)
+  hline(l.white, 3, 20, 3)
+  vline(l.white, 2, 4, 21)
+  vline(l.white, 21, 4, 21)
+  hline(l.white, 3, 20, 22)
+  hline(l.white, 4, 19, 4)
+  vline(l.white, 4, 5, 20)
+  vline(l.white, 19, 5, 20)
+  hline(l.white, 5, 18, 21)
+
+  // Twin rear doors, hinges and latches.
+  vline(l.cyan, 11, 5, 20)
+  vline(l.cyan, 12, 5, 20)
+  for (const y of [7, 15]) {
+    hline(l.cyan, 3, 5, y)
+    hline(l.cyan, 18, 20, y)
+  }
+  hline(l.cyan, 9, 13, 18)
+  vline(l.cyan, 9, 16, 19)
+  vline(l.cyan, 14, 16, 19)
+
+  fill(l.red, 2, 24, 6, 25)
+  fill(l.red, 17, 24, 21, 25)
+  fill(l.yellow, 9, 24, 14, 25)
+
+  // Four visibly separated tyre pairs.
+  for (const x of [3, 5, 17, 19]) {
+    vline(l.cyan, x, 28, 31)
+    pixel(l.cyan, x + 1, 28)
+    pixel(l.cyan, x + 1, 30)
+  }
+
+  return l
+}
+
+function buildLeftLayers(): TruckLayers {
+  const l = createLayers()
+
+  // The near left side grows while the far right edge stays almost vertical.
+  fill(l.black, 6, 1, 19, 1)
+  fill(l.black, 4, 2, 20, 2)
+  fill(l.black, 2, 3, 21, 4)
+  fill(l.black, 1, 5, 22, 21)
+  fill(l.black, 2, 22, 22, 26)
+  fill(l.black, 1, 27, 6, 31)
+  fill(l.black, 17, 27, 20, 31)
+
+  hline(l.cyan, 7, 18, 0)
+  pixel(l.cyan, 6, 1)
+  pixel(l.cyan, 19, 1)
+  vline(l.cyan, 0, 8, 16)
+  pixel(l.cyan, 1, 7)
+  pixel(l.cyan, 1, 17)
+  hline(l.cyan, 2, 22, 26)
+  vline(l.cyan, 7, 24, 26)
+  vline(l.cyan, 16, 24, 26)
+
+  hline(l.white, 7, 19, 2)
+  hline(l.white, 4, 21, 3)
+  pixel(l.white, 3, 4)
+  pixel(l.white, 2, 5)
+  vline(l.white, 1, 6, 19)
+  pixel(l.white, 2, 20)
+  hline(l.white, 3, 7, 21)
+  vline(l.white, 7, 4, 21)
+  hline(l.white, 8, 20, 4)
+  vline(l.white, 20, 5, 21)
+  hline(l.white, 8, 20, 22)
+
+  // Door geometry is compressed toward the far edge.
+  vline(l.cyan, 12, 5, 20)
+  vline(l.cyan, 13, 5, 20)
+  for (const y of [7, 15]) {
+    hline(l.cyan, 6, 8, y)
+    hline(l.cyan, 19, 21, y)
+  }
+  hline(l.cyan, 10, 15, 18)
+  vline(l.cyan, 10, 16, 19)
+  vline(l.cyan, 16, 16, 19)
+
+  fill(l.red, 3, 24, 7, 25)
+  fill(l.red, 17, 24, 21, 25)
+  fill(l.yellow, 10, 24, 15, 25)
+
+  // Near wheels are larger and more exposed.
+  vline(l.cyan, 1, 27, 30)
+  vline(l.cyan, 2, 28, 31)
+  vline(l.cyan, 4, 28, 31)
+  vline(l.cyan, 6, 28, 31)
+  vline(l.cyan, 17, 28, 31)
+  vline(l.cyan, 19, 28, 31)
+
+  return l
+}
+
+function mirrorLayer(source: PixelLayer): PixelLayer {
+  return source.map(row => [...row].reverse())
+}
+
+function mirrorLayers(source: TruckLayers): TruckLayers {
+  return {
+    black: mirrorLayer(source.black),
+    white: mirrorLayer(source.white),
+    cyan: mirrorLayer(source.cyan),
+    red: mirrorLayer(source.red),
+    yellow: mirrorLayer(source.yellow),
+  }
+}
+
+function scaleLayer(source: PixelLayer): PixelLayer {
+  return Array.from({ length: TRUCK_BMP_H }, (_, y) => {
+    const sourceY = Math.min(SOURCE_H - 1, Math.floor(y * SOURCE_H / TRUCK_BMP_H))
+    return Array.from({ length: TRUCK_BMP_W }, (_, x) => {
+      const sourceX = Math.min(SOURCE_W - 1, Math.floor(x * SOURCE_W / TRUCK_BMP_W))
+      return source[sourceY]![sourceX]!
+    })
+  })
+}
+
+function scaleLayers(source: TruckLayers): TruckLayers {
+  return {
+    black: scaleLayer(source.black),
+    white: scaleLayer(source.white),
+    cyan: scaleLayer(source.cyan),
+    red: scaleLayer(source.red),
+    yellow: scaleLayer(source.yellow),
+  }
+}
+
+function layersToSolidData(layers: TruckLayers): Uint8Array {
+  const solid = Array.from(
+    { length: TRUCK_BMP_H },
+    () => Array<boolean>(TRUCK_BMP_W).fill(false),
+  )
+  for (const layer of Object.values(layers)) {
+    for (let y = 0; y < TRUCK_BMP_H; y++) {
+      for (let x = 0; x < TRUCK_BMP_W; x++) solid[y]![x] ||= layer[y]![x]!
+    }
+  }
+  return layerToBitmapData(solid)
+}
+
+function layerToBitmapData(layer: PixelLayer): Uint8Array {
+  const bytesPerRow = TRUCK_BMP_W / 8
+  const out = new Uint8Array(bytesPerRow * TRUCK_BMP_H)
+  for (let y = 0; y < TRUCK_BMP_H; y++) {
+    for (let x = 0; x < TRUCK_BMP_W; x++) {
+      if (!layer[y]![x]) continue
+      out[y * bytesPerRow + Math.floor(x / 8)]! |= 1 << (7 - (x % 8))
     }
   }
   return out
 }
 
-export const TRUCK_BMP_DATA = rowsToBitmapData(TRUCK_ROWS, TRUCK_BMP_W, TRUCK_BMP_H)
+const STRAIGHT_LAYERS = scaleLayers(buildStraightLayers())
+const LEFT_LAYERS = scaleLayers(buildLeftLayers())
+const RIGHT_LAYERS = mirrorLayers(LEFT_LAYERS)
 
-const TRUCK_BMP: Bitmap = createBitmap(TRUCK_BMP_DATA, TRUCK_BMP_W, TRUCK_BMP_H)
+export const TRUCK_BMP_DATA = layersToSolidData(STRAIGHT_LAYERS)
+export const TRUCK_BMP_LEFT_DATA = layersToSolidData(LEFT_LAYERS)
+export const TRUCK_BMP_RIGHT_DATA = layersToSolidData(RIGHT_LAYERS)
 
-// Shift every row of a sprite left (dx<0) or right (dx>0) within the fixed-width frame.
-// Pixels shifted off one edge are replaced with transparent dots on the other.
-function shiftRow(row: string, dx: number): string {
-  if (dx === 0) return row
-  if (dx < 0) return row.slice(-dx) + '.'.repeat(-dx)
-  return '.'.repeat(dx) + row.slice(0, TRUCK_BMP_W - dx)
-}
-
-export const TRUCK_BMP_LEFT_DATA = rowsToBitmapData(
-  TRUCK_ROWS.map(r => shiftRow(r, -2)), TRUCK_BMP_W, TRUCK_BMP_H,
-)
-export const TRUCK_BMP_RIGHT_DATA = rowsToBitmapData(
-  TRUCK_ROWS.map(r => shiftRow(r, 2)), TRUCK_BMP_W, TRUCK_BMP_H,
+export const TRUCK_COLLISION_BMP: Bitmap = createBitmap(
+  TRUCK_BMP_DATA,
+  TRUCK_BMP_W,
+  TRUCK_BMP_H,
 )
 
-const TRUCK_BMP_LEFT: Bitmap = createBitmap(TRUCK_BMP_LEFT_DATA, TRUCK_BMP_W, TRUCK_BMP_H)
-const TRUCK_BMP_RIGHT: Bitmap = createBitmap(TRUCK_BMP_RIGHT_DATA, TRUCK_BMP_W, TRUCK_BMP_H)
+type RenderLayers = Record<keyof TruckLayers, Bitmap>
 
-function buildCollisionData(): Uint8Array {
-  const data = new Uint8Array(TRUCK_BMP_DATA)
-  const bpr = TRUCK_BMP_W / 8
-
-  const setBit = (row: number, col: number) => {
-    const byteIdx = row * bpr + Math.floor(col / 8)
-    data[byteIdx]! |= 1 << (7 - (col % 8))
+function createRenderLayers(layers: TruckLayers): RenderLayers {
+  return {
+    black: createBitmap(layerToBitmapData(layers.black), TRUCK_BMP_W, TRUCK_BMP_H),
+    white: createBitmap(layerToBitmapData(layers.white), TRUCK_BMP_W, TRUCK_BMP_H),
+    cyan: createBitmap(layerToBitmapData(layers.cyan), TRUCK_BMP_W, TRUCK_BMP_H),
+    red: createBitmap(layerToBitmapData(layers.red), TRUCK_BMP_W, TRUCK_BMP_H),
+    yellow: createBitmap(layerToBitmapData(layers.yellow), TRUCK_BMP_W, TRUCK_BMP_H),
   }
-  const fillSpan = (row: number, left: number, right: number) => {
-    for (let col = left; col <= right; col++) setBit(row, col)
-  }
-
-  // Visually black but physically solid: glass, rear door shadow, bumper, tyres.
-  for (let row = 9; row <= 12; row++) {
-    fillSpan(row, 5, 9)
-    fillSpan(row, 14, 18)
-  }
-  for (let row = 18; row <= 21; row++) fillSpan(row, 6, 17)
-  for (let row = 24; row <= 27; row++) fillSpan(row, 4, 19)
-  for (let row = 26; row <= 31; row++) {
-    fillSpan(row, 2, 6)
-    fillSpan(row, 17, 21)
-  }
-
-  return data
 }
 
-export const TRUCK_COLLISION_BMP: Bitmap = createBitmap(buildCollisionData(), TRUCK_BMP_W, TRUCK_BMP_H)
+function solidAttrs(color: SpectrumColor): AttrMap {
+  const attrCols = TRUCK_BMP_W / 8
+  const attrRows = TRUCK_BMP_H / 8
+  return createAttrMap(
+    attrCols,
+    attrRows,
+    Array<SpectrumColor>(attrCols * attrRows).fill(color),
+  )
+}
 
-const TRUCK_ATTRS: AttrMap = createAttrMap(3, 4, [
-  C.B_WHITE, C.B_WHITE, C.B_WHITE,
-  C.B_WHITE, C.B_CYAN,  C.B_WHITE,
-  C.B_WHITE, C.B_WHITE, C.B_WHITE,
-  C.B_RED,   C.B_YELLOW, C.B_RED,
-])
+const STRAIGHT_RENDER = createRenderLayers(STRAIGHT_LAYERS)
+const LEFT_RENDER = createRenderLayers(LEFT_LAYERS)
+const RIGHT_RENDER = createRenderLayers(RIGHT_LAYERS)
+
+const BLACK_ATTRS = solidAttrs(C.BLACK)
+const WHITE_ATTRS = solidAttrs(C.B_WHITE)
+const CYAN_ATTRS = solidAttrs(C.B_CYAN)
+const RED_ATTRS = solidAttrs(C.B_RED)
+const YELLOW_ATTRS = solidAttrs(C.B_YELLOW)
 
 /**
- * Draw the rear-view truck at centre-bottom position.
- * `lean` shifts horizontally (body roll from lateral velocity).
- * `steerDir` selects the whole-truck sprite variant: -1 left, 0 straight, 1 right.
+ * Draw the truck at centre-bottom position.
+ * `lean` shifts it horizontally; `steerDir` selects a true perspective sprite.
  */
 export function drawTruck(
   ctx: CanvasRenderingContext2D,
@@ -140,49 +284,13 @@ export function drawTruck(
   lean = 0,
   steerDir: -1 | 0 | 1 = 0,
 ): void {
-  const x = Math.round(cx - 12 + lean)
-  const y = Math.round(baseY - 32)
-  const o = steerDir * 2  // pixel offset matching the whole-truck sprite shift
+  const x = Math.round(cx - TRUCK_BMP_W / 2 + lean)
+  const y = Math.round(baseY - TRUCK_BMP_H)
+  const layers = steerDir < 0 ? LEFT_RENDER : steerDir > 0 ? RIGHT_RENDER : STRAIGHT_RENDER
 
-  // Opaque dark mass first: the road must not show through the truck body.
-  ctx.fillStyle = C.BLACK
-  ctx.fillRect(x + 5 + o, y + 9, 5, 4)
-  ctx.fillRect(x + 14 + o, y + 9, 5, 4)
-  ctx.fillRect(x + 6 + o, y + 18, 12, 4)
-  ctx.fillRect(x + 4 + o, y + 24, 16, 4)
-  ctx.fillRect(x + 2 + o, y + 26, 5, 6)
-  ctx.fillRect(x + 17 + o, y + 26, 5, 6)
-
-  const bmp = steerDir < 0 ? TRUCK_BMP_LEFT : steerDir > 0 ? TRUCK_BMP_RIGHT : TRUCK_BMP
-  drawBitmapAttrs(ctx, bmp, TRUCK_ATTRS, x, y)
-
-  // Pixel accents: frosty rear glass, box seams, red lights, yellow plate.
-  // All offsets follow the sprite shift so accents stay locked to the body.
-  ctx.fillStyle = C.BLACK
-  ctx.fillRect(x + 11 + o, y + 17, 1, 6)
-  ctx.fillRect(x + 6 + o, y + 19, 12, 1)
-  ctx.fillRect(x + 6 + o, y + 21, 12, 1)
-
-  ctx.fillStyle = C.B_CYAN
-  ctx.fillRect(x + 7 + o, y + 9, 3, 4)
-  ctx.fillRect(x + 14 + o, y + 9, 3, 4)
-  ctx.fillRect(x + 11 + o, y + 8, 2, 1)
-  ctx.fillRect(x + 3 + o, y + 15, 18, 1)
-
-  ctx.fillStyle = C.B_WHITE
-  ctx.fillRect(x + 8 + o, y + 0, 8, 1)
-  ctx.fillRect(x + 2 + o, y + 16, 20, 1)
-  ctx.fillRect(x + 3 + o, y + 23, 18, 1)
-
-  ctx.fillStyle = C.B_RED
-  ctx.fillRect(x + 1 + o, y + 24, 3, 3)
-  ctx.fillRect(x + 20 + o, y + 24, 3, 3)
-  ctx.fillRect(x + 5 + o, y + 5, 2, 1)
-  ctx.fillRect(x + 17 + o, y + 5, 2, 1)
-
-  ctx.fillStyle = C.B_YELLOW
-  ctx.fillRect(x + 9 + o, y + 26, 6, 2)
-
-  ctx.fillStyle = C.WHITE
-  ctx.fillRect(x + 7 + o, y + 30, 10, 1)
+  drawBitmapAttrs(ctx, layers.black, BLACK_ATTRS, x, y)
+  drawBitmapAttrs(ctx, layers.white, WHITE_ATTRS, x, y)
+  drawBitmapAttrs(ctx, layers.cyan, CYAN_ATTRS, x, y)
+  drawBitmapAttrs(ctx, layers.red, RED_ATTRS, x, y)
+  drawBitmapAttrs(ctx, layers.yellow, YELLOW_ATTRS, x, y)
 }

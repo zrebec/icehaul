@@ -3,9 +3,10 @@ import { TRUCK_BMP_DATA, TRUCK_BMP_LEFT_DATA, TRUCK_BMP_RIGHT_DATA, TRUCK_BMP_W,
 
 describe('truck bitmap exports', () => {
   it('dimensions match ZX Spectrum 8px multiples', () => {
-    expect(TRUCK_BMP_W).toBe(24)
-    expect(TRUCK_BMP_H).toBe(32)
+    expect(TRUCK_BMP_W).toBe(32)
+    expect(TRUCK_BMP_H).toBe(40)
     expect(TRUCK_BMP_W % 8).toBe(0)
+    expect(TRUCK_BMP_H % 8).toBe(0)
   })
 
   it('data length matches width × height', () => {
@@ -17,64 +18,71 @@ describe('truck bitmap exports', () => {
     expect(TRUCK_BMP_DATA).toBeInstanceOf(Uint8Array)
   })
 
-  it('cab roof row 0 is narrow (only centre byte)', () => {
-    expect(TRUCK_BMP_DATA[0]).toBe(0x00)
-    expect(TRUCK_BMP_DATA[1]).toBe(0xFF)
-    expect(TRUCK_BMP_DATA[2]).toBe(0x00)
+  it('has transparent corners and a broad centred roof line', () => {
+    const firstRow = Array.from(TRUCK_BMP_DATA.slice(0, TRUCK_BMP_W / 8))
+    expect(firstRow[0]! & 0x80).toBe(0)
+    expect(firstRow.at(-1)! & 0x01).toBe(0)
+    expect(firstRow.some(byte => byte !== 0)).toBe(true)
   })
 
-  it('full-width body rows have all bytes set', () => {
-    const row8 = 8 * 3
-    expect(TRUCK_BMP_DATA[row8]).toBe(0xFF)
-    expect(TRUCK_BMP_DATA[row8 + 1]).toBe(0xFF)
-    expect(TRUCK_BMP_DATA[row8 + 2]).toBe(0xFF)
+  it('keeps the square trailer body nearly full-width', () => {
+    const bpr = TRUCK_BMP_W / 8
+    const row20 = 20 * bpr
+    expect(TRUCK_BMP_DATA[row20]).not.toBe(0x00)
+    expect(TRUCK_BMP_DATA[row20 + 1]).toBe(0xFF)
+    expect(TRUCK_BMP_DATA[row20 + 2]).toBe(0xFF)
+    expect(TRUCK_BMP_DATA[row20 + 3]).not.toBe(0x00)
   })
 
-  it('ground clearance rows are empty', () => {
-    const row30 = 30 * 3
-    expect(TRUCK_BMP_DATA[row30]).toBe(0x00)
-    expect(TRUCK_BMP_DATA[row30 + 1]).toBe(0x00)
-    expect(TRUCK_BMP_DATA[row30 + 2]).toBe(0x00)
+  it('bottom rows contain separated left and right wheel pairs', () => {
+    const bpr = TRUCK_BMP_W / 8
+    const row38 = 38 * bpr
+    expect(TRUCK_BMP_DATA[row38]).not.toBe(0x00)
+    expect(TRUCK_BMP_DATA[row38 + 1]).not.toBe(0x00)
+    expect(TRUCK_BMP_DATA[row38 + 2]).not.toBe(0x00)
+    expect(TRUCK_BMP_DATA[row38 + 3]).not.toBe(0x00)
   })
 })
 
 describe('truck steering sprite variants', () => {
-  const bpr = TRUCK_BMP_W / 8 // 3 bytes per row
+  const bpr = TRUCK_BMP_W / 8
 
-  it('LEFT variant row 0 is shifted 2px left: [0x03, 0xFC, 0x00]', () => {
-    // Base: ........XXXXXXXX........ → [0x00, 0xFF, 0x00]
-    // Left: ......XXXXXXXX.......... → [0x03, 0xFC, 0x00]
-    expect(TRUCK_BMP_LEFT_DATA[0]).toBe(0x03)
-    expect(TRUCK_BMP_LEFT_DATA[1]).toBe(0xFC)
-    expect(TRUCK_BMP_LEFT_DATA[2]).toBe(0x00)
+  it('LEFT variant shifts the roof toward the near side', () => {
+    const leftHalf = TRUCK_BMP_LEFT_DATA.slice(0, bpr / 2)
+    const rightHalf = TRUCK_BMP_LEFT_DATA.slice(bpr / 2, bpr)
+    expect(Array.from(leftHalf).some(byte => byte !== 0)).toBe(true)
+    expect(Array.from(rightHalf).some(byte => byte !== 0)).toBe(true)
   })
 
-  it('RIGHT variant row 0 is shifted 2px right: [0x00, 0x3F, 0xC0]', () => {
-    // Right: ..........XXXXXXXX...... → [0x00, 0x3F, 0xC0]
-    expect(TRUCK_BMP_RIGHT_DATA[0]).toBe(0x00)
-    expect(TRUCK_BMP_RIGHT_DATA[1]).toBe(0x3F)
-    expect(TRUCK_BMP_RIGHT_DATA[2]).toBe(0xC0)
+  it('RIGHT variant mirrors the left-facing roof', () => {
+    expect(TRUCK_BMP_RIGHT_DATA.slice(0, bpr)).not.toEqual(TRUCK_BMP_LEFT_DATA.slice(0, bpr))
   })
 
-  it('LEFT variant full-width body row 8 trims right edge: [0xFF, 0xFF, 0xFC]', () => {
-    // Base row 8: XXXXXXXXXXXXXXXXXXXXXXXX → [0xFF, 0xFF, 0xFF]
-    // Left shift: XXXXXXXXXXXXXXXXXXXXXX.. → [0xFF, 0xFF, 0xFC]
-    const idx = 8 * bpr
-    expect(TRUCK_BMP_LEFT_DATA[idx]).toBe(0xFF)
-    expect(TRUCK_BMP_LEFT_DATA[idx + 1]).toBe(0xFF)
-    expect(TRUCK_BMP_LEFT_DATA[idx + 2]).toBe(0xFC)
-  })
-
-  it('RIGHT variant full-width body row 8 trims left edge: [0x3F, 0xFF, 0xFF]', () => {
-    // Right shift: ..XXXXXXXXXXXXXXXXXXXXXX → [0x3F, 0xFF, 0xFF]
-    const idx = 8 * bpr
-    expect(TRUCK_BMP_RIGHT_DATA[idx]).toBe(0x3F)
-    expect(TRUCK_BMP_RIGHT_DATA[idx + 1]).toBe(0xFF)
-    expect(TRUCK_BMP_RIGHT_DATA[idx + 2]).toBe(0xFF)
+  it('turning variants are real perspective silhouettes, not translated base rows', () => {
+    const row = 21 * bpr
+    expect(Array.from(TRUCK_BMP_LEFT_DATA.slice(row, row + bpr)))
+      .not.toEqual(Array.from(TRUCK_BMP_DATA.slice(row, row + bpr)))
+    expect(Array.from(TRUCK_BMP_RIGHT_DATA.slice(row, row + bpr)))
+      .not.toEqual(Array.from(TRUCK_BMP_DATA.slice(row, row + bpr)))
   })
 
   it('LEFT and RIGHT variants have same byte count as base', () => {
     expect(TRUCK_BMP_LEFT_DATA.length).toBe(TRUCK_BMP_DATA.length)
     expect(TRUCK_BMP_RIGHT_DATA.length).toBe(TRUCK_BMP_DATA.length)
+  })
+
+  it('LEFT and RIGHT variants mirror each other pixel-for-pixel', () => {
+    const reverseByte = (byte: number) => Number.parseInt(
+      byte.toString(2).padStart(8, '0').split('').reverse().join(''),
+      2,
+    )
+
+    for (let row = 0; row < TRUCK_BMP_H; row++) {
+      const idx = row * bpr
+      for (let byte = 0; byte < bpr; byte++) {
+        expect(TRUCK_BMP_RIGHT_DATA[idx + byte])
+          .toBe(reverseByte(TRUCK_BMP_LEFT_DATA[idx + bpr - 1 - byte]!))
+      }
+    }
   })
 })

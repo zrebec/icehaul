@@ -27,7 +27,7 @@ import {
   drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic,
   getTrafficSpriteRows, projectTrafficVehicle,
 } from '../render/road3d.ts'
-import { drawTruck } from '../render/truck.ts'
+import { drawTruck, TRUCK_BMP_H, TRUCK_BMP_W } from '../render/truck.ts'
 import { drawHUD } from '../render/hud.ts'
 import { drawTopBar } from '../render/topbar.ts'
 import { startEngine, updateEngine, stopEngine, muteEngine, unmuteEngine } from '../audio/engine.ts'
@@ -61,8 +61,8 @@ function emitWheelSpray(
   const leftCount = Math.ceil(count / 2)
   const rightCount = count - leftCount
   const wheels = [
-    { x: truckDrawX + 4, count: leftCount, angle: -Math.PI * 0.78 + sideBias },
-    { x: truckDrawX + 20, count: rightCount, angle: -Math.PI * 0.22 + sideBias },
+    { x: truckDrawX + Math.round(TRUCK_BMP_W * 0.18), count: leftCount, angle: -Math.PI * 0.78 + sideBias },
+    { x: truckDrawX + Math.round(TRUCK_BMP_W * 0.82), count: rightCount, angle: -Math.PI * 0.22 + sideBias },
   ] as const
 
   for (const wheel of wheels) {
@@ -70,7 +70,7 @@ function emitWheelSpray(
     if (wheelCount <= 0) continue
     emitParticles(particles, {
       x: wheel.x,
-      y: truckDrawY + 27,
+      y: truckDrawY + Math.round(TRUCK_BMP_H * 0.85),
       count: wheelCount,
       color,
       speed,
@@ -251,8 +251,8 @@ export function createDriveScene(
 
       // ── Pixel-perfect off-road detection (before physics tick) ──
       const truckScreenX = GAME_WIDTH / 2 + v.x * 50
-      const truckDrawX = Math.round(truckScreenX - 12 + (-v.vx * 1.5))
-      const truckDrawY = Math.round(VIEWPORT_BOTTOM - 2 - 32)
+      const truckDrawX = Math.round(truckScreenX - TRUCK_BMP_W / 2 + (-v.vx * 1.5))
+      const truckDrawY = Math.round(VIEWPORT_BOTTOM - 2 - TRUCK_BMP_H)
       const edgesLookup = computeRoadEdges(v.distance, v.x, (d) => getCurvatureAt(d))
       lastOffroad = checkTruckOffroad(truckDrawX, truckDrawY, edgesLookup)
 
