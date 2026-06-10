@@ -23,6 +23,7 @@ export function drawHUD(
     missionDist?: number
     missionTimeLeft?: string
     buildNumber?: string
+    weightT?: number
   },
 ): void {
   const hudY = GAME_HEIGHT - HUD_ROWS * CELL
@@ -136,7 +137,7 @@ function drawTachPanel(
 function drawMissionPanel(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
-  state: { missionText?: string; missionDist?: number; missionTimeLeft?: string; buildNumber?: string },
+  state: { missionText?: string; missionDist?: number; missionTimeLeft?: string; buildNumber?: string; weightT?: number },
 ): void {
   const text = state.missionText ?? 'DELIVER'
   const dist = state.missionDist
@@ -159,8 +160,8 @@ function drawMissionPanel(
     drawText(ctx, timeLeft, timeX, y + 40, C.B_WHITE, C.BLACK)
   }
 
-  // Weight + build number — bottom area
-  const wt = `${TRUCK_WEIGHT_T}t`
+  // Weight + build number — bottom area (live weight; W debug-cycles it)
+  const wt = `${state.weightT ?? TRUCK_WEIGHT_T}t`
   drawText(ctx, wt, x + 2, y + h - 18, C.B_WHITE, C.BLACK)
 
   if (state.buildNumber) {

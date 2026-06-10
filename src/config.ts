@@ -259,10 +259,24 @@ export const SURFACE_PROBABILITY: Record<Surface, number> = {
 // ── Vehicle physics ─────────────────────────────────────────────────────────
 
 /**
- * Truck gross weight in tonnes. Displayed on dashboard.
- * Affects feel (all physics tuned for this mass). Future: cargo system varies it.
+ * Truck gross weight in tonnes. Displayed on dashboard and used as the starting
+ * weight. The cargo system will eventually vary it; for now the W debug key cycles
+ * {@link TRUCK_WEIGHTS_T}.
  */
 export const TRUCK_WEIGHT_T = 20
+
+/**
+ * Tuning baseline gross weight in tonnes. At this mass `massAccelMult` (see
+ * `game/vehicle.ts`) returns 1.0, so every hand-tuned GEARS/ACCEL value keeps its
+ * current feel. Heavier than this accelerates slower, lighter quicker.
+ */
+export const REFERENCE_MASS_T = 20
+
+/**
+ * Debug weight presets cycled by the W key: light cab / standard / heavy load.
+ * 20 t is the default ({@link TRUCK_WEIGHT_T}) so the cycle starts at today's feel.
+ */
+export const TRUCK_WEIGHTS_T = [10, 20, 30] as const
 
 /** Maximum forward speed in km/h (dial range 0–120). */
 export const MAX_SPEED = 120

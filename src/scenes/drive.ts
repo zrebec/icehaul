@@ -16,9 +16,10 @@ import {
   OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S, CRASH_ANIM_MS,
   TRAFFIC_COLLISION_DEPTH_M,
   CRANK_NEEDED_MS,
+  TRUCK_WEIGHT_T, TRUCK_WEIGHTS_T,
 } from '../config.ts'
 import {
-  createVehicle, tickVehicle,
+  createVehicle, tickVehicle, massAccelMult,
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
 import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
@@ -127,6 +128,9 @@ export function createDriveScene(
   let lastCoughS = -1
   let lastBuzzS = -1
   let gearBlockFlashMs = 0
+  // Debug: W cycles gross weight (10/20/30 t) so the mass→accel effect is feelable
+  // before the cargo system exists. 20 t = default = today's tuned feel.
+  let weightT: number = TRUCK_WEIGHT_T
 
   // Only Enter or S starts the game — not Command, not any random key.
   // While playing, A/D queue a gear shift; ENTER cranks a stalled engine.
@@ -142,6 +146,11 @@ export function createDriveScene(
     if (e.repeat) return
     if (e.key === 'a' || e.key === 'A') shiftDownQueued = true
     else if (e.key === 'd' || e.key === 'D') shiftUpQueued = true
+    else if (e.key === 'w' || e.key === 'W') {
+      // Debug weight cycle: 10 → 20 → 30 → 10 t.
+      const i = TRUCK_WEIGHTS_T.indexOf(weightT as typeof TRUCK_WEIGHTS_T[number])
+      weightT = TRUCK_WEIGHTS_T[(i + 1) % TRUCK_WEIGHTS_T.length]!
+    }
   })
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {
@@ -268,7 +277,8 @@ export function createDriveScene(
 
       const surface: Surface = getSurfaceAt(v.distance)
       const grip = gripFor(surface)
-      const accel = accelFor(surface)
+      // Engine pull = surface grip × mass: a heavier truck accelerates slower.
+      const accel = accelFor(surface) * massAccelMult(weightT)
       const curvature = getCurvatureAt(v.distance)
       tickVehicle(v, input, surface, grip, accel, dt, curvature,
         lastOffroad.severity, offroadReturnDir)
@@ -545,6 +555,7 @@ export function createDriveScene(
         missionDist: Math.max(0, (targetDist - v.distance) / 1000),
         missionTimeLeft: `${tlMin}:${tlSec}`,
         buildNumber: __BUILD_NUMBER__,
+        weightT,
       })
 
       // ── Overlays ──

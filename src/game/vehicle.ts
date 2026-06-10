@@ -24,7 +24,7 @@
  */
 
 import {
-  MAX_SPEED,
+  MAX_SPEED, REFERENCE_MASS_T,
   AERO_DRAG, ROLLING_RESISTANCE, ENGINE_BRAKE,
   CURVE_DRIFT,
   STEER_ACCEL, STEER_DAMP, MAX_LATERAL_V,
@@ -40,6 +40,21 @@ import {
 } from '../config.ts'
 
 export { MAX_SPEED }
+
+/**
+ * Mass-based acceleration multiplier. Engine pull scales inversely with gross
+ * weight relative to the tuning baseline ({@link REFERENCE_MASS_T}): the 20 t
+ * reference truck returns 1.0 (today's feel unchanged), a 10 t empty cab ~2.0
+ * (sprightly), a 30 t heavy load ~0.67 (a slog). Heavy loads therefore lean even
+ * harder on the low gears to pull away — the manual box matters more.
+ *
+ * Pure → unit-testable. Folded into the engine-force term at the call site
+ * (`scenes/drive.ts`) for now; a later step will also let mass make the engine
+ * (a) lug/stall more easily and (b) take longer to brake.
+ */
+export function massAccelMult(massT: number, referenceMassT = REFERENCE_MASS_T): number {
+  return referenceMassT / massT
+}
 
 export interface Vehicle {
   x: number
