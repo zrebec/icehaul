@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createVehicle, tickVehicle, massAccelMult, massBrakeMult, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
+import { createVehicle, tickVehicle, massAccelMult, massBrakeMult, massStallMult, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
 import { STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, GEAR_COUNT, REFERENCE_MASS_T } from '../../config.ts'
 
 const noInput: VehicleInput = { throttle: false, brake: false, steerLeft: false, steerRight: false }
@@ -95,6 +95,47 @@ describe('massBrakeMult', () => {
     tickVehicle(light, brake, 'asphalt', 1.0, 1.0, 200, 0, 0, 0, 10)
     tickVehicle(heavy, brake, 'asphalt', 1.0, 1.0, 200, 0, 0, 0, 30)
     expect(heavy.speed).toBeGreaterThan(light.speed)
+  })
+})
+
+describe('massStallMult', () => {
+  it('is exactly 1.0 at the reference mass (grace period unchanged)', () => {
+    expect(massStallMult(REFERENCE_MASS_T)).toBe(1.0)
+    expect(massStallMult(20)).toBe(1.0)
+  })
+
+  it('a heavy 30 t load has ~0.67x grace (lugs to a stall sooner)', () => {
+    expect(massStallMult(30)).toBeCloseTo(0.667, 3)
+  })
+
+  it('a light 10 t cab has ~2x grace (forgiving)', () => {
+    expect(massStallMult(10)).toBeCloseTo(2.0, 5)
+  })
+
+  it('is monotonic: heavier mass always means less grace', () => {
+    expect(massStallMult(10)).toBeGreaterThan(massStallMult(20))
+    expect(massStallMult(20)).toBeGreaterThan(massStallMult(30))
+  })
+
+  it('a heavier lugging truck stalls within a window a lighter one survives', () => {
+    // Gear 2 (top 52), 10 km/h → rpm ≈ 0.19 < LUG_RPM: both trucks are lugging.
+    const heavy = freshVehicle({ gear: 2, speed: 10 })
+    const light = freshVehicle({ gear: 2, speed: 10 })
+    // One tick longer than 30 t's grace (~2333 ms) but shorter than 10 t's (~7000 ms).
+    const dt = 2500
+    tickVehicle(heavy, noInput, 'asphalt', 1.0, 1.0, dt, 0, 0, 0, 30)
+    tickVehicle(light, noInput, 'asphalt', 1.0, 1.0, dt, 0, 0, 0, 10)
+    expect(heavy.stalled).toBe(true)
+    expect(light.stalled).toBe(false)
+  })
+
+  it('at the reference mass the stall grace is exactly STALL_GRACE_MS', () => {
+    const onEdge = freshVehicle({ gear: 2, speed: 10 })
+    const justUnder = freshVehicle({ gear: 2, speed: 10 })
+    tickVehicle(onEdge, noInput, 'asphalt', 1.0, 1.0, STALL_GRACE_MS)        // default 20 t
+    tickVehicle(justUnder, noInput, 'asphalt', 1.0, 1.0, STALL_GRACE_MS - 1) // default 20 t
+    expect(onEdge.stalled).toBe(true)
+    expect(justUnder.stalled).toBe(false)
   })
 })
 

@@ -71,6 +71,20 @@ export function massBrakeMult(massT: number, referenceMassT = REFERENCE_MASS_T):
   return referenceMassT / massT
 }
 
+/**
+ * Mass-based stall-grace multiplier. Scales the lugging grace period (see
+ * {@link STALL_GRACE_MS}) inversely with gross weight relative to
+ * {@link REFERENCE_MASS_T}: 20 t returns 1.0 (today's ~3.5 s unchanged), a heavy
+ * 30 t load ~0.67 (only ~2.3 s before it dies — more load lugs the engine to a
+ * stall sooner), a light 10 t cab ~2.0 (~7 s, forgiving). Same inertia intuition
+ * as {@link massAccelMult}/{@link massBrakeMult}, applied to the stall timer.
+ *
+ * Pure → unit-testable. Threaded into {@link tickVehicle} via the `massT` param.
+ */
+export function massStallMult(massT: number, referenceMassT = REFERENCE_MASS_T): number {
+  return referenceMassT / massT
+}
+
 export interface Vehicle {
   x: number
   vx: number
@@ -205,8 +219,10 @@ export function tickVehicle(
   if (v.stalled) {
     v.stallWarnMs = 0
   } else if (rpmRaw < LUG_RPM && v.gear > 1) {
+    // Heavier loads lug to a stall sooner: massStallMult shrinks the grace window
+    // (20 t = full ~3.5 s, 30 t ≈ 2.3 s, 10 t ≈ 7 s).
     v.stallWarnMs += dtMs
-    if (v.stallWarnMs >= STALL_GRACE_MS) {
+    if (v.stallWarnMs >= STALL_GRACE_MS * massStallMult(massT)) {
       v.stalled = true
       v.stallCause = 'lug'
       v.stallWarnMs = 0
