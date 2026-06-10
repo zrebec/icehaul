@@ -88,7 +88,7 @@ export function drawRoad(
     const kl = leftX - kerbW
     const kr = rightX + 1
     if (kl + kerbW > 0 && kl < GAME_WIDTH) ctx.fillRect(Math.max(0, kl), y, Math.min(kerbW, GAME_WIDTH - kl), 1)
-    if (kr >= 0 && kr < GAME_WIDTH)         ctx.fillRect(kr, y, Math.min(kerbW, GAME_WIDTH - kr), 1)
+    if (kr >= 0 && kr < GAME_WIDTH) ctx.fillRect(kr, y, Math.min(kerbW, GAME_WIDTH - kr), 1)
 
     // Road segment markers — horizontal lines that rush toward the player
     const markerPhase = absDist % ROAD_MARKER_SPACING_M
@@ -123,7 +123,7 @@ function drawSurfaceScanline(
 
   switch (surface) {
     case 'asphalt':
-      ctx.fillStyle = C.BLUE
+      ctx.fillStyle = C.BLACK
       ctx.fillRect(x, y, w, 1)
       break
 
@@ -351,8 +351,8 @@ function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection
 function trafficSpriteSize(type: VehicleType): { w: number; h: number } {
   switch (type) {
     case 'mini': return { w: 14, h: 11 }
-    case 'car':  return { w: 22, h: 15 }
-    case 'bus':  return { w: 28, h: 18 }
+    case 'car': return { w: 22, h: 15 }
+    case 'bus': return { w: 28, h: 18 }
   }
 }
 
@@ -362,15 +362,15 @@ export function getTrafficSpriteRows(dir: TrafficVehicle['dir'], type: VehicleTy
   if (dir === 'oncoming') {
     switch (type) {
       case 'mini': return ONCOMING_MINI_ROWS
-      case 'car':  return ONCOMING_CAR_ROWS
-      case 'bus':  return ONCOMING_BUS_ROWS
+      case 'car': return ONCOMING_CAR_ROWS
+      case 'bus': return ONCOMING_BUS_ROWS
     }
   }
 
   switch (type) {
     case 'mini': return SAME_MINI_ROWS
-    case 'car':  return SAME_CAR_ROWS
-    case 'bus':  return SAME_BUS_ROWS
+    case 'car': return SAME_CAR_ROWS
+    case 'bus': return SAME_BUS_ROWS
   }
 }
 
@@ -378,15 +378,15 @@ function getTrafficSpriteColors(dir: TrafficVehicle['dir'], type: VehicleType): 
   if (dir === 'oncoming') {
     switch (type) {
       case 'mini': return ONCOMING_MINI_COLORS
-      case 'car':  return ONCOMING_CAR_COLORS
-      case 'bus':  return ONCOMING_BUS_COLORS
+      case 'car': return ONCOMING_CAR_COLORS
+      case 'bus': return ONCOMING_BUS_COLORS
     }
   }
 
   switch (type) {
     case 'mini': return SAME_MINI_COLORS
-    case 'car':  return SAME_CAR_COLORS
-    case 'bus':  return SAME_BUS_COLORS
+    case 'car': return SAME_CAR_COLORS
+    case 'bus': return SAME_BUS_COLORS
   }
 }
 
@@ -598,9 +598,9 @@ export function drawRoadsideObjects(
     const scale = Math.max(0.3, t)
 
     switch (obj.type) {
-      case 'tree':   drawTree(ctx, screenX, y, scale); break
-      case 'lamp':   drawLamp(ctx, screenX, y, scale); break
-      case 'sign':   drawSign(ctx, screenX, y, scale); break
+      case 'tree': drawTree(ctx, screenX, y, scale); break
+      case 'lamp': drawLamp(ctx, screenX, y, scale); break
+      case 'sign': drawSign(ctx, screenX, y, scale); break
     }
   }
 }
