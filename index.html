@@ -18,8 +18,8 @@
       }
 
       canvas#game {
-        /* Fit viewport, never exceed native 4× (1024×768), preserve 4:3 ratio. */
-        width: min(1024px, 100vw, calc(100dvh * 4 / 3));
+        /* Fill the largest 4:3 area available in the viewport. */
+        width: min(100vw, calc(100dvh * 4 / 3));
         height: auto;
         aspect-ratio: 4 / 3;
         image-rendering: pixelated;
