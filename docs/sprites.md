@@ -59,7 +59,7 @@ importer to change them; tweak the source PNG or the `EXPECTED` table, not the `
 
 | Sprite | Size | Sheet |
 |--------|------|-------|
-| `deciduous` | 40×56 | `decorations.png` |
-| `conifer`   | 32×56 | `decorations.png` |
-| `rocks`     | 40×24 | `decorations.png` |
-| `signpost`  | 32×40 | `decorations.png` |
+| `deciduous` | 40×56 | `decorations-v2.png` |
+| `conifer`   | 32×56 | `decorations-v2.png` |
+| `rocks`     | 40×24 | `decorations-v2.png` |
+| `signpost`  | 32×40 | `decorations-v2.png` |

@@ -157,8 +157,12 @@ function drawSurfaceScanline(
 // ── Fuel canister rendering ──────────────────────────────────────────────────
 
 import type { Canister } from '../game/canisters.ts'
-import type { RoadsideObject } from '../game/roadside.ts'
+import type { RoadsideObject, RoadsideType } from '../game/roadside.ts'
 import type { TrafficVehicle, VehicleType } from '../game/traffic.ts'
+import { DECIDUOUS_ROWS, DECIDUOUS_COLORS, DECIDUOUS_W, DECIDUOUS_H } from './sprites/deciduous.ts'
+import { CONIFER_ROWS, CONIFER_COLORS, CONIFER_W, CONIFER_H } from './sprites/conifer.ts'
+import { ROCKS_ROWS, ROCKS_COLORS, ROCKS_W, ROCKS_H } from './sprites/rocks.ts'
+import { SIGNPOST_ROWS, SIGNPOST_COLORS, SIGNPOST_W, SIGNPOST_H } from './sprites/signpost.ts'
 
 /**
  * Draws fuel canisters on the road in perspective. Call AFTER drawRoad.
@@ -341,11 +345,11 @@ export function projectTrafficVehicle(
 }
 
 function drawSameDirVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
-  drawScaledRows(ctx, getTrafficSpriteRows('same', p.type), getTrafficSpriteColors('same', p.type), p)
+  drawTrafficRows(ctx, getTrafficSpriteRows('same', p.type), getTrafficSpriteColors('same', p.type), p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
-  drawScaledRows(ctx, getTrafficSpriteRows('oncoming', p.type), getTrafficSpriteColors('oncoming', p.type), p)
+  drawTrafficRows(ctx, getTrafficSpriteRows('oncoming', p.type), getTrafficSpriteColors('oncoming', p.type), p)
 }
 
 function trafficSpriteSize(type: VehicleType): { w: number; h: number } {
@@ -390,30 +394,103 @@ function getTrafficSpriteColors(dir: TrafficVehicle['dir'], type: VehicleType): 
   }
 }
 
-function drawScaledRows(
+/** Minimal placement box for scaled row-string sprites (TrafficProjection fits). */
+interface SpriteBox { left: number; top: number; w: number; h: number }
+
+function drawTrafficRows(
   ctx: CanvasRenderingContext2D,
   rows: readonly string[],
   colors: RowColors,
-  p: TrafficProjection,
+  p: SpriteBox,
 ): void {
   const srcH = rows.length
   const srcW = rows[0]?.length ?? 0
-  const left = p.left
-  const top = p.top
 
   for (let sy = 0; sy < srcH; sy++) {
     const row = rows[sy]!
-    const y0 = top + Math.floor(sy * p.h / srcH)
-    const y1 = top + Math.floor((sy + 1) * p.h / srcH)
+    const y0 = p.top + Math.floor(sy * p.h / srcH)
+    const y1 = p.top + Math.floor((sy + 1) * p.h / srcH)
     const ph = Math.max(1, y1 - y0)
 
     for (let sx = 0; sx < srcW; sx++) {
       const color = colors[row[sx]!]
       if (!color) continue
-      const x0 = left + Math.floor(sx * p.w / srcW)
-      const x1 = left + Math.floor((sx + 1) * p.w / srcW)
+      const x0 = p.left + Math.floor(sx * p.w / srcW)
+      const x1 = p.left + Math.floor((sx + 1) * p.w / srcW)
       ctx.fillStyle = color
       ctx.fillRect(x0, y0, Math.max(1, x1 - x0), ph)
+    }
+  }
+}
+
+export function scaleRoadsideRows(
+  rows: readonly string[],
+  targetW: number,
+  targetH: number,
+): string[] {
+  const srcH = rows.length
+  const srcW = rows[0]?.length ?? 0
+  if (srcW === 0 || srcH === 0 || targetW <= 0 || targetH <= 0) return []
+
+  const scaled: string[] = []
+  for (let dy = 0; dy < targetH; dy++) {
+    const sy0 = Math.floor(dy * srcH / targetH)
+    const sy1 = Math.max(sy0 + 1, Math.ceil((dy + 1) * srcH / targetH))
+    let row = ''
+
+    for (let dx = 0; dx < targetW; dx++) {
+      const sx0 = Math.floor(dx * srcW / targetW)
+      const sx1 = Math.max(sx0 + 1, Math.ceil((dx + 1) * srcW / targetW))
+      const counts = new Map<string, number>()
+      let samples = 0
+      let opaqueSamples = 0
+
+      for (let sy = sy0; sy < Math.min(sy1, srcH); sy++) {
+        const sourceRow = rows[sy]!
+        for (let sx = sx0; sx < Math.min(sx1, srcW); sx++) {
+          const char = sourceRow[sx] ?? '.'
+          samples++
+          if (char !== '.') opaqueSamples++
+          counts.set(char, (counts.get(char) ?? 0) + 1)
+        }
+      }
+
+      if (opaqueSamples / samples < 0.2) {
+        row += '.'
+        continue
+      }
+
+      let winner = ''
+      let winnerCount = 0
+      for (const [char, count] of counts) {
+        if (char === '.') continue
+        if (count > winnerCount) {
+          winner = char
+          winnerCount = count
+        }
+      }
+      row += winner || '.'
+    }
+    scaled.push(row)
+  }
+
+  return scaled
+}
+
+function drawRoadsideRows(
+  ctx: CanvasRenderingContext2D,
+  rows: readonly string[],
+  colors: RowColors,
+  p: SpriteBox,
+): void {
+  const scaled = scaleRoadsideRows(rows, p.w, p.h)
+  for (let y = 0; y < scaled.length; y++) {
+    const row = scaled[y]!
+    for (let x = 0; x < row.length; x++) {
+      const color = colors[row[x]!]
+      if (!color) continue
+      ctx.fillStyle = color
+      ctx.fillRect(p.left + x, p.top + y, 1, 1)
     }
   }
 }
@@ -545,8 +622,23 @@ const ONCOMING_BUS_COLORS: RowColors = {
 
 // ── Roadside objects rendering ───────────────────────────────────────────────
 
+interface RoadsideSprite { rows: readonly string[]; colors: RowColors; w: number; h: number }
+
+// Imported sprite per scenery kind (`lamp` stays procedural — no sprite). On-screen
+// size derives from each sprite's own W/H, so relative sizes come from the art itself
+// (see docs/sprites.md), scaled by ROADSIDE_WORLD_UNIT × perspective depth.
+const ROADSIDE_SPRITES: Record<Exclude<RoadsideType, 'lamp'>, RoadsideSprite> = {
+  deciduous: { rows: DECIDUOUS_ROWS, colors: DECIDUOUS_COLORS, w: DECIDUOUS_W, h: DECIDUOUS_H },
+  conifer:   { rows: CONIFER_ROWS,   colors: CONIFER_COLORS,   w: CONIFER_W,   h: CONIFER_H },
+  rocks:     { rows: ROCKS_ROWS,     colors: ROCKS_COLORS,     w: ROCKS_W,     h: ROCKS_H },
+  sign:      { rows: SIGNPOST_ROWS,  colors: SIGNPOST_COLORS,  w: SIGNPOST_W,  h: SIGNPOST_H },
+}
+
+/** Sprite-pixel → screen-pixel size at full perspective depth (scale = 1). Tune for legibility. */
+const ROADSIDE_WORLD_UNIT = 0.55
+
 /**
- * Draw roadside decorations (trees, lampposts, signs) in perspective.
+ * Draw roadside decorations (trees, rocks, signs, lampposts) in perspective.
  * Call AFTER drawRoad, BEFORE drawCanisters/drawTruck.
  */
 export function drawRoadsideObjects(
@@ -592,30 +684,21 @@ export function drawRoadsideObjects(
       : centerX + half + obj.offset * half
     const screenX = Math.round(edgeX)
 
-    if (screenX < -10 || screenX > GAME_WIDTH + 10) continue
+    if (screenX < -90 || screenX > GAME_WIDTH + 90) continue
 
-    // Scale factor: 0 at horizon → 1 at bottom
-    const scale = Math.max(0.3, t)
+    // Perspective depth scale: small far at the horizon → large up close.
+    const scale = Math.max(0.15, t)
 
-    switch (obj.type) {
-      case 'tree': drawTree(ctx, screenX, y, scale); break
-      case 'lamp': drawLamp(ctx, screenX, y, scale); break
-      case 'sign': drawSign(ctx, screenX, y, scale); break
+    if (obj.type === 'lamp') {
+      drawLamp(ctx, screenX, y, scale)
+      continue
     }
-  }
-}
-
-function drawTree(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number): void {
-  const h = Math.round(8 * scale)
-  const w = Math.round(5 * scale)
-  // Trunk
-  ctx.fillStyle = C.RED
-  ctx.fillRect(x, baseY - Math.round(2 * scale), Math.max(1, Math.round(scale)), Math.round(2 * scale))
-  // Canopy — triangle approximation (3 horizontal strips)
-  ctx.fillStyle = C.B_GREEN
-  for (let row = 0; row < h; row++) {
-    const rowW = Math.max(1, Math.round(w * (1 - row / h)))
-    ctx.fillRect(x - Math.floor(rowW / 2), baseY - Math.round(2 * scale) - row, rowW, 1)
+    // Size from the sprite's own dimensions × world unit × depth — keeps aspect and
+    // relative sizes (a 56-tall tree is naturally bigger than 24-tall rocks).
+    const spr = ROADSIDE_SPRITES[obj.type]
+    const w = Math.max(2, Math.round(spr.w * ROADSIDE_WORLD_UNIT * scale))
+    const h = Math.max(2, Math.round(spr.h * ROADSIDE_WORLD_UNIT * scale))
+    drawRoadsideRows(ctx, spr.rows, spr.colors, { left: screenX - (w >> 1), top: y - h, w, h })
   }
 }
 
@@ -632,18 +715,6 @@ function drawLamp(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale
   if (scale > 0.5) {
     ctx.fillRect(x - Math.floor(lightW / 2), baseY - h - 2, lightW, 1)
   }
-}
-
-function drawSign(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number): void {
-  const poleH = Math.round(8 * scale)
-  const signW = Math.max(2, Math.round(5 * scale))
-  const signH = Math.max(2, Math.round(3 * scale))
-  // Pole
-  ctx.fillStyle = C.B_WHITE
-  ctx.fillRect(x, baseY - poleH, 1, poleH)
-  // Sign plate
-  ctx.fillStyle = C.B_YELLOW
-  ctx.fillRect(x - Math.floor(signW / 2), baseY - poleH - signH, signW, signH)
 }
 
 function left(x: number): number { return Math.max(0, x) }
