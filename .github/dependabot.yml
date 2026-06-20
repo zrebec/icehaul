@@ -1,0 +1,19 @@
+# Dependabot: auto-open a PR when a new zx-kit version is published on npm.
+# Automates the manual "bump zx-kit in package.json + npm update" step — Dependabot
+# bumps the version range and the lockfile; you just review and merge.
+# Targets this repo's default branch automatically.
+#
+# To watch every dependency (not only zx-kit), remove the `allow` block.
+# To check less often, change `interval` to "weekly".
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    versioning-strategy: increase
+    allow:
+      - dependency-name: "zx-kit"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
