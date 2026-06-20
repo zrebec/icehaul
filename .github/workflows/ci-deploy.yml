@@ -6,29 +6,58 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # semantic-release pushes the version-bump commit + tag
   pages: write
   id-token: write
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false # never cancel a run that may be mid-release-push
 
 jobs:
-  build:
-    # Deploy only on releasable commits (feat/fix/perf/BREAKING) or a manual run.
-    # Config-only commits (ci/chore/docs) and dependabot bumps don't redeploy.
+  release:
+    # Auto-release (semantic-release): feat → minor, fix/perf → patch; chore / docs /
+    # ci / refactor / style / test → nothing. Bumps package.json, prepends CHANGELOG.md,
+    # tags vX.Y.Z, creates a GitHub release, pushes "chore(release): X.Y.Z [skip ci]"
+    # — remember to `git pull`. The gate skips non-releasable pushes (incl. dependabot
+    # bumps) so they don't redeploy; semantic-release re-checks the commits itself too.
     if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' &&
-       (startsWith(github.event.head_commit.message, 'feat') ||
-        startsWith(github.event.head_commit.message, 'fix') ||
-        startsWith(github.event.head_commit.message, 'perf') ||
-        contains(github.event.head_commit.message, 'BREAKING CHANGE')))
+      github.event_name == 'push' &&
+      (startsWith(github.event.head_commit.message, 'feat') ||
+       startsWith(github.event.head_commit.message, 'fix') ||
+       startsWith(github.event.head_commit.message, 'perf') ||
+       contains(github.event.head_commit.message, 'BREAKING CHANGE'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0 # semantic-release needs tags + full history
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
+
+  build:
+    # Builds the post-release main tip so the served bundle matches the release.
+    # A manual run (workflow_dispatch) always builds — an override.
+    needs: release
+    if: >
+      !cancelled() &&
+      (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main # includes the release commit pushed by the job above
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
