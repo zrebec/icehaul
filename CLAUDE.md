@@ -137,6 +137,11 @@ node scripts/screenshot.mjs out.png        # headless capture of canvas bitmap (
 node scripts/drive-shot.mjs out.png 5      # boots, holds ArrowUp+ArrowRight for N seconds, then captures
 ```
 
+**CI / Pages rule (2026-07-03):** the deploy workflow must use `actions/upload-pages-artifact@v5+`
+and `actions/deploy-pages@v5+` — the Pages backend rejects v3-era artifacts since 2026-07-03 with a
+generic *"Deployment failed, try again later"* (build/tests green, no error description). If a Pages
+deploy fails like that, check these two action versions FIRST.
+
 ## Controls
 
 - **ArrowUp** — throttle

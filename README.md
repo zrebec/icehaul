@@ -8,6 +8,12 @@ Built on [zx-kit](https://github.com/zrebec/zx-kit) (`zx-kit@^0.28.0`).
 
 **[Play in browser](https://zrebec.github.io/icehaul/)** (GitHub Pages)
 
+> **CI note (2026-07-03):** GitHub Pages deploys require `actions/upload-pages-artifact@v5+` and
+> `actions/deploy-pages@v5+`. The Pages backend started rejecting v3-era artifacts on 2026-07-03 —
+> the deploy fails seconds after creation with a generic *"Deployment failed, try again later"*
+> while build and tests stay green. If a Pages deploy ever fails like that, check these two action
+> versions FIRST.
+
 Or run locally:
 
 ```bash
