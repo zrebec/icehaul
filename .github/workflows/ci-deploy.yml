@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -62,7 +62,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install dependencies (fetches zx-kit from npm)
@@ -78,7 +78,7 @@ jobs:
         run: test -f dist/index.html
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5 # v3 artifacts rejected by Pages backend since 2026-07-03
         with:
           path: ./dist
 
@@ -91,7 +91,7 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5 # Node 24 native, pairs with upload v5
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
