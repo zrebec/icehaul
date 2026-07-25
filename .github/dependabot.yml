@@ -1,10 +1,16 @@
-# Dependabot: auto-open a PR when a new zx-kit version is published on npm.
-# Automates the manual "bump zx-kit in package.json + npm update" step — Dependabot
-# bumps the version range and the lockfile; you just review and merge.
-# Targets this repo's default branch automatically.
+# Dependabot for this repo — two jobs:
 #
-# To watch every dependency (not only zx-kit), remove the `allow` block.
-# To check less often, change `interval` to "weekly".
+# 1. npm — auto-open a PR when a new zx-kit version is published. Automates the
+#    manual "bump zx-kit in package.json + npm update" step; you review and merge.
+#    This repo is still on an old kit range, so expect the first PR to be a jump.
+# 2. github-actions — stop the workflow's action versions from silently drifting
+#    apart across the four repos. Grouped into a single PR so it stays quiet.
+#
+# The `allow` block deliberately limits VERSION updates to zx-kit, so routine
+# dev-tool bumps don't flood the queue. SECURITY updates are a SEPARATE mechanism
+# — Settings → Code security → Dependabot security updates, enabled 2026-07-25 —
+# and they reach every dependency regardless of this block. Removing `allow`
+# would add noise, not safety.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -17,3 +23,13 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
