@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 
 const ARGS = process.argv.slice(2)
 const WRITE = ARGS.includes('--write')
-const SHEET = ARGS.find(a => !a.startsWith('--')) ?? 'docs/assets/decorations.png'
+const SHEET = ARGS.find(a => !a.startsWith('--')) ?? 'docs/assets/decorations-v2.png'
 const OUT_DIR = 'src/render/sprites'
 
 // name, target game width/height (multiple of 8, ≥24), quadrant in the 2×2 sheet.
