@@ -1,3 +1,62 @@
+# 1.0.0 (2026-07-30)
+
+
+### Bug Fixes
+
+* 20t truck momentum — coast decel 10× slower ([094d905](https://github.com/zrebec/icehaul/commit/094d905370556a52191e32505548be115a502161))
+* CI fetch-depth 0 so build number counts all commits ([df46a7e](https://github.com/zrebec/icehaul/commit/df46a7ed2bcd53442714bb2a5f4e6104fd9acaf5))
+* fuel now actually runs out + canister pickup timing ([beb1152](https://github.com/zrebec/icehaul/commit/beb11521aa006fc9f12d7ce83f1ce034aca2fb6d))
+* heavy truck feel — slower accel AND slower braking ([9656082](https://github.com/zrebec/icehaul/commit/9656082aa0ae6abd1b97dffd4cc8c2a888a3a9a3))
+* isDangerAhead cross-surface warnings, sand balance, ice steering, pixel-perfect traffic collision ([0ecf111](https://github.com/zrebec/icehaul/commit/0ecf111efc9c50be0cdcdc54d61be2052511861c))
+* **physics:** surface drag double-penalty — mud/sand gear trap (B46) ([c6f53ec](https://github.com/zrebec/icehaul/commit/c6f53ec3cd3b93fa297455c5b62b9e8668b07151))
+* quadratic fuel burn — slower driving saves fuel ([39630b1](https://github.com/zrebec/icehaul/commit/39630b15a830f6f53784f6af0a58800c70ecde9e))
+* **render:** asphalt road is black, not blue ([07280f0](https://github.com/zrebec/icehaul/commit/07280f081f2bfb97f2fde8038a1b62c706d0d343))
+* **render:** correct traffic perspective projection — 1/z formula (B48) ([32be181](https://github.com/zrebec/icehaul/commit/32be181effa22d587f161e8eae04c29962a0e383))
+* reverse up and down shifting on keyboard ([30edeb5](https://github.com/zrebec/icehaul/commit/30edeb57dd854eb0d6f85cc4fed304b87c31e831))
+* **scaling:** fixed max 1024 px scaling ([4d5d775](https://github.com/zrebec/icehaul/commit/4d5d77568c2cb2ffb82f56a80664e00b3140c553))
+* speed-dependent braking, brake sounds, curves on ice ([256edee](https://github.com/zrebec/icehaul/commit/256edee59f5ceb1486f4bcb0c3eaf3f059dc4fe3))
+* start on asphalt (1km), variable-length surface segments ([fdfbd0c](https://github.com/zrebec/icehaul/commit/fdfbd0cbc42253984922de9fe6281976d92379a9))
+* start only on Enter/S (not Command/any key) + bigger traffic ([c462f50](https://github.com/zrebec/icehaul/commit/c462f50e6527edbc90d0913e392122a3e9e9764e))
+* surface drag proportional to speed — sand no longer traps at 0 ([753bec9](https://github.com/zrebec/icehaul/commit/753bec90b2da98234d527a738897a6d151e0a55b))
+* traffic cars sprites fixed ([f1039f3](https://github.com/zrebec/icehaul/commit/f1039f387da672d16cef7eacda25500070bae82d))
+* updated truck bitmap ([4211803](https://github.com/zrebec/icehaul/commit/421180356568dc6fbb234ee06c7a3d3fd6dd9bfa))
+* use relative asset paths for GitHub Pages + opt into Node.js 24 ([7346c4b](https://github.com/zrebec/icehaul/commit/7346c4b7825a6da4ddf159d030cf803bfc33a4c4))
+* **vehicle:** fixed not needed shift down ([a61e04e](https://github.com/zrebec/icehaul/commit/a61e04ee8c99393cb1e198d064b0f61a1b3e8f53))
+* **vehicle:** make RPM proportional to speed (real-engine feel) ([fa2c52e](https://github.com/zrebec/icehaul/commit/fa2c52e699ff3494f851d6e1f12f82fde35c887f))
+* warn before ANY non-asphalt surface + weight display + cleanup ([debad3c](https://github.com/zrebec/icehaul/commit/debad3cccae02ea01e3bea0bdab39b6727c91d45))
+* wheels visually dark — tiny red tread marks only ([76d1afb](https://github.com/zrebec/icehaul/commit/76d1afbc3173cbce42f016b0c2c73e344d485318))
+
+
+### Features
+
+* acceleration now reacts to weight of truck ([26f2116](https://github.com/zrebec/icehaul/commit/26f21169fd6c13bf5d9cec2de19f55bce6768076))
+* add manual shifting ([606f406](https://github.com/zrebec/icehaul/commit/606f40644915128a43254f9cafe34a2d56ecd3e7))
+* add traffic pixel masks and skid surface particles ([7d03213](https://github.com/zrebec/icehaul/commit/7d03213c725b14656c00c97be02cf01fdac9c620))
+* AY-3-8912 engine sound + sprite generation prompts ([3f85930](https://github.com/zrebec/icehaul/commit/3f859301c3a305517c6c2aaecc59770c4b7e7399)), closes [hi#pitched](https://github.com/hi/issues/pitched)
+* brake profiles, AY brake screech, wheel lock physics ([bab1195](https://github.com/zrebec/icehaul/commit/bab1195d963ab5107ceaa5e4ab4ead252c4be238))
+* build number in HUD (commit count from git) ([fe43141](https://github.com/zrebec/icehaul/commit/fe431413a8327a42104225972eb50b57c5d70c64))
+* **engine:** non-instant crank start + harder torque curve ([8cd619e](https://github.com/zrebec/icehaul/commit/8cd619ea878b5b1d85800b008b98fa84679f1d13))
+* fuel canisters on the road — pickup for survival ([a06edf1](https://github.com/zrebec/icehaul/commit/a06edf16020e8abccc5cbbf585bb308cbd3d6870)), closes [hi#pitched](https://github.com/hi/issues/pitched)
+* **graphics:** redraw and enlarge truck and oncoming vehicle sprites ([94fb8e1](https://github.com/zrebec/icehaul/commit/94fb8e18dc494be73f479d56ad23df7d2f37342a))
+* **hud:** RPM bar — red/green/yellow/red per-segment colour order (B1) ([6589365](https://github.com/zrebec/icehaul/commit/65893650c05740389d9fd0e523c42ce14e41fcd4))
+* live traffic, physics rewrite, truck fixes, start/pause ([52af55c](https://github.com/zrebec/icehaul/commit/52af55cae98fd909e7dfa6d6186e01f60b2b4c41)), closes [#6](https://github.com/zrebec/icehaul/issues/6)
+* new z-axis, better perpective, better AI driving, collisions ([2c69acc](https://github.com/zrebec/icehaul/commit/2c69accb9db2d9992949cb2eef60df62610c50a5))
+* phase 2 — 5 surfaces, skid mechanic, fuel/grip live, game over ([2a584a5](https://github.com/zrebec/icehaul/commit/2a584a5beb22d7b0b0604b7a9a529f7eb2325042))
+* physics rewrite — slip curve, rolling resistance, engine braking ([7a4e4ad](https://github.com/zrebec/icehaul/commit/7a4e4ad1bb5214137b9e32c81585973c0757a436))
+* **physics:** braking distance scales with truck mass (I2a) ([791bb57](https://github.com/zrebec/icehaul/commit/791bb57afbe4c5c31bd7bec9871e2313bc8789ba))
+* **physics:** heavier mass shortens stall grace (I2b) ([ab0a027](https://github.com/zrebec/icehaul/commit/ab0a027b8ac5bd613b7029fbe2ab8fcbec6ec9ab))
+* pixel-perfect off-road detection, crash handling, zx-kit v0.22.0 ([3afed8d](https://github.com/zrebec/icehaul/commit/3afed8db0d76e681a94d80b6730658cdbddc8d4b))
+* recovery asphalt, surface drag/brake, sand resistance, proper curves ([15e3ad2](https://github.com/zrebec/icehaul/commit/15e3ad2c7d00b4e3dd039d3cdcf4860409fc63c2))
+* **render:** whole-truck steering sprite variants — cab + body shift (B49) ([0b1ca71](https://github.com/zrebec/icehaul/commit/0b1ca71bf257b2a9f9304abf6877de06f9ad858c))
+* **render:** winter roadside scenery + coverage-aware sprite scaling ([#12](https://github.com/zrebec/icehaul/issues/12)) ([8b9fa59](https://github.com/zrebec/icehaul/commit/8b9fa59fe524373b816abed236da27b1b7d67c87)), closes [hi#severity](https://github.com/hi/issues/severity)
+* roadside decorations — trees, lampposts, signs ([aeec668](https://github.com/zrebec/icehaul/commit/aeec6688e4ec84977e19ff715c30a29811df6e8f))
+* seeded randomness — every game is unique + survival guide ([bc32e98](https://github.com/zrebec/icehaul/commit/bc32e98fb2d47d30e7c2063a7096bf58f0d06ae6))
+* speed perception — road markers, faster texture scroll, denser kerbs ([0f8bf1c](https://github.com/zrebec/icehaul/commit/0f8bf1c81f28cb9429b0c3bcd7eaaafe9f5b1b49)), closes [#1](https://github.com/zrebec/icehaul/issues/1)
+* **sprites:** PNG→row-string sprite import pipeline + roadside decorations ([eff2cbd](https://github.com/zrebec/icehaul/commit/eff2cbd28e75560485cb4281d887c46c62a19ff9))
+* surface sounds, delivery targets, low-fuel warning ([2f047ff](https://github.com/zrebec/icehaul/commit/2f047ff6d79f43dfc5b03eb9cda67d05bd95e157)), closes [#1](https://github.com/zrebec/icehaul/issues/1) [#2](https://github.com/zrebec/icehaul/issues/2) [#3](https://github.com/zrebec/icehaul/issues/3)
+* **vehicle:** redline over-rev burn-out warning ([6454a38](https://github.com/zrebec/icehaul/commit/6454a380b71b2c5b034453baf3de6728a348425e))
+* **vehicle:** synchro downshift limits (per-gear maxSpeedToShift) ([6c592bf](https://github.com/zrebec/icehaul/commit/6c592bfd610714e9fce56c8adac608d64cb59582))
+
 # Changelog
 
 All notable changes to Ice Haul are documented here.
