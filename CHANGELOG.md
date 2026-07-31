@@ -1,3 +1,10 @@
+## [0.3.1](https://github.com/zrebec/icehaul/compare/v0.3.0...v0.3.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **vehicle:** the clutch pedal was behaving like a brake ([#14](https://github.com/zrebec/icehaul/issues/14)) ([1b42464](https://github.com/zrebec/icehaul/commit/1b42464fcb22b7f931248a435389a863840ef61c))
+
 # [0.3.0](https://github.com/zrebec/icehaul/compare/v0.2.0...v0.3.0) (2026-07-31)
 
 
