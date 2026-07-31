@@ -150,6 +150,81 @@ prominently. Promote RPM from the current 7-seg sliver to the dial; give speed a
 number; don't reduce it to a tiny bar. **Rebuild: medium** (HUD reflow; the dial widget
 already exists — point it at `rpm`).
 
+### 2.6 Manual clutch (SHIFT) — ✓ IMPLEMENTED (2026-08-01)
+
+**The skill is rev-matching, not timing.** There is deliberately no correct number
+of milliseconds to hold the pedal. The clean release point is wherever the engine's
+revs equal what the wheels will demand in the selected gear:
+
+```
+targetRpm = speed / GEARS[gear].to
+```
+
+Everything the owner asked for falls out of that one line, with no special cases:
+
+- **The window moves while you are declutched.** A truck in neutral keeps slowing —
+  fast on mud (`SURFACE_DRAG`), barely at all on asphalt, differently again under
+  braking or with 30 t behind you.
+- **Mass changes it.** `massBrakeMult` already scales how the shock lands, and drag
+  bleeds a heavy load's speed differently.
+- **Direction matters, from the gear table alone.** Downshifting *raises* the
+  demanded revs (3rd→2nd at 50 km/h: 0.59 → 0.96), so you must **blip the throttle**
+  while declutched — a real double-clutch. Upshifting lowers them, so you wait.
+- **You can hear it.** `audio/engine.ts` already follows rpm, so the match is an
+  audio skill first and a dial second.
+
+**What was built:** `Vehicle.engineRpm` as an independent quantity (before this,
+`rpm` was a pure function of road speed — engine welded to the wheels, which is
+precisely what a clutch is not). `clutchIn`/`targetRpm`/`lastBite`/`clutchJolt`
+alongside it; `CLUTCH_*` in `config.ts`; a rev-match marker on the tachometer;
+SHIFT tracked as a **level** in `drive.ts` (plus a `blur` handler, or alt-tabbing
+away leaves you coasting in neutral for ever).
+
+**Decisions taken (owner, 2026-08-01)** — the alternatives are recorded below
+because they are all still reachable from here:
+
+| Decision | Chosen | Rejected, and still open |
+|---|---|---|
+| Punishment | **Jolt, and a big mismatch can stall it** — tuned mercifully | Jolt-only; traction loss into `v.vx`; all three scaled by error size |
+| Clutchless shifting | **Removed entirely** — no gear moves without SHIFT | Keep it as punished *float shifting*; expose as a difficulty setting |
+| Assist | **Engine note + a tach marker** | Audio only; marker plus a green "release now" lamp |
+| Inputs | **Speed + gear + mass** (all already in the physics) | Curvature as a *direct* factor; per-truck clutch characteristics |
+
+Owner's rule for the tuning: *"usually it jolts you, sometimes you don't recover —
+but let's be merciful for now. It is easier to tighten than to add and then tune."*
+`CLUTCH_STALL_MISMATCH = 0.55` is set well above the everyday botch for that reason.
+
+**◻ Deferred, in the order they would be worth trying:**
+
+1. **Traction loss on a bad bite** — feed `clutchJolt` into `v.vx` so a dumped
+   clutch mid-corner on ice breaks the back loose. The most realistic of the
+   rejected options and the natural next tightening; needs `curvature` to be a
+   direct input (below) to avoid punishing straight-line mistakes twice.
+2. **Curvature as a direct factor** — a narrower clean window and a harsher shock
+   mid-corner. Today the corner only matters *indirectly*, because you brake in it.
+3. **Cargo shock** — a bad bite jolts the load. Nothing to feed yet; it is the
+   natural first customer for the damage model (§2.3) and for the "living cargo"
+   idea (a beehive whose hum sours on every jolt).
+4. **Difficulty setting** — auto / today's synchro-only box / full clutch. Cheap,
+   but it means maintaining three physics modes and deciding which one the
+   leaderboard believes.
+5. **Per-truck clutch feel** — different bite windows and shock scaling per truck.
+   Wants a vehicle-selection feature first; there is exactly one truck today.
+
+**One trap, found by driving it rather than by testing it:** the first cut treated
+the two mismatch directions symmetrically, so winding the engine to the limiter in
+neutral and side-stepping the pedal threw the truck from 3 km/h to 30 — revving in
+neutral was *faster* than driving. Real clutches are not symmetric: being dragged
+down is rigid, over-revving mostly spins the wheels and cooks the plate. Hence
+`CLUTCH_LAUNCH_FRACTION = 0.15`, a regression test, and a note here.
+
+**The completability sim now drives a clutch.** `completability.test.ts` used to
+send `shiftUp`/`shiftDown` straight into the physics; with the clutch mandatory it
+had to learn to press, select, blip and release like a human. That makes it the
+real balance harness: **if the ideal driver cannot finish 5 km inside the budget,
+the mechanic is not completable.** At this tuning the moderate strategy finishes in
+344 s of 480 s, so there is ~136 s of headroom for a human being worse at it.
+
 ---
 
 ## 3. Agent-proposed ideas (easiest → hardest)

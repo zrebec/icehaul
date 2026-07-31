@@ -2,7 +2,7 @@ import {
   C, CELL,
   drawText, drawDial, drawSegmentedBar,
 } from 'zx-kit'
-import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, TRUCK_WEIGHT_T, GEAR_COUNT, RPM_DISPLAY_REDLINE, REDLINE_RPM } from '../config.ts'
+import { GAME_HEIGHT, GAME_WIDTH, HUD_ROWS, TRUCK_WEIGHT_T, GEAR_COUNT, RPM_DISPLAY_REDLINE, REDLINE_RPM, CLUTCH_MATCH_TOLERANCE } from '../config.ts'
 
 /**
  * Bottom instrument cluster — 3 equal-width panels in 9 rows (72 px):
@@ -24,6 +24,10 @@ export function drawHUD(
     missionTimeLeft?: string
     buildNumber?: string
     weightT?: number
+    /** SHIFT held — shows the rev-match marker on the tach. */
+    clutchIn?: boolean
+    /** Revs the selected gear will demand when the clutch bites (0..1). */
+    targetRpm?: number
   },
 ): void {
   const hudY = GAME_HEIGHT - HUD_ROWS * CELL
@@ -37,7 +41,8 @@ export function drawHUD(
   ctx.fillRect(0, hudY, GAME_WIDTH, hudH)
 
   drawInstrumentsPanel(ctx, x0, hudY, panelW, hudH, state)
-  drawTachPanel(ctx, x1, hudY, panelW, hudH, state.speed, state.rpm ?? 0)
+  drawTachPanel(ctx, x1, hudY, panelW, hudH, state.speed, state.rpm ?? 0,
+    state.clutchIn ?? false, state.targetRpm ?? 0)
   drawMissionPanel(ctx, x2, hudY, GAME_WIDTH - x2, hudH, state)
 
   // Panel dividers + top border
@@ -107,6 +112,7 @@ function drawTachPanel(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
   speed: number, rpm: number,   // rpm is the 0..1 ratio (0 = stalled/standstill, 1 = redline)
+  clutchIn = false, targetRpm = 0,
 ): void {
   const cx = x + Math.floor(w / 2)
   const cy = y + 22
@@ -122,6 +128,26 @@ function drawTachPanel(
     needleColor: needle, rimColor: C.B_WHITE,
     tickColor: C.B_WHITE, ticks: 5, faceColor: C.BLACK,
   })
+
+  // Rev-match marker — a second, stubby needle showing the revs the selected
+  // gear will demand the instant the clutch bites. Only while the pedal is down,
+  // because the rest of the time the two are the same number by definition.
+  //
+  // It is a teaching aid, not the mechanic: the engine note already carries this
+  // (audio/engine.ts follows rpm), so a player can and eventually does stop
+  // looking. Turning it into a green "release NOW" lamp was rejected — that
+  // converts a judgement into a reaction and kills the thing worth having.
+  if (clutchIn) {
+    const t = Math.min(1, Math.max(0, targetRpm))
+    // Same sweep the dial uses: 225° round to −45°, clockwise.
+    const angle = (Math.PI * 0.75) + t * (Math.PI * 1.5)
+    const inner = radius - 5
+    const matched = Math.abs(rpm - t) <= CLUTCH_MATCH_TOLERANCE
+    ctx.fillStyle = matched ? C.B_GREEN : C.B_CYAN
+    for (let r = inner; r <= radius - 1; r++) {
+      ctx.fillRect(Math.round(cx + Math.cos(angle) * r), Math.round(cy + Math.sin(angle) * r), 1, 1)
+    }
+  }
 
   // Real revs (number) — reddens at the redline; drops toward 0 when you lug.
   drawText(ctx, 'RPM', x + 6, y + 46, C.B_WHITE, C.BLACK)

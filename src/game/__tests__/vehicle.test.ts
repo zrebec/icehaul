@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createVehicle, tickVehicle, massAccelMult, massBrakeMult, massStallMult, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
-import { STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, GEAR_COUNT, REFERENCE_MASS_T } from '../../config.ts'
+import { STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, GEAR_COUNT, REFERENCE_MASS_T, CLUTCH_IDLE_RPM, GEARS } from '../../config.ts'
 
 const noInput: VehicleInput = { throttle: false, brake: false, steerLeft: false, steerRight: false }
 const dt16 = 16
@@ -317,9 +317,9 @@ describe('tickVehicle — manual gearbox + stall', () => {
 
   it('shiftUp raises the gear, shiftDown lowers it', () => {
     const v = freshVehicle({ speed: 40, gear: 2 })
-    tickVehicle(v, { ...noInput, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)
+    tickVehicle(v, { ...noInput, clutch: true, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)
     expect(v.gear).toBe(3)
-    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
+    tickVehicle(v, { ...noInput, clutch: true, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
     expect(v.gear).toBe(2)
   })
 
@@ -337,8 +337,8 @@ describe('tickVehicle — manual gearbox + stall', () => {
     const v = freshVehicle({ speed: 20, gear: 5 })
     tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
     expect(v.stallWarning).toBe(true)
-    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 5→4 (still lugging)
-    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 4→3 recovers
+    tickVehicle(v, { ...noInput, clutch: true, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 5→4 (still lugging)
+    tickVehicle(v, { ...noInput, clutch: true, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 4→3 recovers
     expect(v.stallWarning).toBe(false)
     expect(v.stalled).toBe(false)
   })
@@ -372,28 +372,28 @@ describe('tickVehicle — manual gearbox + stall', () => {
 describe('tickVehicle — synchro shift limits', () => {
   it('refuses a downshift into a gear above its maxSpeedToShift', () => {
     const v = freshVehicle({ speed: 50, gear: 2 })   // 1st engages only below 35
-    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
+    tickVehicle(v, { ...noInput, clutch: true, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
     expect(v.gear).toBe(2)             // refused — stays in 2nd
     expect(v.shiftBlocked).toBe(true)
   })
 
   it('allows the same downshift once below the limit', () => {
     const v = freshVehicle({ speed: 30, gear: 2 })   // 30 < 35
-    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
+    tickVehicle(v, { ...noInput, clutch: true, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)
     expect(v.gear).toBe(1)
     expect(v.shiftBlocked).toBe(false)
   })
 
   it('a null maxSpeedToShift never blocks (4th/5th)', () => {
     const v = freshVehicle({ speed: 120, gear: 5 })
-    tickVehicle(v, { ...noInput, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 5 → 4
+    tickVehicle(v, { ...noInput, clutch: true, shiftDown: true }, 'asphalt', 1.0, 1.0, dt16)  // 5 → 4
     expect(v.gear).toBe(4)
     expect(v.shiftBlocked).toBe(false)
   })
 
   it('upshifts are never blocked by a synchro limit', () => {
     const v = freshVehicle({ speed: 28, gear: 1 })
-    tickVehicle(v, { ...noInput, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)  // 1 → 2
+    tickVehicle(v, { ...noInput, clutch: true, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)  // 1 → 2
     expect(v.gear).toBe(2)
     expect(v.shiftBlocked).toBe(false)
   })
@@ -416,10 +416,23 @@ describe('tickVehicle — redline burn-out', () => {
     const v = freshVehicle({ speed: 76, gear: 3 })
     tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, REDLINE_WARN_DELAY_MS + 100)
     expect(v.redlineWarning).toBe(true)
-    tickVehicle(v, { ...noInput, throttle: true, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)  // 3 → 4
+    // Clutch in and OFF the throttle — keeping your foot down through a shift is
+    // still over-revving (the engine is now spinning against nothing at all),
+    // and the warning correctly stays on for it. Lifting is part of the shift.
+    tickVehicle(v, { ...noInput, clutch: true, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)  // 3 → 4
+    expect(v.gear).toBe(4)
     expect(v.redlineWarning).toBe(false)
     expect(v.stalled).toBe(false)
     expect(v.redlineMs).toBe(0)
+  })
+
+  it('holding the throttle with the clutch in keeps over-revving', () => {
+    // The new way to cook the engine: free-rev it into the limiter with nothing
+    // connected. There is no gear to hide behind, so even top gear burns out.
+    const v = freshVehicle({ speed: 76, gear: GEAR_COUNT })
+    tickVehicle(v, { ...noInput, clutch: true, throttle: true }, 'asphalt', 1.0, 1.0, 2000)
+    expect(v.engineRpm).toBeCloseTo(1, 5)
+    expect(v.redlineWarning).toBe(true)
   })
 
   it('coasting at the limiter (no throttle) never burns out', () => {
@@ -452,5 +465,119 @@ describe('tickVehicle — fuel exhaustion chain', () => {
     const v = freshVehicle({ speed: 60, fuel: 0 })
     for (let i = 0; i < 600; i++) tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
     expect(v.speed).toBe(0)
+  })
+})
+
+// ── Clutch ──────────────────────────────────────────────────────────────────
+// The mechanic in one sentence: the clean release point is wherever the engine's
+// revs equal what the wheels demand in the selected gear, and that target moves
+// while you are declutched. These pin the parts that make that true.
+
+describe('tickVehicle — clutch', () => {
+  const clutchIn = (over: Partial<VehicleInput> = {}): VehicleInput =>
+    ({ ...noInput, clutch: true, ...over })
+
+  it('refuses to change gear without the clutch, and says so', () => {
+    const v = freshVehicle({ speed: 40, gear: 2 })
+    tickVehicle(v, { ...noInput, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.gear).toBe(2)              // there is no clutchless shifting
+    expect(v.shiftBlocked).toBe(true)   // same grind cue as a refused synchro
+  })
+
+  it('declutching cuts the drive — throttle revs the engine but not the truck', () => {
+    const v = freshVehicle({ speed: 40, gear: 2 })
+    const before = v.speed
+    tickVehicle(v, clutchIn({ throttle: true }), 'asphalt', 1.0, 1.0, 200)
+    expect(v.engineRpm).toBeGreaterThan(CLUTCH_IDLE_RPM)  // revs climbed
+    expect(v.speed).toBeLessThanOrEqual(before)           // …the truck did not
+  })
+
+  it('a rev-matched release is clean: no jolt', () => {
+    // 3rd at 60 km/h wants 60/76 ≈ 0.79. Blip to there, then let it out.
+    const v = freshVehicle({ speed: 60, gear: 3 })
+    tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+    v.engineRpm = 60 / 76
+    const before = v.speed
+    tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.clutchJolt).toBe(false)
+    expect(v.lastBite).toBe(0)
+    expect(v.speed).toBeCloseTo(before, 0)
+  })
+
+  it('dumping the clutch on an unblipped downshift jolts the truck', () => {
+    // 3rd → 2nd at 50: 2nd demands 50/52 ≈ 0.96, engine is idling at 0.20.
+    // The wheels have to drag it up, and the truck pays for it.
+    const v = freshVehicle({ speed: 50, gear: 3 })
+    tickVehicle(v, clutchIn({ shiftDown: true }), 'asphalt', 1.0, 1.0, dt16)
+    expect(v.gear).toBe(2)
+    const before = v.speed
+    tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.clutchJolt).toBe(true)
+    expect(v.lastBite).toBeLessThan(0)        // engine slower than demanded
+    expect(v.speed).toBeLessThan(before - 5)  // dragged down hard
+  })
+
+  it('blipping the throttle first turns that same downshift clean', () => {
+    const v = freshVehicle({ speed: 50, gear: 3 })
+    tickVehicle(v, clutchIn({ shiftDown: true }), 'asphalt', 1.0, 1.0, dt16)
+    // Hold the clutch and rev until the engine reaches what 2nd will demand.
+    for (let i = 0; i < 200 && v.engineRpm < 50 / 52 - 0.02; i++) {
+      tickVehicle(v, clutchIn({ throttle: true }), 'asphalt', 1.0, 1.0, dt16)
+    }
+    const before = v.speed
+    tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.clutchJolt).toBe(false)
+    expect(v.speed).toBeCloseTo(before, 0)
+  })
+
+  it('a heavier truck shrugs off the same mismatch', () => {
+    const shock = (massT: number) => {
+      const v = freshVehicle({ speed: 50, gear: 2 })
+      tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+      v.engineRpm = CLUTCH_IDLE_RPM               // identical mismatch both times
+      const before = v.speed
+      tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16, 0, 0, 0, massT)
+      return before - v.speed
+    }
+    expect(shock(30)).toBeLessThan(shock(10))
+  })
+
+  it('targetRpm tracks what the selected gear will demand, live', () => {
+    const v = freshVehicle({ speed: 76, gear: 3 })
+    tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+    expect(v.targetRpm).toBeCloseTo(1, 1)         // 76/76 — 3rd is at its ceiling
+    tickVehicle(v, clutchIn({ shiftUp: true }), 'asphalt', 1.0, 1.0, dt16)
+    expect(v.targetRpm).toBeCloseTo(76 / 100, 1)  // 4th wants far fewer revs
+  })
+
+  it('dumping an over-revved clutch is a lurch, not free speed', () => {
+    // REGRESSION (2026-08-01, found by driving the real build): the first cut
+    // was symmetric, so revving to the limiter in neutral and side-stepping the
+    // pedal threw the truck from 3 km/h to 30 — faster than actually driving.
+    // Over-revved bites now mostly spin the wheels (CLUTCH_LAUNCH_FRACTION).
+    const v = freshVehicle({ speed: 3, gear: 2 })
+    tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+    v.engineRpm = 1                       // wound right up to the redline
+    tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.clutchJolt).toBe(true)
+    expect(v.speed).toBeGreaterThan(3)    // it does lurch forward…
+    expect(v.speed).toBeLessThan(10)      // …but nothing like a free gear
+  })
+
+  it('a launch can never carry you past the gear\'s own ceiling', () => {
+    const v = freshVehicle({ speed: GEARS[0]!.to - 1, gear: 1 })
+    tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+    v.engineRpm = 1
+    tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.speed).toBeLessThanOrEqual(GEARS[0]!.to)
+  })
+
+  it('the engine cannot lug while the clutch is in', () => {
+    // Nothing is loading it, so pressing the pedal is the correct save when you
+    // are about to stall — and the stall timer must actually respect that.
+    const v = freshVehicle({ speed: 5, gear: 5 })
+    tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, STALL_GRACE_MS * 3)
+    expect(v.stalled).toBe(false)
+    expect(v.stallWarnMs).toBe(0)
   })
 })

@@ -28,8 +28,21 @@ npm run dev       # http://localhost:5173
 | Arrow Up | Throttle |
 | Arrow Down | Brake |
 | Arrow Left / Right | Steer |
-| D / A | Shift up / down (manual gearbox) |
+| **SHIFT** | **Clutch** — hold it to change gear; the skill is *when you let it out* |
+| D / A | Shift up / down (only while the clutch is held) |
 | Enter | Start engine · restart after a stall · start the game |
+
+**The clutch is the whole game.** Gears do not move without **SHIFT** held — and
+what matters is not how long you hold it, but the revs you let it out at. The clean
+point is wherever the engine matches what the wheels will demand in the new gear,
+and the tachometer shows that target as a second small needle while the pedal is
+down. **Downshifting needs more revs than you have, so blip the throttle while
+declutched** (yes, that is a real double-clutch); upshifting needs fewer, so wait for
+them to fall. Let it out wrong and the truck lurches — badly wrong and the engine
+dies. And every second you spend in neutral, you are coasting: no drive, no engine
+braking, and the target moving away from you as the truck slows.
+
+You can hear the match before you can see it — the engine note follows the revs.
 
 **Manual 5-speed gearbox.** Each gear has its own top speed — **1st gear caps at ~28 km/h, so you can't reach 120 in a low gear** — and a power band shown on the **RPM** gauge (green → red toward redline). Acceleration is slow and heavy: climb through the gears with **D** (up) / **A** (down), watching the revs. Sit on the **redline** (red RPM) under throttle without upshifting and the engine over-revs and **burns out** — an `ENGINE REDLINE / SHIFT UP` warning gives you a few seconds before it stalls (the top gear is safe — its redline is just the speed limiter).
 
