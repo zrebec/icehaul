@@ -1,3 +1,10 @@
+# [0.3.0](https://github.com/zrebec/icehaul/compare/v0.2.0...v0.3.0) (2026-07-31)
+
+
+### Features
+
+* **vehicle:** manual clutch on SHIFT — rev-matching, not timing ([#13](https://github.com/zrebec/icehaul/issues/13)) ([cd25bd2](https://github.com/zrebec/icehaul/commit/cd25bd2be935319d4213126e078fb140569ca977))
+
 # 0.2.0 (2026-07-30)
 
 
