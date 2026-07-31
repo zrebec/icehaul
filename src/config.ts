@@ -482,8 +482,20 @@ export const CLUTCH_MATCH_TOLERANCE = 0.10
  * Engine slower than the wheels demand → the drivetrain drags the truck down;
  * faster → a brief shove. Scaled by mass at the call site: a 30 t load shrugs
  * off the same mismatch that snaps a 10 t cab.
+ *
+ * Small on purpose, and it was not at first. The mass ratio here is about
+ * 1000:1 — spinning an engine's flywheel up cannot meaningfully slow twenty
+ * tonnes, so **the engine follows the truck, not the other way round.** At the
+ * original 26 a driver who merely dipped the pedal and let it out again in the
+ * SAME gear lost 6.7 km/h, which made SHIFT feel like a brake pedal (owner,
+ * 2026-08-01). At 6 that same dip costs ~1.5 km/h: a jerk you feel and do not
+ * plan around.
+ *
+ * The mechanic keeps its teeth elsewhere, which is where they belong: you are
+ * coasting the whole time the pedal is down (no drive, no engine braking), and
+ * a release into a gear that cannot sustain the speed still kills the engine.
  */
-export const CLUTCH_SHOCK = 26
+export const CLUTCH_SHOCK = 6
 /**
  * How much of an OVER-revved bite reaches the road (the rest is wheelspin and a
  * slipping plate). The two directions are deliberately asymmetric.
@@ -500,13 +512,21 @@ export const CLUTCH_SHOCK = 26
  */
 export const CLUTCH_LAUNCH_FRACTION = 0.15
 /**
- * Mismatch beyond which a botched release can kill the engine outright. Set
- * ABOVE the everyday botch on purpose (see CLUTCH_SHOCK): the owner's rule is
- * "usually it jolts you, sometimes you don't recover" — and a mechanic is far
- * easier to tighten later than to loosen once players have learned to fear it.
- * Only bites when the engine ends up dragged below LUG_RPM, and never in 1st.
+ * Engine revs below which letting the clutch out kills the motor on the spot,
+ * with none of the STALL_GRACE_MS cough the gradual lug gets.
+ *
+ * A floor, not a mismatch — that was the first attempt and it was the wrong
+ * question. Whether the engine survives depends on WHERE IT LANDS, not on how
+ * far it fell: dip the pedal at 10 km/h with 5th selected and the wheels can
+ * only turn it at 0.08, so twenty tonnes drag the motor under idle and it dies,
+ * even though the engine was merely idling and the "mismatch" was tiny.
+ *
+ * Set at 60 % of LUG_RPM so the mercy sits in the right place: land a little
+ * under the lug line (18 km/h in 3rd → 0.24) and you still get the normal
+ * warning and 3.5 s to fix it; land nowhere near it and you have simply killed
+ * the engine, which is exactly what happens in the cab. Never fires in 1st.
  */
-export const CLUTCH_STALL_MISMATCH = 0.55
+export const CLUTCH_STALL_RPM = LUG_RPM * 0.6
 
 // ── Fuel ────────────────────────────────────────────────────────────────────
 
