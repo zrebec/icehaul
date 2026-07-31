@@ -192,7 +192,29 @@ because they are all still reachable from here:
 
 Owner's rule for the tuning: *"usually it jolts you, sometimes you don't recover —
 but let's be merciful for now. It is easier to tighten than to add and then tune."*
-`CLUTCH_STALL_MISMATCH = 0.55` is set well above the everyday botch for that reason.
+
+**Retuned 2026-08-01 after the first playtest, and both changes were real errors
+rather than taste.** The owner's report was *"SHIFT automatically starts braking
+the truck… practically at 0."*
+
+- **`CLUTCH_SHOCK` 26 → 6.** The shock was scaled as if a 20 t truck had to spend
+  its own momentum spinning the engine up. The mass ratio is about 1000:1, so the
+  engine follows the truck, not the reverse. Measured: a half-second dip of the
+  pedal with **no gear change at all** cost 6.7 km/h, which is why the pedal read
+  as a brake. It now costs 0.7 km/h. An unblipped 3→2 at 50 km/h costs 3.0 km/h —
+  a lurch you feel — and the same shift *with* a blip costs 0.0.
+- **`CLUTCH_STALL_MISMATCH` → `CLUTCH_STALL_RPM` (= 0.6 × `LUG_RPM`).** The stall
+  test asked the wrong question. Whether the engine survives depends on **where it
+  lands**, not how far it fell: dip the pedal at 10 km/h with 5th selected and the
+  wheels can only turn it at 0.08, so it dies — even though the engine was merely
+  idling and the "mismatch" was tiny. Sign was inverted too. Now: 10 km/h in 5th
+  stalls on the spot; 18 km/h in 3rd (just under the lug line) still gets the
+  normal 3.5 s warning, which is where the mercy belongs.
+
+The teeth were never meant to be in raw speed loss. They are in **coasting for as
+long as the pedal is down** (no drive, no engine braking, and the target drifting
+away as the truck slows) and in **killing the engine if you engage a gear the
+speed cannot sustain**.
 
 **◻ Deferred, in the order they would be worth trying:**
 

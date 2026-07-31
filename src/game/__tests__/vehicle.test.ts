@@ -514,7 +514,45 @@ describe('tickVehicle — clutch', () => {
     tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
     expect(v.clutchJolt).toBe(true)
     expect(v.lastBite).toBeLessThan(0)        // engine slower than demanded
-    expect(v.speed).toBeLessThan(before - 5)  // dragged down hard
+    expect(v.speed).toBeLessThan(before - 2)  // a lurch you feel…
+    expect(v.speed).toBeGreaterThan(before - 6) // …not a brake pedal (see CLUTCH_SHOCK)
+  })
+
+  it('merely dipping the pedal in the same gear is nearly free', () => {
+    // REGRESSION (owner, 2026-08-01): "SHIFT automatically starts braking the
+    // truck… practically at 0". CLUTCH_SHOCK was set as if a 20 t truck had to
+    // spend its momentum spinning the engine up; at 26 a half-second dip with no
+    // gear change cost 6.7 km/h. The mass ratio is ~1000:1 — the engine follows
+    // the truck, not the reverse.
+    const v = freshVehicle({ speed: 60, gear: 3 })
+    v.engineRpm = 60 / 76
+    for (let i = 0; i < 300 / dt16; i++) {
+      tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+    }
+    const before = v.speed
+    tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
+    expect(before - v.speed).toBeLessThan(1.5)
+  })
+
+  it('letting the clutch out in far too tall a gear kills the engine on the spot', () => {
+    // 10 km/h in 5th: the wheels can only turn the engine at 10/130 ≈ 0.08, well
+    // under CLUTCH_STALL_RPM, so the truck drags the motor under idle. No cough,
+    // no grace — this was one action, not a gradual lug.
+    const v = freshVehicle({ speed: 10, gear: 5 })
+    tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+    tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.stalled).toBe(true)
+    expect(v.stallCause).toBe('clutch')
+  })
+
+  it('landing just under the lug line still gets the normal warning, not death', () => {
+    // 18 km/h in 3rd ≈ 0.24 — below LUG_RPM but above CLUTCH_STALL_RPM. That is
+    // where the mercy lives: you get STALL_GRACE_MS to downshift out of it.
+    const v = freshVehicle({ speed: 18, gear: 3 })
+    tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+    tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
+    expect(v.stalled).toBe(false)
+    expect(v.stallWarning).toBe(true)
   })
 
   it('blipping the throttle first turns that same downshift clean', () => {

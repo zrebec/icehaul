@@ -37,7 +37,7 @@ import {
   GEARS, GEAR_COUNT, BOG_RPM, BOG_FLOOR, POWER_RPM, REDLINE_FLOOR, OVERREV_ENGINE_BRAKE,
   LUG_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
   CLUTCH_IDLE_RPM, CLUTCH_REV_RATE, CLUTCH_DECAY_RATE, CLUTCH_MATCH_TOLERANCE,
-  CLUTCH_SHOCK, CLUTCH_STALL_MISMATCH, CLUTCH_LAUNCH_FRACTION,
+  CLUTCH_SHOCK, CLUTCH_STALL_RPM, CLUTCH_LAUNCH_FRACTION,
   type Surface,
 } from '../config.ts'
 
@@ -285,11 +285,13 @@ export function tickVehicle(
       v.speed = Math.max(0, Math.min(gained > 0 ? Math.min(gear.to, MAX_SPEED) : MAX_SPEED, v.speed + gained))
       v.clutchJolt = true
 
-      // Dumping the pedal on a badly mismatched engine can kill it outright.
-      // Deliberately rare at this tuning (owner, 2026-08-01): "usually it jolts
-      // you, sometimes you don't recover" — tighten later, never loosen.
+      // Where the engine LANDS is what kills it, not how far it fell: the wheels
+      // can only turn it at `speed / gear.to`, and if that is far under idle,
+      // twenty tonnes drag the motor under and it dies on the spot — no gradual
+      // lug, so no STALL_GRACE_MS cough either. Landing just below the lug line
+      // is left to the normal warning.
       const draggedTo = gear.to > 0 ? v.speed / gear.to : 0
-      if (bite < -CLUTCH_STALL_MISMATCH && draggedTo < LUG_RPM && v.gear > 1) {
+      if (draggedTo < CLUTCH_STALL_RPM && v.gear > 1) {
         v.stalled = true
         v.stallCause = 'clutch'
       }
