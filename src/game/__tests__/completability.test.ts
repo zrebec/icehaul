@@ -21,7 +21,7 @@ import { resetRoad, getSurfaceAt, getCurvatureAt, gripFor, accelFor, type Surfac
 import { createVehicle, tickVehicle } from '../vehicle.ts'
 import {
   DELIVERY_TIME_LIMIT_MS, FIRST_TARGET_DIST_M,
-  SURFACE_FUEL_MULT, GEARS, GEAR_COUNT,
+  SURFACE_FUEL_MULT, GEARS, GEAR_COUNT, CLUTCH_MATCH_TOLERANCE,
 } from '../../config.ts'
 
 // ─── Strategies ──────────────────────────────────────────────────────────────
@@ -97,6 +97,8 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
   let segStartTime  = 0
   let segStartFuel  = v.fuel
   const segments: SegmentSummary[] = []
+  // Clutch driver state (see the shift block in the loop below).
+  let clutchPhase: 'in' | 'out' = 'out'
 
   function flushSegment(currentSurface: Surface, nowDist: number, nowTime: number, nowFuel: number) {
     const lengthM = nowDist - segStartDist
@@ -141,12 +143,54 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
     // full speed range (mirrors what a human does with A/D shifting). rpm = speed / to.
     const spec = GEARS[v.gear - 1]!
     const rpm  = spec.to > 0 ? v.speed / spec.to : 0
-    const shiftUp   = throttle && rpm > 0.9 && v.gear < GEAR_COUNT
-    const shiftDown = rpm < 0.33 && v.gear > 1   // downshift well before lugging (LUG_RPM 0.25)
+    const wantUp   = throttle && rpm > 0.9 && v.gear < GEAR_COUNT
+    const wantDown = rpm < 0.33 && v.gear > 1   // downshift well before lugging (LUG_RPM 0.25)
+
+    // ── Clutch driver ──────────────────────────────────────────────────────
+    // Shifting now requires the clutch (SHIFT), so the ideal driver has to work
+    // one too — and that is the point of running it here. This bot does exactly
+    // what a competent human does and nothing a human could not: press, select,
+    // match the revs (blipping the throttle when the new gear wants MORE revs
+    // than the engine currently has), release. It never reads a hidden number
+    // and never teleports the gearbox.
+    //
+    // If this loop cannot finish 5 km inside the budget, the mechanic is not
+    // completable and the tuning is wrong — that is the assertion these tests
+    // are really making now.
+    let shiftUp = false
+    let shiftDown = false
+    let clutch = false
+    let blip = false
+
+    if (clutchPhase === 'out') {
+      if (wantUp || wantDown) {
+        clutchPhase = 'in'
+        clutch = true
+        shiftUp = wantUp
+        shiftDown = !wantUp
+      }
+    } else {
+      clutch = true
+      // Revs the wheels will demand once it bites — recomputed every tick,
+      // because the truck keeps slowing down while we are declutched.
+      const nextSpec = GEARS[v.gear - 1]!
+      const wantRpm = nextSpec.to > 0 ? v.speed / nextSpec.to : 0
+      const err = v.engineRpm - wantRpm
+      if (Math.abs(err) <= CLUTCH_MATCH_TOLERANCE * 0.6) {
+        clutch = false                 // release — inside the clean window
+        clutchPhase = 'out'
+      } else {
+        blip = err < 0                 // engine too slow → blip (the downshift case)
+      }
+    }
 
     tickVehicle(
       v,
-      { throttle, brake, steerLeft, steerRight, shiftUp, shiftDown },
+      {
+        throttle: clutch ? blip : throttle,   // declutched, the throttle only revs the engine
+        brake: clutch ? false : brake,
+        steerLeft, steerRight, shiftUp, shiftDown, clutch,
+      },
       surface, grip, accel, DT_MS, curvature,
     )
 

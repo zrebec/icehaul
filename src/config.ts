@@ -437,6 +437,77 @@ export const REDLINE_WARN_DELAY_MS = 900
 /** Milliseconds ENTER must be held to crank the engine to a start. */
 export const CRANK_NEEDED_MS = 1800
 
+// ── Clutch (SHIFT) ──────────────────────────────────────────────────────────
+//
+// The clutch is the one thing that lets the engine and the wheels turn at
+// DIFFERENT speeds. Before it existed, `rpm` was a pure function of road speed
+// (`speed / gear.to`) — engine welded to the drivetrain. Now the engine carries
+// its own revs (`Vehicle.engineRpm`) whenever SHIFT is held.
+//
+// THE SKILL IS REV-MATCHING, NOT TIMING. There is deliberately no "correct"
+// number of milliseconds to hold the pedal. The clean release point is wherever
+// the engine's revs equal what the wheels will demand in the gear you selected:
+//
+//     targetRpm = speed / GEARS[gear].to
+//
+// That target MOVES while you are declutched, because a truck in neutral is
+// still slowing down — fast on mud (SURFACE_DRAG), barely at all on asphalt,
+// and differently again under braking or with 30 t behind you. So the window is
+// situational by construction; none of it is special-cased.
+//
+// Direction matters and falls out of the gear table for free. Downshifting
+// raises the demanded revs (3rd→2nd at 50 km/h: 0.59 → 0.96), so you must BLIP
+// THE THROTTLE while declutched or the wheels will drag the engine up and the
+// truck lurches — that is a real double-clutch. Upshifting lowers them, so you
+// simply wait for the revs to fall.
+
+/** Idle revs (rpm fraction) the engine settles to when declutched off throttle. */
+export const CLUTCH_IDLE_RPM = 0.20
+/**
+ * Free-rev climb rate (rpm fraction per second) on throttle with the clutch in.
+ * A loaded diesel does not scream up instantly — 0.9 means idle → redline in
+ * roughly a second, which is enough time to overshoot if you are careless.
+ */
+export const CLUTCH_REV_RATE = 0.9
+/** Free-rev decay rate (rpm fraction per second) off throttle with the clutch in. */
+export const CLUTCH_DECAY_RATE = 0.7
+/**
+ * Mismatch (|engineRpm − targetRpm|) inside which a release counts as CLEAN: no
+ * jolt at all. Wide enough that a deliberate rev-match is reliably rewarded,
+ * narrow enough that mashing SHIFT without looking is not.
+ */
+export const CLUTCH_MATCH_TOLERANCE = 0.10
+/**
+ * Speed shock (km/h) per unit of rpm mismatch when the clutch bites badly.
+ * Engine slower than the wheels demand → the drivetrain drags the truck down;
+ * faster → a brief shove. Scaled by mass at the call site: a 30 t load shrugs
+ * off the same mismatch that snaps a 10 t cab.
+ */
+export const CLUTCH_SHOCK = 26
+/**
+ * How much of an OVER-revved bite reaches the road (the rest is wheelspin and a
+ * slipping plate). The two directions are deliberately asymmetric.
+ *
+ * Engine slower than the wheels demand is a rigid coupling: 20 tonnes of truck
+ * wins, the engine is dragged up, and the truck really does lose that speed.
+ * Engine faster is not symmetric — a dumped clutch spins the wheels and cooks
+ * the friction plate; almost none of those revs become road speed.
+ *
+ * Found by driving it (2026-08-01): at 1.0 the first real test lurched from
+ * 3 km/h to 30 km/h on one dumped clutch, which made revving in neutral and
+ * side-stepping the pedal *faster* than driving properly. A launch should feel
+ * like a lurch, not like a gear you skipped.
+ */
+export const CLUTCH_LAUNCH_FRACTION = 0.15
+/**
+ * Mismatch beyond which a botched release can kill the engine outright. Set
+ * ABOVE the everyday botch on purpose (see CLUTCH_SHOCK): the owner's rule is
+ * "usually it jolts you, sometimes you don't recover" — and a mechanic is far
+ * easier to tighten later than to loosen once players have learned to fear it.
+ * Only bites when the engine ends up dragged below LUG_RPM, and never in 1st.
+ */
+export const CLUTCH_STALL_MISMATCH = 0.55
+
 // ── Fuel ────────────────────────────────────────────────────────────────────
 
 // export const FUEL_BURN_RATE = 0.00012  // original — tight but completable with canisters

@@ -36,6 +36,8 @@ import {
   SURFACE_SLIP_PEAK,
   GEARS, GEAR_COUNT, BOG_RPM, BOG_FLOOR, POWER_RPM, REDLINE_FLOOR, OVERREV_ENGINE_BRAKE,
   LUG_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
+  CLUTCH_IDLE_RPM, CLUTCH_REV_RATE, CLUTCH_DECAY_RATE, CLUTCH_MATCH_TOLERANCE,
+  CLUTCH_SHOCK, CLUTCH_STALL_MISMATCH, CLUTCH_LAUNCH_FRACTION,
   type Surface,
 } from '../config.ts'
 
@@ -106,9 +108,30 @@ export interface Vehicle {
   /** True while the "REDLINE / SHIFT UP" warning shows — over-revving, not dead yet. */
   redlineWarning: boolean
   /** Why the engine last stalled — kept so a future damage model can differentiate. */
-  stallCause: 'lug' | 'overrev' | null
+  stallCause: 'lug' | 'overrev' | 'clutch' | null
   /** True only on the tick a downshift was refused by a synchro speed limit. */
   shiftBlocked: boolean
+
+  // ── Clutch ────────────────────────────────────────────────────────────────
+  /** True while SHIFT is held: the engine is disconnected from the wheels. */
+  clutchIn: boolean
+  /**
+   * Engine revs (0..1, 1 = redline) as an INDEPENDENT quantity. While the clutch
+   * is in, this free-revs on the throttle and decays to idle off it; while it is
+   * out, it is locked to what the wheels demand (`speed / gear.to`). The whole
+   * clutch mechanic exists in the gap between those two.
+   */
+  engineRpm: number
+  /**
+   * Revs the wheels will demand the moment the clutch bites, i.e. the number the
+   * player is trying to match. Live even while declutched (speed keeps changing),
+   * which is what makes the window move. Drives the tachometer's target marker.
+   */
+  targetRpm: number
+  /** Signed rpm error of the last clutch release; 0 if it was clean. For the HUD/audio. */
+  lastBite: number
+  /** True only on the tick the clutch bit badly enough to shock the drivetrain. */
+  clutchJolt: boolean
 }
 
 export interface VehicleInput {
@@ -116,12 +139,14 @@ export interface VehicleInput {
   brake: boolean
   steerLeft: boolean
   steerRight: boolean
-  /** Edge-triggered: shift up one gear this tick. */
+  /** Edge-triggered: shift up one gear this tick. Ignored unless {@link clutch} is held. */
   shiftUp?: boolean
-  /** Edge-triggered: shift down one gear this tick. */
+  /** Edge-triggered: shift down one gear this tick. Ignored unless {@link clutch} is held. */
   shiftDown?: boolean
   /** Edge-triggered: ENTER ignition — restart a stalled engine. */
   restart?: boolean
+  /** Held state of the clutch pedal (SHIFT). Level, not an edge — the release moment is the skill. */
+  clutch?: boolean
 }
 
 export function createVehicle(): Vehicle {
@@ -129,6 +154,7 @@ export function createVehicle(): Vehicle {
     x: 0, vx: 0, speed: 0, distance: 0, fuel: 1.0,
     gear: 1, rpm: 0, stalled: false, stallWarnMs: 0, stallWarning: false,
     redlineMs: 0, redlineWarning: false, stallCause: null, shiftBlocked: false,
+    clutchIn: false, engineRpm: CLUTCH_IDLE_RPM, targetRpm: 0, lastBite: 0, clutchJolt: false,
   }
 }
 
@@ -191,12 +217,25 @@ export function tickVehicle(
   const dt = dtMs / 1000
   const speedRatio = v.speed / MAX_SPEED
 
-  // ── Gearbox (manual) — shift, optional restart, then derive rpm + torque ──
+  // ── Gearbox (manual, clutched) ───────────────────────────────────────────
+  // The clutch is a LEVEL, not an edge: what the player is timing is the moment
+  // they let it out, so both the held state and the release edge matter here.
   v.shiftBlocked = false
-  if (input.shiftUp && v.gear < GEAR_COUNT) v.gear++   // upshifts are always allowed
-  if (input.shiftDown && v.gear > 1) {
-    if (canDownshiftInto(v.gear - 1, v.speed)) v.gear--
-    else v.shiftBlocked = true                          // synchro refused the downshift
+  v.clutchJolt = false
+  const clutchIn = input.clutch === true
+  const clutchReleased = v.clutchIn && !clutchIn   // the bite happens on this tick
+  v.clutchIn = clutchIn
+
+  // Gears only move with the pedal down. There is no clutchless shifting — see
+  // DRIVETRAIN_ROADMAP §2.6; float-shifting was considered and deliberately cut.
+  if (clutchIn) {
+    if (input.shiftUp && v.gear < GEAR_COUNT) v.gear++   // upshifts are always allowed
+    if (input.shiftDown && v.gear > 1) {
+      if (canDownshiftInto(v.gear - 1, v.speed)) v.gear--
+      else v.shiftBlocked = true                          // synchro refused the downshift
+    }
+  } else if (input.shiftUp || input.shiftDown) {
+    v.shiftBlocked = true   // "you didn't press the clutch" — same grind cue as a refused synchro
   }
 
   // ENTER ignition — restart a stalled engine in a sensible gear.
@@ -206,17 +245,69 @@ export function tickVehicle(
     v.redlineMs = 0
     v.stallCause = null
     v.gear = startableGear(v.speed)
+    v.engineRpm = CLUTCH_IDLE_RPM
   }
 
   const gear = GEARS[v.gear - 1]!
-  // RPM is proportional to road speed within the gear (like a real engine):
-  // 0 at standstill, 1.0 = redline at the gear's top. Never negative.
+  // What the WHEELS demand in this gear: proportional to road speed, like a real
+  // engine — 0 at standstill, 1.0 = redline at the gear's top. Never negative.
+  // With the clutch out this simply IS the engine speed; with it in, it is the
+  // number the player is chasing, and it keeps moving because the truck is still
+  // slowing down (drag, brakes, mass) the whole time they are declutched.
   const rpmRaw = gear.to > 0 ? v.speed / gear.to : 0
+  v.targetRpm = Math.min(1, rpmRaw)
+
+  // ── Clutch: free-revving, then the bite ──────────────────────────────────
+  if (v.stalled) {
+    v.engineRpm = 0
+  } else if (clutchIn) {
+    // Disconnected: the engine answers only to the throttle. Overshooting past
+    // the redline is possible and is its own punishment — see the redline block.
+    v.engineRpm += (input.throttle && v.fuel > 0 ? CLUTCH_REV_RATE : -CLUTCH_DECAY_RATE) * dt
+    v.engineRpm = Math.max(CLUTCH_IDLE_RPM, Math.min(1, v.engineRpm))
+  } else if (clutchReleased) {
+    // THE BITE. Everything the mechanic is about happens on this one tick.
+    const bite = v.engineRpm - rpmRaw
+    v.lastBite = Math.abs(bite) <= CLUTCH_MATCH_TOLERANCE ? 0 : bite
+
+    if (v.lastBite !== 0) {
+      // Mismatch is taken out on the truck. Engine slower than the wheels demand
+      // (the un-blipped downshift) drags the speed down; faster gives a shove.
+      // A heavier load absorbs the same mismatch more calmly — same inertia
+      // intuition as massBrakeMult, and the reason a 10 t cab feels twitchy.
+      const excess = bite > 0 ? bite - CLUTCH_MATCH_TOLERANCE : bite + CLUTCH_MATCH_TOLERANCE
+      // Asymmetric on purpose — see CLUTCH_LAUNCH_FRACTION. Being dragged down
+      // is rigid and costs the full amount; over-revving mostly spins the wheels
+      // and must never become a cheaper way to accelerate than driving.
+      const transfer = excess > 0 ? excess * CLUTCH_LAUNCH_FRACTION : excess
+      const gained = transfer * CLUTCH_SHOCK * massBrakeMult(massT)
+      // A launch can never carry you past what the gear itself could pull.
+      v.speed = Math.max(0, Math.min(gained > 0 ? Math.min(gear.to, MAX_SPEED) : MAX_SPEED, v.speed + gained))
+      v.clutchJolt = true
+
+      // Dumping the pedal on a badly mismatched engine can kill it outright.
+      // Deliberately rare at this tuning (owner, 2026-08-01): "usually it jolts
+      // you, sometimes you don't recover" — tighten later, never loosen.
+      const draggedTo = gear.to > 0 ? v.speed / gear.to : 0
+      if (bite < -CLUTCH_STALL_MISMATCH && draggedTo < LUG_RPM && v.gear > 1) {
+        v.stalled = true
+        v.stallCause = 'clutch'
+      }
+    }
+    // Whatever happened, the engine is now locked to the wheels again.
+    v.engineRpm = Math.min(1, gear.to > 0 ? v.speed / gear.to : 0)
+  } else {
+    v.engineRpm = Math.min(1, rpmRaw)
+  }
 
   // Stall — lugging far below idle in a gear it can't sustain kills the engine,
   // but only after a grace period with an "ENGINE STALLING" warning so you can
   // downshift. First gear is exempt — you can always idle and pull away in 1st.
+  // A declutched engine cannot lug: nothing is loading it, which is precisely
+  // why pushing the pedal in is the correct move when you are about to stall.
   if (v.stalled) {
+    v.stallWarnMs = 0
+  } else if (clutchIn) {
     v.stallWarnMs = 0
   } else if (rpmRaw < LUG_RPM && v.gear > 1) {
     // Heavier loads lug to a stall sooner: massStallMult shrinks the grace window
@@ -235,7 +326,13 @@ export function tickVehicle(
   // Redline burn-out — sitting on the limiter under throttle without upshifting
   // cooks the engine. Only in gears you can upshift out of: the top gear's redline
   // is just the speed limiter (no recourse), so it never burns out.
-  const atRedline = !v.stalled && rpmRaw >= REDLINE_RPM && v.gear < GEAR_COUNT
+  //
+  // Measured on ENGINE revs, not wheel revs, so this now also covers the new way
+  // to over-rev: holding the throttle with the clutch in and free-revving into
+  // the limiter. That case ignores the top-gear exemption — a floored engine
+  // spinning against nothing has no gear to hide behind.
+  const overRevving = !v.stalled && v.engineRpm >= REDLINE_RPM
+  const atRedline = overRevving && (clutchIn || v.gear < GEAR_COUNT)
   if (atRedline && input.throttle) {
     v.redlineMs += dtMs
     if (v.redlineMs >= REDLINE_BURN_MS) {
@@ -248,10 +345,13 @@ export function tickVehicle(
   }
   v.redlineWarning = !v.stalled && atRedline && input.throttle && v.redlineMs >= REDLINE_WARN_DELAY_MS
 
-  // Dashboard RPM is the raw ratio (it CAN drop to 0 bars when lugging), clamped to
-  // redline at the top. Zero only when actually stalled.
-  v.rpm = v.stalled ? 0 : Math.min(1, rpmRaw)
-  const torque = v.stalled ? 0 : gearTorqueMult(rpmRaw)
+  // Dashboard RPM follows the ENGINE, which is the whole point of a tachometer:
+  // with the clutch in it shows your free revs (so you can watch yourself close
+  // on the target), with it out it is the wheel-driven ratio as before — and it
+  // can still drop to 0 bars when lugging. Zero only when actually stalled.
+  v.rpm = v.stalled ? 0 : v.engineRpm
+  // No drive through a disengaged clutch, however hard you rev.
+  const torque = v.stalled || clutchIn ? 0 : gearTorqueMult(rpmRaw)
 
   // ── Longitudinal forces ────────────────────────────────────────────────
 
@@ -263,8 +363,9 @@ export function tickVehicle(
   }
 
   // Over-rev engine braking — too low a gear for this speed (e.g. after a
-  // downshift) drags speed back down toward the gear's top. Compression, not brake.
-  if (!v.stalled && v.speed > gear.to) {
+  // downshift) drags speed back down toward the gear's top. Compression, not
+  // brake — so it needs the clutch engaged to reach the wheels at all.
+  if (!v.stalled && !clutchIn && v.speed > gear.to) {
     v.speed = Math.max(gear.to, v.speed - OVERREV_ENGINE_BRAKE * dt)
   }
 
@@ -277,8 +378,11 @@ export function tickVehicle(
     v.speed = Math.max(0, v.speed - bp.decel * speedFade * massBrakeMult(massT) * dt)
   }
 
-  // Engine braking (throttle released, engine compression resists motion)
-  if (!v.stalled && !input.throttle && !input.brake && v.fuel > 0 && v.speed > 0) {
+  // Engine braking (throttle released, engine compression resists motion).
+  // Gone the moment the clutch goes in — that is what "coasting in neutral"
+  // means, and it is the hidden cost of holding the pedal down too long: on ice
+  // you have given up the one retarding force you had.
+  if (!v.stalled && !clutchIn && !input.throttle && !input.brake && v.fuel > 0 && v.speed > 0) {
     v.speed = Math.max(0, v.speed - ENGINE_BRAKE * speedRatio * dt)
   }
 

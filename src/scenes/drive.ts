@@ -116,9 +116,14 @@ export function createDriveScene(
   resetCanisters(gameSeed + 2)
 
   let driveState: DriveState = 'waiting'
-  // Manual gearbox — A = shift up, D = shift down. Edge-triggered (ignore key-repeat).
+  // Manual gearbox — D = shift up, A = shift down. Edge-triggered (ignore key-repeat).
+  // Both are inert unless the clutch (SHIFT) is held; see game/vehicle.ts.
   let shiftUpQueued = false
   let shiftDownQueued = false
+  // Clutch pedal. A LEVEL, not an edge: the skill is *when you let it out*, so the
+  // physics needs the held state every tick, not a one-shot. Read from the event
+  // rather than isHeld() because zx-kit's input map is arrow/letter keys only.
+  let clutchHeld = false
   // ENTER ignition — crank the engine (hold to start). wasStalled tracks audio transition.
   let restartQueued = false
   let wasStalled = false
@@ -143,6 +148,10 @@ export function createDriveScene(
       isCranking = true
       return
     }
+    // Tracked before the key-repeat guard: holding SHIFT fires repeats, and an
+    // early return there would leave the clutch stuck out while the player is
+    // very much standing on it.
+    if (e.key === 'Shift') clutchHeld = true
     if (e.repeat) return
     if (e.key === 'a' || e.key === 'A') shiftDownQueued = true
     else if (e.key === 'd' || e.key === 'D') shiftUpQueued = true
@@ -154,10 +163,16 @@ export function createDriveScene(
   })
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {
+    if (e.key === 'Shift') clutchHeld = false
     if (e.key === 'Enter' || e.key === 's' || e.key === 'S') {
       if (crankMs < CRANK_NEEDED_MS) { isCranking = false; crankMs = 0; lastCrankBeepMs = 0 }
     }
   })
+
+  // Alt-tabbing away with SHIFT down would otherwise leave the clutch held for
+  // ever — the browser never sends the keyup. Coasting in neutral until the
+  // player notices is a nasty way to lose a delivery.
+  window.addEventListener('blur', () => { clutchHeld = false })
 
   let targetDist = FIRST_TARGET_DIST_M
   let deliveryCount = 0
@@ -269,6 +284,7 @@ export function createDriveScene(
         shiftUp: shiftUpQueued,
         shiftDown: shiftDownQueued,
         restart: restartQueued,
+        clutch: clutchHeld,
       }
       shiftUpQueued = false
       shiftDownQueued = false
@@ -556,6 +572,8 @@ export function createDriveScene(
         missionTimeLeft: `${tlMin}:${tlSec}`,
         buildNumber: __BUILD_NUMBER__,
         weightT,
+        clutchIn: v.clutchIn,
+        targetRpm: v.targetRpm,
       })
 
       // ── Overlays ──
