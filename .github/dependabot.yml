@@ -1,16 +1,27 @@
-# Dependabot for this repo — two jobs:
+# Dependabot for this repo — two ecosystems:
 #
-# 1. npm — auto-open a PR when a new zx-kit version is published. Automates the
-#    manual "bump zx-kit in package.json + npm update" step; you review and merge.
-#    This repo is still on an old kit range, so expect the first PR to be a jump.
+# 1. npm — auto-open a PR when a new zx-kit version is published (the only runtime
+#    dependency), plus security fixes for everything else. This repo is still on an
+#    old kit range, so expect the first zx-kit PR to be a jump.
 # 2. github-actions — stop the workflow's action versions from silently drifting
-#    apart across the four repos. Grouped into a single PR so it stays quiet.
+#    apart across the sibling repos. Grouped into a single PR so it stays quiet.
 #
-# The `allow` block deliberately limits VERSION updates to zx-kit, so routine
-# dev-tool bumps don't flood the queue. SECURITY updates are a SEPARATE mechanism
-# — Settings → Code security → Dependabot security updates, enabled 2026-07-25 —
-# and they reach every dependency regardless of this block. Removing `allow`
-# would add noise, not safety.
+# ERRATA (2026-08-08, diagnosed in minefield and applied here too). This file used
+# to carry an `allow: [zx-kit]` block with a comment claiming security updates
+# reached every dependency "regardless of this block". That was WRONG: `allow`
+# filters SECURITY updates too, so every security job (undici and ip-address here)
+# started, found its target excluded by the filter, and died with
+# `all_versions_ignored`. The job definition in the logs shows it plainly — a
+# "command":"security" job carrying "allowed-updates":[{"dependency-name":"zx-kit"}].
+#
+# `applies-to` cannot split version- and security-update rules at the `updates`
+# level (it only exists inside `groups`), so the fix is to drop `allow` entirely
+# and use GROUPS to keep the queue quiet instead — which is what `allow` was
+# really for. Expect one catch-up PR of dev-tool bumps that the filter had frozen.
+#
+# NOTE: security updates ignore both `schedule` and `open-pull-requests-limit` —
+# they fire off the alert, not the timer — so the security GROUP is what keeps
+# them to a single PR.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -18,9 +29,23 @@ updates:
     schedule:
       interval: "daily"
     versioning-strategy: increase
-    allow:
-      - dependency-name: "zx-kit"
+    open-pull-requests-limit: 2   # version updates only; security PRs are exempt by design
+    groups:
+      # zx-kit is the ONLY runtime dependency and the one bump worth reviewing on
+      # its own — it ships to players, so it never waits behind dev-tool bumps.
+      zx-kit:
+        patterns: ["zx-kit"]
+      # Everything else is build/test tooling that never reaches a player, so it
+      # arrives as ONE batched PR that Dependabot updates in place on later runs.
+      dev-tooling:
+        patterns: ["*"]
+        exclude-patterns: ["zx-kit"]
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
     commit-message:
+      # Deliberately `chore`, not `fix`: a dev-only dependency bump should not cut
+      # a release of the game by itself.
       prefix: "chore"
       include: "scope"
 
