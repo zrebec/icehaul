@@ -77,15 +77,16 @@ function holdsLine(
   surface: Surface,
   curvature: number,
   speedKph: number,
-  opts: { brake?: boolean } = {},
+  opts: { brake?: boolean; mirror?: boolean } = {},
 ): HoldResult {
+  const signedCurvature = opts.mirror ? -curvature : curvature
   const v = createVehicle()
   v.speed = speedKph
   v.gear = gearForSpeed(speedKph)
 
   const grip = gripFor(surface)
   const accel = accelFor(surface)
-  const curveFn = () => curvature
+  const curveFn = () => signedCurvature
 
   let maxAbsX = 0
   let maxSeverity = 0
@@ -100,7 +101,7 @@ function holdsLine(
     tickVehicle(
       v,
       { throttle: false, brake: opts.brake ?? false, steerLeft, steerRight },
-      surface, grip, accel, DT_MS, curvature,
+      surface, grip, accel, DT_MS, signedCurvature,
     )
 
     // Pin road speed — this test is about the lateral axis only.
@@ -121,7 +122,7 @@ function holdsLine(
  * Highest speed that holds the road *with every slower speed also holding*.
  * Returns 0 if even the slowest sweep step already leaves the road.
  */
-function envelope(surface: Surface, curvature: number, opts: { brake?: boolean } = {}): number {
+function envelope(surface: Surface, curvature: number, opts: { brake?: boolean; mirror?: boolean } = {}): number {
   let best = 0
   for (let kph = SPEED_STEP; kph <= MAX_SWEEP_KPH; kph += SPEED_STEP) {
     if (holdsLine(surface, curvature, kph, opts).offRoad) break
@@ -132,7 +133,7 @@ function envelope(surface: Surface, curvature: number, opts: { brake?: boolean }
 
 type EnvelopeTable = Record<Surface, number[]>
 
-function buildTable(opts: { brake?: boolean } = {}): EnvelopeTable {
+function buildTable(opts: { brake?: boolean; mirror?: boolean } = {}): EnvelopeTable {
   const table = {} as EnvelopeTable
   for (const surface of SURFACES) {
     table[surface] = CURVATURES.map(c => envelope(surface, c, opts))
@@ -152,6 +153,8 @@ function printTable(table: EnvelopeTable, label: string): void {
 // Both tables are built once — the sweep is the expensive part of this file.
 const COASTING = buildTable()
 const BRAKING = buildTable({ brake: true })
+/** Same sweep with the curve mirrored, for the symmetry check below. */
+const COASTING_LEFT = buildTable({ mirror: true })
 
 // ─── Baseline: the measurement itself must be sound ──────────────────────────
 
@@ -242,6 +245,19 @@ describe('controllability envelope — braking into the curve', () => {
         expect(BRAKING[surface][c]!, `${surface} @ c=${CURVATURES[c]}`)
           .toBeLessThanOrEqual(COASTING[surface][c]!)
       }
+    }
+  })
+})
+
+// ─── Symmetry ────────────────────────────────────────────────────────────────
+
+describe('controllability envelope — left/right symmetry', () => {
+  it('a left curve is exactly as driveable as its mirrored right curve', () => {
+    // The lateral model is one signed axis, so a sign slip anywhere in it —
+    // steering, centrifugal, the lean offset, the off-road margin — shows up as
+    // one direction being easier than the other and as nothing else.
+    for (const surface of SURFACES) {
+      expect(COASTING_LEFT[surface], surface).toEqual(COASTING[surface])
     }
   })
 })
