@@ -22,7 +22,7 @@ import {
   createVehicle, tickVehicle, massAccelMult,
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
-import { getSurfaceAt, gripFor, accelFor, isDangerAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
+import { getSurfaceAt, getGripAt, accelFor, isDangerAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
 import {
   drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic,
   getTrafficSpriteRows, projectTrafficVehicle,
@@ -292,7 +292,7 @@ export function createDriveScene(
       const gearBefore = v.gear
 
       const surface: Surface = getSurfaceAt(v.distance)
-      const grip = gripFor(surface)
+      const grip = getGripAt(v.distance)
       // Engine pull = surface grip × mass: a heavier truck accelerates slower.
       const accel = accelFor(surface) * massAccelMult(weightT)
       const curvature = getCurvatureAt(v.distance)
@@ -559,7 +559,7 @@ export function createDriveScene(
       const tlMin = Math.floor(timeLeftSec / 60).toString().padStart(2, '0')
       const tlSec = (timeLeftSec % 60).toString().padStart(2, '0')
 
-      const currentGrip = gripFor(getSurfaceAt(v.distance))
+      const currentGrip = getGripAt(v.distance)
       drawHUD(ctx, {
         speed: v.speed,
         rpm: v.rpm,

@@ -1,7 +1,7 @@
 import {
   type Surface,
   SURFACE_GRIP, SURFACE_ACCEL, SURFACE_PROBABILITY, SURFACE_LENGTH_RANGE,
-  RECOVERY_ASPHALT_PCT, RECOVERY_ASPHALT_RANGE, START_ASPHALT_M,
+  RECOVERY_ASPHALT_PCT, RECOVERY_ASPHALT_RANGE, START_ASPHALT_M, SURFACE_TRANSITION_M,
   ICE_AHEAD_LOOK_M,
   CURVE_INTENSITY_RANGE, STRAIGHT_LENGTH_RANGE, TURN_LENGTH_RANGE, TURN_RAMP_M,
 } from '../config.ts'
@@ -87,6 +87,47 @@ export function getSurfaceAt(distanceMeters: number, _seed = 0): Surface {
 
 export function gripFor(surface: Surface): number { return SURFACE_GRIP[surface] }
 export function accelFor(surface: Surface): number { return SURFACE_ACCEL[surface] }
+
+/**
+ * Grip at a point, blended across segment boundaries over
+ * {@link SURFACE_TRANSITION_M} centred on the seam — see that constant for why.
+ *
+ * Deliberately NOT `gripFor(getSurfaceAt(d))`: surface identity stays a hard
+ * edge (visuals, drag, fuel, audio all key off it), only the number moves.
+ */
+export function getGripAt(distanceMeters: number): number {
+  if (distanceMeters < 0) return SURFACE_GRIP.asphalt
+
+  const half = SURFACE_TRANSITION_M / 2
+  ensureGenerated(distanceMeters + half)
+
+  let i = -1
+  for (let k = _segments.length - 1; k >= 0; k--) {
+    if (distanceMeters >= _segments[k]!.start) { i = k; break }
+  }
+  if (i < 0) return SURFACE_GRIP.asphalt
+
+  const seg = _segments[i]!
+  const here = SURFACE_GRIP[seg.surface]
+
+  // Entering: blend up from the previous segment. The first segment has no
+  // predecessor, so it starts flat.
+  if (i > 0 && distanceMeters < seg.start + half) {
+    const prev = SURFACE_GRIP[_segments[i - 1]!.surface]
+    const t = (distanceMeters - (seg.start - half)) / SURFACE_TRANSITION_M
+    return prev + (here - prev) * smoothstep(Math.max(0, Math.min(1, t)))
+  }
+
+  // Leaving: blend down into the next segment.
+  const next = _segments[i + 1]
+  if (next && distanceMeters > seg.end - half) {
+    const there = SURFACE_GRIP[next.surface]
+    const t = (distanceMeters - (seg.end - half)) / SURFACE_TRANSITION_M
+    return here + (there - here) * smoothstep(Math.max(0, Math.min(1, t)))
+  }
+
+  return here
+}
 
 /** Warn when a different dangerous surface is approaching. No warning when already on it. */
 export function isDangerAhead(currentDist: number): Surface | null {

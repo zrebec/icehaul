@@ -28,7 +28,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { resetRoad, getSurfaceAt, getCurvatureAt, gripFor, accelFor, type Surface } from '../road.ts'
+import { resetRoad, getSurfaceAt, getCurvatureAt, getGripAt, accelFor, type Surface } from '../road.ts'
 import { createVehicle, tickVehicle } from '../vehicle.ts'
 import { computeRoadEdges } from '../roadgeometry.ts'
 import { checkTruckOffroad } from '../offroad.ts'
@@ -222,7 +222,7 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
   while (v.distance < FIRST_TARGET_DIST_M && elapsedMs < DELIVERY_TIME_LIMIT_MS) {
     const surface  = getSurfaceAt(v.distance) as Surface
     const curvature = getCurvatureAt(v.distance)
-    const grip     = gripFor(surface)
+    const grip     = getGripAt(v.distance)
     const accel    = accelFor(surface)
     // Straight-line speed for the worst surface in sight, eased off for the bend.
     const target   = plannedTarget(v.distance, targetKph)

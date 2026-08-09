@@ -584,6 +584,21 @@ export const SURFACE_LENGTH_RANGE: Record<Surface, readonly [number, number]> = 
  * After a non-asphalt surface, probability of a recovery asphalt segment.
  * Gives the driver a breather. 0.85 = 85% chance.
  */
+/**
+ * Length of the grip blend across a surface boundary, in metres, centred on the
+ * boundary itself (half before, half after).
+ *
+ * A real road does not change grip on a painted line — ice starts patchy and the
+ * asphalt on its far side stays glazed for a while. Mechanically this matters
+ * because the jump used to be one tick wide: grip 1.0, then 0.25, with no moment
+ * in between where the truck felt light and the player could still act.
+ *
+ * Only the grip *number* is blended. {@link SURFACE_LENGTH_RANGE} segment
+ * identity stays hard-edged, because it also drives the visuals, drag, fuel burn
+ * and skid audio — smearing those would desync what you see from what you feel.
+ */
+export const SURFACE_TRANSITION_M = 20
+
 export const RECOVERY_ASPHALT_PCT = 0.85
 /** Recovery asphalt segment length range [min, max] in metres. */
 export const RECOVERY_ASPHALT_RANGE: readonly [number, number] = [150, 400]
