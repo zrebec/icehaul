@@ -168,9 +168,13 @@ function truckDrawPos(playerX: number, lateralV: number) {
   }
 }
 
-// 20 diverse seeds that cover a wide range of generated surfaces
+// 20 diverse seeds that cover a wide range of generated surfaces, plus 1443866 —
+// the owner's hand-verified worst case: a mostly-ice route completed in a real
+// playtest with ~12 s to spare. It is the one entry here backed by a human hand
+// on the keys rather than by sampling, so it stays in the sweep permanently.
 const MULTI_SEEDS = [0, 1, 7, 42, 99, 137, 256, 500, 777, 999,
-                     1234, 2025, 4096, 8888, 12345, 19999, 55555, 99999, 123456, 999999]
+                     1234, 2025, 4096, 8888, 12345, 19999, 55555, 99999, 123456, 999999,
+                     1443866]
 
 function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResult {
   resetRoad(seed)

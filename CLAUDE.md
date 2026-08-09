@@ -9,6 +9,17 @@ Guidance for Claude Code when working in this repository.
 > Alerts dismissed as `tolerable_risk`. Full analysis, including why `allow:`/`ignore:` in
 > `dependabot.yml` is the wrong lever: `docs/known-issues.md`.
 
+> **`../iceroads-codex` is READ-ONLY.** A parallel working copy of this game lives at
+> `/Users/zrebec/Projects/retro/games/iceroads-codex`, with its own unpublished branches
+> (e.g. `fix/codex-ice-controllability`) and a map editor. **Never write to it** — no edits, no
+> commits, no branch switching, no `git` state changes of any kind. Read and compare only.
+> Note it has several branches; comparisons are usually against a feature branch, not `main`.
+
+> **Reference seed `1443866`** — mostly-ice route, found in the codex copy while hunting for a
+> worst-case layout. Owner playtested it end to end: 5 km completed, with about 12 s to spare,
+> and it required deliberately exceeding the "safe ice speed" in places. Use it as the
+> hand-verified difficulty benchmark for any controllability or road-generation change.
+
 ## What this is
 
 **Ice Haul** is a ZX-Spectrum-flavoured micro-simulator of ice-road trucking. Not ETS2 — its ZX hallucination. The fantasy is *risk management*, not speed: tyre pressure, cargo balance, ice patches, wind, fuel, driver fatigue. Every metre is a small decision.

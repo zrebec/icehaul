@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { resetRoad, getSurfaceAt, gripFor, getGripAt, accelFor, isDangerAhead, getCurvatureAt } from '../road.ts'
-import { START_ASPHALT_M, SURFACE_GRIP, SURFACE_ACCEL, ICE_AHEAD_LOOK_M, SURFACE_TRANSITION_M } from '../../config.ts'
+import { START_ASPHALT_M, SURFACE_GRIP, SURFACE_ACCEL, ICE_AHEAD_LOOK_M, SURFACE_TRANSITION_M, SAFE_ENTRY_STRAIGHT_M } from '../../config.ts'
 
 const SEED = 42
 
@@ -261,5 +261,82 @@ describe('getGripAt — blended surface transitions', () => {
       else expect(g).toBeGreaterThanOrEqual(prev - 1e-9)
       prev = g
     }
+  })
+})
+
+// ─── Hazard entry is never inside a bend ─────────────────────────────────────
+
+describe('surface generation vs curvature', () => {
+  const SEEDS = [0, 1, 7, 42, 99, 137, 256, 500, 777, 999,
+                 1234, 2025, 4096, 8888, 12345, 19999, 55555, 99999, 123456, 999999, 1443866]
+
+  /** Distances at which a non-asphalt segment begins, within `upTo`. */
+  function hazardStarts(upTo: number): number[] {
+    const starts: number[] = []
+    let prev = getSurfaceAt(0)
+    for (let d = 1; d <= upTo; d++) {
+      const s = getSurfaceAt(d)
+      if (s !== prev && s !== 'asphalt') starts.push(d)
+      prev = s
+    }
+    return starts
+  }
+
+  it('every hazard begins on a straight with the required run ahead', () => {
+    for (const seed of SEEDS) {
+      resetRoad(seed)
+      const starts = hazardStarts(8000)
+      expect(starts.length, `seed ${seed} generated no hazards to check`).toBeGreaterThan(0)
+      for (const at of starts) {
+        // Half-open [at, at + SAFE_ENTRY_STRAIGHT_M): the guarantee is that many
+        // metres OF straight, so the far endpoint is already the next section.
+        // Sampled at 5 m; ramps are 60 m so nothing narrower can hide between samples.
+        // Epsilon rather than exact zero — a ramp's smoothstep leaves ~1e-6 of
+        // float dust just past a section boundary, which is not a curve.
+        for (let d = at; d < at + SAFE_ENTRY_STRAIGHT_M; d += 5) {
+          expect(
+            Math.abs(getCurvatureAt(d)),
+            `seed ${seed}: hazard at ${at}m has curvature at +${(d - at).toFixed(0)}m`,
+          ).toBeLessThan(1e-4)
+        }
+      }
+    }
+  })
+
+  it('stays deterministic per seed after the coupling', () => {
+    resetRoad(1443866)
+    const a: string[] = []
+    for (let d = 0; d < 6000; d += 25) a.push(getSurfaceAt(d))
+    resetRoad(1443866)
+    const b: string[] = []
+    for (let d = 0; d < 6000; d += 25) b.push(getSurfaceAt(d))
+    expect(a).toEqual(b)
+  })
+
+  it('generation terminates and still produces varied surfaces', () => {
+    for (const seed of SEEDS) {
+      resetRoad(seed)
+      const seen = new Set<string>()
+      for (let d = 0; d < 8000; d += 25) seen.add(getSurfaceAt(d))
+      expect(seen.has('asphalt'), `seed ${seed}`).toBe(true)
+      expect([...seen].some(s => s !== 'asphalt'), `seed ${seed} is all asphalt`).toBe(true)
+    }
+  })
+
+  it('does not starve hazards — they still cover a real share of the route', () => {
+    // The constraint pushes hazards forward; if it pushed too hard the game would
+    // quietly become an asphalt road with decorations.
+    let nonAsphalt = 0
+    let total = 0
+    for (const seed of SEEDS) {
+      resetRoad(seed)
+      for (let d = 0; d < 5000; d += 10) {
+        total++
+        if (getSurfaceAt(d) !== 'asphalt') nonAsphalt++
+      }
+    }
+    const share = nonAsphalt / total
+    console.log(`\nnon-asphalt share of the first 5 km across ${SEEDS.length} seeds: ${(share * 100).toFixed(1)}%`)
+    expect(share).toBeGreaterThan(0.25)
   })
 })
