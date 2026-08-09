@@ -100,9 +100,24 @@ A car occupies 35 of 256 pixels. Nothing stops it being drawn 60 px wide today. 
 
 ### Raising the resolution is rejected for this purpose
 
-At 320 × 240 the car becomes 44 px **from the same 22 px source** — an upscale ratio of 2.0 instead
-of 1.6, so it would look *more* mushy, not less. The cost is 10–20 h (nine pixel-tuned constants
-plus a truck redraw; see `iceroads-rozlisenie.md`) for the opposite of the intended effect.
+Vehicle scale never touches `GAME_WIDTH`. From `road3d.ts`:
+
+```
+tScale = min(1, (PERSPECTIVE_K / worldZ) / roadHeight)
+scale  = 0.28 + sqrt(tScale) * 1.15
+```
+
+`roadHeight` is in the **denominator**, so a taller viewport makes distant vehicles *smaller*:
+
+| | 256 × 192 | 320 × 240 |
+|---|---|---|
+| `roadHeight` | 89 | 130 |
+| Car at 50 m | ~11 px | **~10 px** |
+| Car right beside you | 31 px | **31 px** — scale saturates at 1.43 |
+
+So more pixels changes nothing up close and makes it worse at distance. Any real gain would need
+the projection redefined, the sources redrawn and the collisions re-verified at the same time —
+10–20 h (nine pixel-tuned constants plus a truck redraw; see `iceroads-rozlisenie.md`).
 
 Distant vehicles are also *supposed* to be blobs — that is what distance looks like. The fix there
 is silhouette and lights, not detail.
@@ -117,6 +132,14 @@ doubled, so the sprite boils between frames. The eye reads that as an unstable s
 gets to judging detail. Quantising the scale to a small ladder fixes it in a few lines.
 
 ### Agreed order
+
+> **Under revision.** A second independent design note
+> (`retro/docs/sk/iceroads-graficky-smer-codex.md`) found something this order does not lead with:
+> render and collision do not build the same raster at downscale, and `scaleRoadsideRows()` already
+> implements the correct coverage resampler that traffic does not use. That makes "one shared
+> raster feeding draw, collision and glow" a better first step than scale quantisation. A merged
+> order is proposed in `iceroads-grafika.md` §9.5 and awaits the owner's decision; the table below
+> is what was agreed before that note was read.
 
 | # | Item | Effort |
 |---|---|---|
