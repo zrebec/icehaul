@@ -84,19 +84,30 @@ If a future change must insert segments, key the rolls off a decision counter ra
 ## Graphics direction
 
 Decided 2026-08-09, after the owner reported that traffic reads as a blob at the horizon and still
-does not read as a car up close. Full measurements and reasoning live in the Slovak note
-`retro/docs/sk/iceroads-grafika.md`; the decisions and their order live here.
+does not read as a car up close, and proposed three routes: raise the resolution, draw vehicles
+mathematically like the road, or reach for glow + dither + LOD.
 
-### The measured constraint is the source sprite, not the screen
+Two design notes were written independently and then merged; the order below is the merged one.
+Full measurements, the disagreements and where each note was wrong are in
+`retro/docs/sk/iceroads-grafika.md` (§9 compares them) and
+`retro/docs/sk/iceroads-graficky-smer-codex.md`. Decisions and their order live here.
 
-| | |
-|---|---|
-| Car source sprite | **22 × 15** (`SAME_CAR_ROWS`, `road3d.ts`) |
-| Peak draw scale | **1.45 → 1.60** (`projectTrafficVehicle`) |
-| Closest car on screen | **~35 × 24 px**, on a 256 px-wide canvas |
+Its one-line summary is worth keeping: **draw meaning in the distance, silhouette in the middle,
+geometry up close.**
 
-A car occupies 35 of 256 pixels. Nothing stops it being drawn 60 px wide today. The limit is that a
-22 px source is upscaled 1.6×.
+### What the vehicle actually gets, in pixels
+
+| Distance | Scale | Car on screen |
+|---|---|---|
+| 220 m | 0.38 | ~8 × 6 px |
+| 100 m | 0.43 | ~9 × 6 px |
+| 50 m | 0.49 | ~11 × 7 px |
+| 10 m | 0.75 | ~17 × 11 px |
+| beside you | 1.43 | **~31 × 21 px** |
+
+Sources are 14 × 11 (mini), 22 × 15 (car), 28 × 18 (bus). At 8 × 6 px no body, windows, grille,
+wheels and lights can coexist — so at the horizon the goal is not to recognise a model. The player
+needs lane, direction, closing speed and threat. Type can wait for a bigger tier.
 
 ### Raising the resolution is rejected for this purpose
 
@@ -115,46 +126,60 @@ scale  = 0.28 + sqrt(tScale) * 1.15
 | Car at 50 m | ~11 px | **~10 px** |
 | Car right beside you | 31 px | **31 px** — scale saturates at 1.43 |
 
-So more pixels changes nothing up close and makes it worse at distance. Any real gain would need
-the projection redefined, the sources redrawn and the collisions re-verified at the same time —
-10–20 h (nine pixel-tuned constants plus a truck redraw; see `iceroads-rozlisenie.md`).
+More pixels changes nothing up close and makes distance worse. Any real gain would need the
+projection redefined, the sources redrawn and collisions re-verified together — 10–20 h (nine
+pixel-tuned constants plus a truck redraw; see `iceroads-rozlisenie.md`).
 
 Distant vehicles are also *supposed* to be blobs — that is what distance looks like. The fix there
 is silhouette and lights, not detail.
 
 If the resolution is ever raised it will be for HUD space, and to 320 × 240 rather than 320 × 200.
 
-### Likely the biggest single culprit, and it is in none of the proposals
+### Three faults in how the sprite reaches the screen
 
-`drawScaledRows` maps source to destination through `floor(sx * w / srcW)`, and `w` grows
-continuously with distance. Every one-pixel change in `w` reshuffles *which* source columns get
-doubled, so the sprite boils between frames. The eye reads that as an unstable smear long before it
-gets to judging detail. Quantising the scale to a small ladder fixes it in a few lines.
+**1 · Downscale throws information away, arbitrarily.** `drawTrafficRows` draws a minimum 1 × 1
+rect per *source* pixel. Scaling 22 px down to 8, several source pixels land on the same target and
+**the last colour wins** — lights, windows and outline have no priority over body. This is the
+horizon mush, and it is the fault the owner actually reported.
+
+**2 · Upscale reshuffles between frames.** Near the player `w > srcW`, and every one-pixel change in
+`w` changes *which* source columns get doubled, so the pattern boils. Less severe than 1, and a
+coverage resampler softens it, but it does not disappear.
+
+**3 · Render and collision do not build the same raster.** The renderer maps source → target with
+overdraw; collision maps target → source. At downscale these are **not the same algorithm**, so
+"pixel-perfect collision" is weaker than claimed at small sprite sizes. This one is a correctness
+bug, not an aesthetic one, and it decides the architecture: **one raster per vehicle, feeding draw,
+collision and the emissive mask alike.**
+
+`scaleRoadsideRows()` already implements the correct target-driven coverage resampler — aggregate
+the source region, track coverage, pick the dominant opaque colour. Roadside uses it; traffic does
+not. The fix is largely reuse, not invention.
 
 ### Agreed order
 
-> **Under revision.** A second independent design note
-> (`retro/docs/sk/iceroads-graficky-smer-codex.md`) found something this order does not lead with:
-> render and collision do not build the same raster at downscale, and `scaleRoadsideRows()` already
-> implements the correct coverage resampler that traffic does not use. That makes "one shared
-> raster feeding draw, collision and glow" a better first step than scale quantisation. A merged
-> order is proposed in `iceroads-grafika.md` §9.5 and awaits the owner's decision; the table below
-> is what was agreed before that note was read.
-
 | # | Item | Effort |
 |---|---|---|
-| A | Quantise sprite scale to a ladder (0.5 / 0.75 / 1.0 / 1.25 / 1.5) | S · 2–3 h |
-| B | Contact shadow under each vehicle | XS · 1 h |
-| C | Head/tail lights through the `glow` layer | S/M · 3–5 h |
-| D | Far LOD tier — clean silhouette plus lights, *less* detail | S · 2–4 h |
-| E | Near LOD tier at ~36 × 24 source, tier chosen by `worldZ` | M/L · 8–14 h |
-| H | Timeboxed maths-drawn vehicle spike, one type, behind a flag | S/M · 4–6 h |
+| 0 | Screenshot matrix + `?trafficRenderer=` / `?glow=0` switches, fixed seed from the catalogue above — so every later change is judged against the same frames | 2–4 h |
+| 1 | **One shared raster.** `scaleRoadsideRows` for traffic too; the same raster feeds draw, collision and emissive; cache by size | 4–8 h |
+| 2 | Far and medium LOD by meaning, tier chosen by **projected height** with hysteresis | 1–2 days |
+| 3 | Cheap wins: contact shadow, contrast outline, lights through restrained `glow` | 0.5–1 day |
+| 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | 1–2 days |
+| 5 | Distance fog; night per the decision below | 4–6 h + night |
+| 6 | Resolution decision — only here, and probably no | — |
 
-**20–33 h before night mode.** The order matters: A and B are cheap and change how everything else
-looks, so D and E should be re-judged after them. Starting with sprite art would be the mistake.
+Step 0 first because everything after it is a judgement call about how something *looks*, and those
+are worthless without a fixed comparison. Step 1 before any art because it fixes faults 1–3 at once
+and may remove much of the problem on today's sprites — measuring the sampler change alone is the
+point. Starting with sprite art would be the mistake: 3 types × 2 directions × 3 tiers is already
+18 assets before yaw variants.
+
+Step 4 has a gate, and it is a real one: *does a ~20–31 px parametric car look clearly better than a
+properly resampled sprite?* If not, stop the procedural direction there rather than widening it.
 
 `glow` (`createGlowLayer` / `drawGlowSource` / `renderGlow`) and `lighting` (`ditherBlack`,
-`brightnessAt`, `DarknessLayer`) both ship in zx-kit 0.42 and have **zero consumers here**.
+`brightnessAt`, `DarknessLayer`) both ship in zx-kit 0.42 with **zero consumers here**. Ice Haul
+does not use `AttrScreen`, so `stampMono(glow: true)` is not available — go through the layer.
 
 ### Night mode — open, both paths costed
 
@@ -164,22 +189,35 @@ looks, so D and E should be re-judged after them. Starting with sprite art would
 | Daylight only | glow at low alpha (oncoming lights are on anyway) + distance fog | 7–11 h |
 
 A full day/night cycle is a further 10–16 h and belongs with roadmap phase 9. Distance fog is worth
-doing on either path — it is the strongest depth cue available and it turns "blob in the distance"
-from a defect into an intention.
+doing on either path — the strongest depth cue available, and it turns "blob in the distance" from a
+defect into an intention.
 
 ### Rules that hold whatever gets built
 
-- **Glow stays opt-in.** The module promises a byte-identical frame when unused; assert it. Glow is
-  an effect on the glass and never widens the palette.
+- **One raster, three consumers.** Draw, collision and glow must read the same rendered raster.
+  Collision must never independently rescale the source sprite. Test that every solid pixel of the
+  collision mask corresponds to a drawn solid pixel.
+- **Glow only on lights, never the body.** Bloom over a whole vehicle just makes a bigger blob, and
+  at the horizon two lamps merge into one smear. Start at alpha 0.2–0.35, one pass, downscale 2,
+  radius derived from vehicle height and hard-capped.
+- **Glow stays opt-in** and never widens the palette; the module promises a byte-identical frame
+  when unused, so assert it. Keep `?glow=0` for instant A/B.
+- **Dither is for surfaces big enough to hold it** — medium and near tiers only. On a 5–8 px car it
+  eats half the pixels and reads as noise. Tie the pattern to vehicle-local coordinates so it never
+  changes between frames.
+- **Pick the LOD tier by projected height, not `worldZ`** — that survives a future viewport change.
+  Needs hysteresis or stable integer boundaries; test that the tier is monotonic and that
+  `mini < car < bus` holds inside each tier.
+- **A white oncoming vehicle disappears on snow and ice.** A one-pixel dark outline is worth more
+  than five interior details.
+- **Vehicles are flat billboards even when passing.** Three yaw buckets (left / straight / right)
+  would help more than pixel count up close; no continuous 3D yaw needed.
+- **Performance:** horizontal spans rather than per-pixel `fillRect`, rasterise only on a cache-key
+  change, allocate the glow layer once, never `getImageData` in the game loop.
 - **Collisions stay pixel-perfect and screen-space** — `ROADMAP.md` and `docs/collision-study.md`.
   World-space may filter, never decide.
-- **Quantising the scale changes the collision rect.** Re-check `offroad.test.ts` and
-  `road3d-scaling.test.ts`, and add a test for the property itself: sprite width must be *stable*
-  across a range of `worldZ`.
-- **LOD tier switching flickers at the boundary** without hysteresis. Test that the tier is
-  monotonic in `worldZ` and that `mini < car < bus` holds inside each tier.
-- No bilinear filtering, no full-screen antialiasing. If distant sprites shimmer, the answer is
-  deterministic dither and a stable scale.
+- No bilinear filtering, no full-screen antialiasing. If distant sprites shimmer, the answer is a
+  deterministic dither and a stable raster.
 
 ## Open decisions
 
