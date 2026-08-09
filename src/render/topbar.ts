@@ -1,12 +1,37 @@
 import { C, CELL, drawText, drawTextCentered } from 'zx-kit'
-import { type Surface, COLS, GAME_WIDTH, STATUS_BAR_ROWS } from '../config.ts'
+import { type Surface, COLS, GAME_WIDTH, STATUS_BAR_ROWS, CURVE_WARN_CURVATURE } from '../config.ts'
+import type { DangerAhead } from '../game/road.ts'
 
 function fmtKm(distM: number): string {
   return (distM / 1000).toFixed(1)
 }
 
 const SURFACE_WARN_LABEL: Record<Surface, string> = {
-  asphalt: '', snow: 'SNOW AHEAD', ice: 'ICE AHEAD', sand: 'SAND AHEAD', mud: 'MUD AHEAD',
+  asphalt: '', snow: 'SNOW', ice: 'ICE', sand: 'SAND', mud: 'MUD',
+}
+
+/**
+ * `ICE 120m >>` — what it is, how far, and whether it bends.
+ *
+ * The distance is the point: the strip used to read identically at 220 m and at
+ * 10 m, so it announced danger without ever saying when. Rounded to 10 m because
+ * the player is reading a warning light, not a rangefinder, and a digit
+ * twitching every frame is harder to read than a coarse one that is not.
+ *
+ * The arrow is only drawn for a bend sharp enough to matter — see
+ * {@link CURVE_WARN_CURVATURE}. Doubled because one chevron at 8x8 in the ROM
+ * font is easy to miss at a glance.
+ */
+export function formatDangerLabel(danger: DangerAhead): string {
+  const label = SURFACE_WARN_LABEL[danger.surface]
+  if (!label) return ''
+
+  const metres = Math.max(0, Math.round(danger.distanceM / 10) * 10)
+  let text = `${label} ${metres}m`
+  if (Math.abs(danger.curvature) >= CURVE_WARN_CURVATURE) {
+    text += danger.curvature < 0 ? ' <<' : ' >>'
+  }
+  return text
 }
 
 export function drawTopBar(
@@ -15,7 +40,7 @@ export function drawTopBar(
     distance: number
     score: number
     elapsedMs: number
-    dangerAhead: Surface | null
+    dangerAhead: DangerAhead | null
     iceAheadBlink: boolean
     lowFuel?: boolean
     lowFuelBlink?: boolean
@@ -40,7 +65,7 @@ export function drawTopBar(
   if (state.lowFuel && state.lowFuelBlink) {
     drawTextCentered(ctx, 'LOW FUEL', CELL, COLS, C.B_RED, C.BLACK)
   } else if (state.dangerAhead && state.iceAheadBlink) {
-    const label = SURFACE_WARN_LABEL[state.dangerAhead]
+    const label = formatDangerLabel(state.dangerAhead)
     if (label) drawTextCentered(ctx, label, CELL, COLS, C.B_RED, C.B_YELLOW)
   }
 }

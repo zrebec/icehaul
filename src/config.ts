@@ -618,6 +618,13 @@ export const SURFACE_TRANSITION_M = 20
 export const SAFE_ENTRY_STRAIGHT_M = 80
 
 /**
+ * Curvature at or above which the top bar adds a direction arrow to a hazard
+ * warning. The midpoint of {@link CURVE_INTENSITY_RANGE}: gentler bends are not
+ * worth the ink, since ice holds a 0.4 bend at 120 km/h and a 1.0 bend at 75.
+ */
+export const CURVE_WARN_CURVATURE = 1.0
+
+/**
  * How far ahead {@link SAFE_ENTRY_STRAIGHT_M} may push a hazard before the
  * generator gives up and places it anyway. Straights are 80–250 m and arrive
  * every 320–820 m, so this is many times the expected wait — it exists only so a

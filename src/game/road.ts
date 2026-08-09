@@ -166,13 +166,50 @@ export function getGripAt(distanceMeters: number): number {
   return here
 }
 
-/** Warn when a different dangerous surface is approaching. No warning when already on it. */
-export function isDangerAhead(currentDist: number): Surface | null {
+export interface DangerAhead {
+  surface: Surface
+  /** Metres from the player to where it starts. */
+  distanceM: number
+  /**
+   * Sharpest signed curvature inside the hazard within the look-ahead window.
+   * Negative left, positive right, 0 if the visible part of it is straight.
+   */
+  curvature: number
+}
+
+/**
+ * Nearest different dangerous surface within {@link ICE_AHEAD_LOOK_M}, with how
+ * far off it is and whether it bends. Silent when already on it.
+ *
+ * Scans the interval rather than sampling the single point at the far end of it,
+ * which is what this used to do. That point sample was silent about any hazard
+ * shorter than the look-ahead — the segment could open and close between the
+ * player and the probe — and it could only ever say "something is coming", never
+ * how far, so the strip read the same at 220 m as at 10 m.
+ */
+export function isDangerAhead(currentDist: number): DangerAhead | null {
   const current = getSurfaceAt(currentDist)
-  const ahead = getSurfaceAt(currentDist + ICE_AHEAD_LOOK_M)
-  if (ahead === 'asphalt') return null
-  if (ahead === current) return null
-  return ahead
+  const end = currentDist + ICE_AHEAD_LOOK_M
+  const STEP = 5
+
+  // Walk past the surface underfoot first: more of what you are already on is
+  // not news, and neither is the asphalt in between.
+  let d = currentDist
+  while (d <= end && getSurfaceAt(d) === current) d += STEP
+  while (d <= end && getSurfaceAt(d) === 'asphalt') d += STEP
+  if (d > end) return null
+
+  const surface = getSurfaceAt(d)
+  const startsAt = d
+
+  // How the hazard bends, as far into it as the player can see.
+  let curvature = 0
+  for (; d <= end && getSurfaceAt(d) === surface; d += STEP) {
+    const c = getCurvatureAt(d)
+    if (Math.abs(c) > Math.abs(curvature)) curvature = c
+  }
+
+  return { surface, distanceM: startsAt - currentDist, curvature }
 }
 
 // ── Curvature pattern: straight → ramp → turn → ramp → straight ────────────

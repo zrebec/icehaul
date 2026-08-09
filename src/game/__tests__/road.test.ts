@@ -84,65 +84,77 @@ describe('gripFor / accelFor', () => {
 })
 
 describe('isDangerAhead', () => {
-  it('returns null on initial asphalt stretch', () => {
+  it('returns null on the opening asphalt stretch', () => {
     expect(isDangerAhead(0)).toBeNull()
     expect(isDangerAhead(100)).toBeNull()
   })
 
-  it('returns surface type when danger approaches from asphalt', () => {
-    let firstNonAsphaltDist = -1
+  it('reports the surface, its distance and its bend', () => {
+    let firstHazard = -1
     for (let d = 0; d < 10000; d += 5) {
-      if (getSurfaceAt(d) !== 'asphalt') { firstNonAsphaltDist = d; break }
+      if (getSurfaceAt(d) !== 'asphalt') { firstHazard = d; break }
     }
-    expect(firstNonAsphaltDist).toBeGreaterThan(0)
-    const warnDist = firstNonAsphaltDist - ICE_AHEAD_LOOK_M + 5
-    if (warnDist > 0 && getSurfaceAt(warnDist) === 'asphalt') {
-      const danger = isDangerAhead(warnDist)
-      expect(danger).not.toBeNull()
-    }
+    expect(firstHazard).toBeGreaterThan(0)
+
+    const from = firstHazard - 150
+    const danger = isDangerAhead(from)
+    expect(danger).not.toBeNull()
+    expect(danger!.surface).toBe(getSurfaceAt(firstHazard))
+    // Scanned at 5 m, so the reported start is within one step of the real one.
+    expect(Math.abs(danger!.distanceM - (firstHazard - from))).toBeLessThanOrEqual(5)
+    expect(Math.abs(danger!.curvature)).toBeLessThanOrEqual(2.0)
   })
 
-  it('returns null when already on a surface and the same surface is still ahead', () => {
-    // Standing in the middle of an ice/snow/etc zone — no warning needed
-    let nonAsphaltDist = -1
+  it('counts down as the hazard gets closer', () => {
+    let firstHazard = -1
     for (let d = 0; d < 10000; d += 5) {
-      if (getSurfaceAt(d) !== 'asphalt') { nonAsphaltDist = d; break }
+      if (getSurfaceAt(d) !== 'asphalt') { firstHazard = d; break }
     }
-    expect(nonAsphaltDist).toBeGreaterThan(0)
-    // If ahead is also the same surface, should be silent
-    const current = getSurfaceAt(nonAsphaltDist)
-    const ahead = getSurfaceAt(nonAsphaltDist + ICE_AHEAD_LOOK_M)
-    if (ahead === current) {
-      expect(isDangerAhead(nonAsphaltDist)).toBeNull()
-    }
+    const far = isDangerAhead(firstHazard - 200)
+    const near = isDangerAhead(firstHazard - 50)
+    expect(far).not.toBeNull()
+    expect(near).not.toBeNull()
+    // The old point-sample version could not do this at all: it returned only a
+    // surface, so the strip read the same at 220 m as at 10 m.
+    expect(near!.distanceM).toBeLessThan(far!.distanceM)
   })
 
-  it('warns when approaching a different dangerous surface from a dangerous surface', () => {
-    // Find a transition: current = non-asphalt, ahead = different non-asphalt
-    // (e.g. snow → dust, ice → mud). Scan a long stretch to find one.
-    let warnDist = -1
-    let expectedSurface: string | null = null
-    for (let d = 0; d < 50000; d += 5) {
-      const current = getSurfaceAt(d)
-      const ahead = getSurfaceAt(d + ICE_AHEAD_LOOK_M)
-      if (current !== 'asphalt' && ahead !== 'asphalt' && ahead !== current) {
-        warnDist = d
-        expectedSurface = ahead
+  it('sees a hazard shorter than the look-ahead window', () => {
+    // The point sample missed these entirely — the segment could open and close
+    // between the player and the probe at ICE_AHEAD_LOOK_M.
+    let found = false
+    for (let d = 0; d < 40000; d += 5) {
+      if (getSurfaceAt(d) !== 'asphalt') continue
+      const hazardNow = isDangerAhead(d)
+      if (!hazardNow) continue
+      const pointSample = getSurfaceAt(d + ICE_AHEAD_LOOK_M)
+      if (pointSample === 'asphalt') {
+        // Interval scan sees it; the far-point probe reports plain asphalt.
+        expect(hazardNow.surface).not.toBe('asphalt')
+        found = true
         break
       }
     }
-    if (warnDist >= 0) {
-      expect(isDangerAhead(warnDist)).toBe(expectedSurface)
-    }
-    // If no cross-surface transition found in 50km the test is vacuously fine
+    expect(found, 'no short hazard found in 40 km to demonstrate the gap').toBe(true)
   })
 
-  it('returns null when heading back onto asphalt from a dangerous surface', () => {
-    // Find a position: current = non-asphalt, ahead = asphalt (exiting the zone)
+  it('stays silent while standing on the hazard it would warn about', () => {
     for (let d = 0; d < 10000; d += 5) {
-      const current = getSurfaceAt(d)
-      const ahead = getSurfaceAt(d + ICE_AHEAD_LOOK_M)
-      if (current !== 'asphalt' && ahead === 'asphalt') {
+      const here = getSurfaceAt(d)
+      if (here === 'asphalt') continue
+      const danger = isDangerAhead(d)
+      if (danger) expect(danger.surface).not.toBe(here)
+      return
+    }
+  })
+
+  it('stays silent when the road ahead is only asphalt', () => {
+    for (let d = 0; d < 10000; d += 5) {
+      let allAsphalt = true
+      for (let k = d; k <= d + ICE_AHEAD_LOOK_M; k += 5) {
+        if (getSurfaceAt(k) !== 'asphalt') { allAsphalt = false; break }
+      }
+      if (allAsphalt) {
         expect(isDangerAhead(d)).toBeNull()
         return
       }
