@@ -1,3 +1,10 @@
+## [0.3.3](https://github.com/zrebec/icehaul/compare/v0.3.2...v0.3.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **vehicle:** make ice in a curve driveable, and prove it stays that way ([#22](https://github.com/zrebec/icehaul/issues/22)) ([9d219d1](https://github.com/zrebec/icehaul/commit/9d219d1993b1c98b97c3f92ce3785c28f058a64b))
+
 ## [0.3.2](https://github.com/zrebec/icehaul/compare/v0.3.1...v0.3.2) (2026-08-09)
 
 
