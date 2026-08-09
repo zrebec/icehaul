@@ -186,16 +186,21 @@ describe('controllability envelope', () => {
     expect(Object.keys(COASTING).length).toBe(SURFACES.length)
   })
 
-  it('ice holds the sharpest curve up to at least 45 km/h', () => {
-    // THE invariant this whole change exists for. The owner-facing promise is
-    // "slow down before the ice and you live"; 45 km/h is where that becomes true.
-    expect(COASTING.ice[3]).toBeGreaterThanOrEqual(45)
+  it('ice holds the sharpest curve up to at least 40 km/h', () => {
+    // THE invariant this whole change exists for. The promise is "slow down
+    // before the ice and you live", and 40 km/h is where that becomes true.
+    //
+    // 40 rather than 45 is a physics claim, not a difficulty preference: safe
+    // curve speed scales as sqrt(mu), asphalt holds this curve at 85, so 40
+    // asserts mu_ice ~ 0.155 — bare ice. 45 would be asserting studs the truck
+    // does not have, and playtested as noticeably less tense.
+    expect(COASTING.ice[3]).toBeGreaterThanOrEqual(40)
   })
 
-  it('ice still loses the sharpest curve well before 70 km/h', () => {
+  it('ice still loses the sharpest curve well before 60 km/h', () => {
     // The counterweight. Ice must stay frightening — an envelope that keeps
     // climbing means the fix overshot and the hazard is gone.
-    expect(COASTING.ice[3]).toBeLessThan(70)
+    expect(COASTING.ice[3]).toBeLessThan(60)
   })
 
   it('asphalt keeps its current feel in the sharpest curve', () => {

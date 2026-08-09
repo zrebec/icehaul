@@ -2,13 +2,21 @@ import { describe, it, expect } from 'vitest'
 import { computeRoadEdges } from '../roadgeometry.ts'
 import {
   VIEWPORT_TOP, VIEWPORT_BOTTOM, HORIZON_PCT, GAME_WIDTH, LATERAL_SHIFT,
-  PERSPECTIVE_K,
+  PERSPECTIVE_K, KERB_WIDTH_TOP, KERB_WIDTH_BOTTOM,
 } from '../../config.ts'
 
 const horizonY = VIEWPORT_TOP + Math.floor((VIEWPORT_BOTTOM - VIEWPORT_TOP) * HORIZON_PCT)
 
 describe('computeRoadEdges', () => {
   const noCurve = () => 0
+
+  it('projects the configured kerb from horizon to foreground', () => {
+    // The same two constants drive road3d.ts's painted shoulder, so a drift here
+    // means the truck leaves the road somewhere other than where it looks like it.
+    const lookup = computeRoadEdges(0, 0, noCurve)
+    expect(lookup(horizonY + 1)!.kerbW).toBe(KERB_WIDTH_TOP)
+    expect(lookup(VIEWPORT_BOTTOM - 1)!.kerbW).toBe(KERB_WIDTH_BOTTOM)
+  })
 
   it('returns undefined above the horizon', () => {
     const lookup = computeRoadEdges(0, 0, noCurve)

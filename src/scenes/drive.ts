@@ -22,7 +22,7 @@ import {
   createVehicle, tickVehicle, massAccelMult,
   type Vehicle, type VehicleInput,
 } from '../game/vehicle.ts'
-import { getSurfaceAt, getGripAt, accelFor, isDangerAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
+import { getSurfaceAt, getGripAt, accelFor, isDangerAhead, sharpCurveAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
 import {
   drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic,
   getTrafficSpriteRows, projectTrafficVehicle,
@@ -86,6 +86,7 @@ type DriveState = 'waiting' | 'playing' | 'paused' | 'crashing'
 
 export function createDriveScene(
   onGameOver: (stats: { distance: number; elapsedMs: number; reason: 'fuel' | 'offroad' | 'timeout' | 'crash'; score: number }) => void,
+  gameSeed: number,
 ): Scene {
   const v: Vehicle = createVehicle()
   let elapsedMs = 0
@@ -109,11 +110,12 @@ export function createDriveScene(
   }
   let crashTimerMs = 0
   let crashReason: 'offroad' | 'crash' | null = null
-  // Seed all generators — every game is unique
-  const gameSeed = Date.now()
+  // Every procedural stream hangs off the route seed, so a seed reproduces the
+  // whole run. The offsets keep the streams independent: changing traffic must
+  // not reshape the road. `>>> 0` keeps them inside the hash's unsigned range.
   resetRoad(gameSeed)
-  resetTraffic(gameSeed + 1)
-  resetCanisters(gameSeed + 2)
+  resetTraffic((gameSeed + 1) >>> 0)
+  resetCanisters((gameSeed + 2) >>> 0)
 
   let driveState: DriveState = 'waiting'
   // Manual gearbox — D = shift up, A = shift down. Edge-triggered (ignore key-repeat).
@@ -522,7 +524,9 @@ export function createDriveScene(
 
       drawTopBar(ctx, {
         distance: v.distance, score, elapsedMs,
-        dangerAhead: isDangerAhead(v.distance), iceAheadBlink: blinkPhase,
+        dangerAhead: isDangerAhead(v.distance),
+        curveAhead: sharpCurveAhead(v.distance),
+        iceAheadBlink: blinkPhase,
         lowFuel: fuelWarn,
         lowFuelBlink: fuelCrit ? blinkPhase : (fuelWarn && !blinkPhase),
       })

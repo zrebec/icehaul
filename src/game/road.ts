@@ -4,7 +4,7 @@ import {
   RECOVERY_ASPHALT_PCT, RECOVERY_ASPHALT_RANGE, START_ASPHALT_M, SURFACE_TRANSITION_M,
   ICE_AHEAD_LOOK_M,
   CURVE_INTENSITY_RANGE, STRAIGHT_LENGTH_RANGE, TURN_LENGTH_RANGE, TURN_RAMP_M,
-  SAFE_ENTRY_STRAIGHT_M, SAFE_ENTRY_SEARCH_LIMIT_M,
+  CURVE_AHEAD_LOOK_M, CURVE_WARN_GRIP_MAX, CURVE_WARN_CURVATURE,
 } from '../config.ts'
 
 export type { Surface }
@@ -36,18 +36,6 @@ let _segments: RoadSegment[] = []
 let _generatedUpTo = 0
 let _lastWasSpecial = false
 let _seed = 0
-/**
- * Counts *decisions*, not segments — the hash input for every roll below.
- *
- * These are the same number until a hazard has to be pushed forward onto a
- * straight and an asphalt filler is inserted ahead of it. Keying the rolls off
- * `_segments.length` would let that filler shift every later roll, so one
- * inserted segment reshuffles the whole remaining route and a seed stops meaning
- * what it meant. Seeds are how routes are reported, reproduced and playtested,
- * so the roll sequence has to survive the constraint: a given seed keeps its
- * exact surface order and lengths, and the constraint only moves where they sit.
- */
-let _rollIdx = 0
 
 /** Reset all road state with a new seed. Call at game start. */
 export function resetRoad(seed: number): void {
@@ -55,19 +43,17 @@ export function resetRoad(seed: number): void {
   _segments = []
   _generatedUpTo = 0
   _lastWasSpecial = false
-  _rollIdx = 0
   _curves = []
   _curvesUpTo = 0
 }
 
 function ensureGenerated(upToDist: number): void {
   while (_generatedUpTo < upToDist + 500) {
-    const idx = _rollIdx
+    const idx = _segments.length
     if (idx === 0) {
       _segments.push({ start: 0, end: START_ASPHALT_M, surface: 'asphalt' })
       _generatedUpTo = START_ASPHALT_M
       _lastWasSpecial = false
-      _rollIdx++
       continue
     }
 
@@ -78,38 +64,21 @@ function ensureGenerated(upToDist: number): void {
       _segments.push({ start: _generatedUpTo, end: _generatedUpTo + length, surface: 'asphalt' })
       _generatedUpTo += length
       _lastWasSpecial = false
-      _rollIdx++
       continue
     }
 
-    // Normal segment
+    // Normal segment. Surfaces and curves are generated independently on purpose:
+    // ice forms where water sits and the sun does not reach, which on a real road
+    // is the inside of a bend more often than a straight. Forcing a flat entry was
+    // tried and removed — it paved over a fifth of the route and made the game
+    // arcade-ish. The promise to the player is not "hazards are never awkward", it
+    // is "slow down enough and you can hold it", which controllability.test.ts pins.
     const surface = pickSurface(hash(idx * 17 + 3 + _seed))
     const [minLen, maxLen] = SURFACE_LENGTH_RANGE[surface]
     const length = minLen + (maxLen - minLen) * hash(idx * 31 + 11 + _seed)
-
-    // A hazard must not begin inside a bend — see SAFE_ENTRY_STRAIGHT_M. This is
-    // the only place the two generators talk to each other; the curve chain is
-    // queried, never modified, so its own sequence stays independent of surfaces.
-    if (surface !== 'asphalt') {
-      const entry = nextStraightStart(_generatedUpTo, SAFE_ENTRY_STRAIGHT_M)
-      if (entry > _generatedUpTo) {
-        // Pave the gap, then start the hazard on the straight. Both segments are
-        // pushed in the same iteration deliberately: re-entering the loop would
-        // re-roll `surface` against a new idx and discard the decision we just
-        // made, so the constraint would silently turn into a reshuffle.
-        _segments.push({ start: _generatedUpTo, end: entry, surface: 'asphalt' })
-      }
-      _segments.push({ start: entry, end: entry + length, surface })
-      _generatedUpTo = entry + length
-      _lastWasSpecial = true
-      _rollIdx++
-      continue
-    }
-
     _segments.push({ start: _generatedUpTo, end: _generatedUpTo + length, surface })
     _generatedUpTo += length
-    _lastWasSpecial = false
-    _rollIdx++
+    _lastWasSpecial = surface !== 'asphalt'
   }
 }
 
@@ -212,6 +181,40 @@ export function isDangerAhead(currentDist: number): DangerAhead | null {
   return { surface, distanceM: startsAt - currentDist, curvature }
 }
 
+export interface CurveAhead {
+  /** Metres to where the bend reaches warning sharpness. 0 means you are in it. */
+  distanceM: number
+  /** Signed curvature there — negative left, positive right. */
+  curvature: number
+}
+
+/**
+ * Sharp bend ahead, but only while the truck is on a surface that cannot simply
+ * be steered through — see {@link CURVE_WARN_GRIP_MAX}.
+ *
+ * This covers the gap {@link isDangerAhead} leaves by design: that one goes quiet
+ * once you are standing on the hazard, and a 2.0 bend in the middle of a long ice
+ * run is exactly where quiet is wrong. Surfaces and curves are generated
+ * independently, so this case is common rather than exotic.
+ *
+ * Keys off surface *identity*, not {@link getGripAt}: the blended value would
+ * cross the threshold somewhere inside a 20 m seam and make the strip flicker on
+ * and off as the truck crawled across it.
+ */
+export function sharpCurveAhead(currentDist: number): CurveAhead | null {
+  if (currentDist < 0) return null
+  if (SURFACE_GRIP[getSurfaceAt(currentDist)] > CURVE_WARN_GRIP_MAX) return null
+
+  const end = currentDist + CURVE_AHEAD_LOOK_M
+  for (let d = currentDist; d <= end; d += 5) {
+    const c = getCurvatureAt(d)
+    if (Math.abs(c) >= CURVE_WARN_CURVATURE) {
+      return { distanceM: d - currentDist, curvature: c }
+    }
+  }
+  return null
+}
+
 // ── Curvature pattern: straight → ramp → turn → ramp → straight ────────────
 
 interface CurveSection {
@@ -281,34 +284,6 @@ function ensureCurvesGenerated(upToDist: number): void {  // uses _seed from mod
 
 function smoothstep(t: number): number {
   return t * t * (3 - 2 * t)
-}
-
-/**
- * Earliest distance at or after `fromDist` with at least `minLen` metres of
- * zero curvature ahead of it. Falls back to `fromDist` if nothing qualifies
- * inside {@link SAFE_ENTRY_SEARCH_LIMIT_M}.
- *
- * Read-only with respect to the curve chain: it extends generation but never
- * alters what was generated, so adding this coupling does not change the curve
- * sequence a seed produces.
- */
-function nextStraightStart(fromDist: number, minLen: number): number {
-  // Config-driven off switch, in the same spirit as GEARS[].maxSpeedToShift:
-  // SAFE_ENTRY_STRAIGHT_M = 0 drops the constraint entirely and restores the
-  // original independent generators, which is also how the A/B is measured.
-  if (minLen <= 0) return fromDist
-
-  const limit = fromDist + SAFE_ENTRY_SEARCH_LIMIT_M
-  ensureCurvesGenerated(limit + minLen)
-
-  for (const sec of _curves) {
-    if (sec.type !== 'straight') continue
-    if (sec.end <= fromDist) continue
-    const start = Math.max(sec.start, fromDist)
-    if (start > limit) break
-    if (sec.end - start >= minLen) return start
-  }
-  return fromDist
 }
 
 export function getCurvatureAt(distM: number): number {

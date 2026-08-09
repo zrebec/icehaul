@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { resetRoad, getSurfaceAt, gripFor, getGripAt, accelFor, isDangerAhead, getCurvatureAt } from '../road.ts'
-import { START_ASPHALT_M, SURFACE_GRIP, SURFACE_ACCEL, ICE_AHEAD_LOOK_M, SURFACE_TRANSITION_M, SAFE_ENTRY_STRAIGHT_M } from '../../config.ts'
+import { resetRoad, getSurfaceAt, gripFor, getGripAt, accelFor, isDangerAhead, sharpCurveAhead, getCurvatureAt } from '../road.ts'
+import { START_ASPHALT_M, SURFACE_GRIP, SURFACE_ACCEL, ICE_AHEAD_LOOK_M, SURFACE_TRANSITION_M, CURVE_WARN_CURVATURE, CURVE_AHEAD_LOOK_M } from '../../config.ts'
 
 const SEED = 42
 
@@ -278,7 +278,7 @@ describe('getGripAt — blended surface transitions', () => {
 
 // ─── Hazard entry is never inside a bend ─────────────────────────────────────
 
-describe('surface generation vs curvature', () => {
+describe('surface generation', () => {
   const SEEDS = [0, 1, 7, 42, 99, 137, 256, 500, 777, 999,
                  1234, 2025, 4096, 8888, 12345, 19999, 55555, 99999, 123456, 999999, 1443866]
 
@@ -294,28 +294,7 @@ describe('surface generation vs curvature', () => {
     return starts
   }
 
-  it('every hazard begins on a straight with the required run ahead', () => {
-    for (const seed of SEEDS) {
-      resetRoad(seed)
-      const starts = hazardStarts(8000)
-      expect(starts.length, `seed ${seed} generated no hazards to check`).toBeGreaterThan(0)
-      for (const at of starts) {
-        // Half-open [at, at + SAFE_ENTRY_STRAIGHT_M): the guarantee is that many
-        // metres OF straight, so the far endpoint is already the next section.
-        // Sampled at 5 m; ramps are 60 m so nothing narrower can hide between samples.
-        // Epsilon rather than exact zero — a ramp's smoothstep leaves ~1e-6 of
-        // float dust just past a section boundary, which is not a curve.
-        for (let d = at; d < at + SAFE_ENTRY_STRAIGHT_M; d += 5) {
-          expect(
-            Math.abs(getCurvatureAt(d)),
-            `seed ${seed}: hazard at ${at}m has curvature at +${(d - at).toFixed(0)}m`,
-          ).toBeLessThan(1e-4)
-        }
-      }
-    }
-  })
-
-  it('stays deterministic per seed after the coupling', () => {
+  it('stays deterministic per seed', () => {
     resetRoad(1443866)
     const a: string[] = []
     for (let d = 0; d < 6000; d += 25) a.push(getSurfaceAt(d))
@@ -336,8 +315,8 @@ describe('surface generation vs curvature', () => {
   })
 
   it('does not starve hazards — they still cover a real share of the route', () => {
-    // The constraint pushes hazards forward; if it pushed too hard the game would
-    // quietly become an asphalt road with decorations.
+    // Guards the balance of the route: a probability or length change that made
+    // hazards rare would turn an ice-road game into an asphalt one with scenery.
     let nonAsphalt = 0
     let total = 0
     for (const seed of SEEDS) {
@@ -350,5 +329,73 @@ describe('surface generation vs curvature', () => {
     const share = nonAsphalt / total
     console.log(`\nnon-asphalt share of the first 5 km across ${SEEDS.length} seeds: ${(share * 100).toFixed(1)}%`)
     expect(share).toBeGreaterThan(0.25)
+  })
+})
+
+// ─── Sharp bend while already on a slippery surface ──────────────────────────
+
+describe('sharpCurveAhead', () => {
+  it('says nothing on asphalt — reading the bend is the game there', () => {
+    for (let d = 0; d < START_ASPHALT_M; d += 25) {
+      expect(sharpCurveAhead(d), `asphalt at ${d}m`).toBeNull()
+    }
+  })
+
+  it('warns about a sharp bend while standing on a hazard', () => {
+    // isDangerAhead is deliberately silent here, which is the gap this fills.
+    let found = false
+    for (let d = 0; d < 40000; d += 5) {
+      if (getSurfaceAt(d) === 'asphalt') continue
+      const curve = sharpCurveAhead(d)
+      if (!curve) continue
+      expect(isDangerAhead(d)?.surface).not.toBe(getSurfaceAt(d))
+      expect(Math.abs(curve.curvature)).toBeGreaterThanOrEqual(CURVE_WARN_CURVATURE)
+      expect(curve.distanceM).toBeGreaterThanOrEqual(0)
+      expect(curve.distanceM).toBeLessThanOrEqual(CURVE_AHEAD_LOOK_M)
+      found = true
+      break
+    }
+    expect(found, 'no sharp bend on a hazard within 40 km').toBe(true)
+  })
+
+  it('never reports a bend gentler than the warning threshold', () => {
+    for (let d = 0; d < 20000; d += 5) {
+      const curve = sharpCurveAhead(d)
+      if (curve) expect(Math.abs(curve.curvature)).toBeGreaterThanOrEqual(CURVE_WARN_CURVATURE)
+    }
+  })
+
+  it('reports the curvature actually present at the distance it names', () => {
+    for (let d = 0; d < 20000; d += 5) {
+      const curve = sharpCurveAhead(d)
+      if (!curve) continue
+      expect(getCurvatureAt(d + curve.distanceM)).toBeCloseTo(curve.curvature, 6)
+      return
+    }
+  })
+
+  it('counts down as the bend approaches', () => {
+    for (let d = 0; d < 20000; d += 5) {
+      const here = sharpCurveAhead(d)
+      if (!here || here.distanceM < 20) continue
+      const closer = sharpCurveAhead(d + 15)
+      if (!closer) continue
+      expect(closer.distanceM).toBeLessThan(here.distanceM)
+      return
+    }
+  })
+
+  it('is deterministic for a given seed', () => {
+    const take = () => {
+      const out: string[] = []
+      for (let d = 0; d < 8000; d += 25) {
+        const c = sharpCurveAhead(d)
+        out.push(c ? `${c.distanceM}:${c.curvature.toFixed(4)}` : '-')
+      }
+      return out
+    }
+    const a = take()
+    resetRoad(SEED)
+    expect(take()).toEqual(a)
   })
 })

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { formatDangerLabel } from '../topbar.ts'
-import { COLS, CURVE_WARN_CURVATURE, ICE_AHEAD_LOOK_M, type Surface } from '../../config.ts'
-import type { DangerAhead } from '../../game/road.ts'
+import { formatCurveLabel, formatDangerLabel } from '../topbar.ts'
+import { COLS, CURVE_AHEAD_LOOK_M, CURVE_WARN_CURVATURE, ICE_AHEAD_LOOK_M, type Surface } from '../../config.ts'
+import type { CurveAhead, DangerAhead } from '../../game/road.ts'
 
 const danger = (over: Partial<DangerAhead> = {}): DangerAhead =>
   ({ surface: 'ice', distanceM: 120, curvature: 0, ...over })
@@ -48,5 +48,31 @@ describe('formatDangerLabel', () => {
       const label = formatDangerLabel(danger({ surface, distanceM: ICE_AHEAD_LOOK_M, curvature: -2 }))
       expect(label.length, `${surface}: "${label}"`).toBeLessThanOrEqual(COLS - 20)
     }
+  })
+})
+
+describe('formatCurveLabel', () => {
+  const curve = (over: Partial<CurveAhead> = {}): CurveAhead =>
+    ({ distanceM: 90, curvature: 2.0, ...over })
+
+  it('says how far the bend is and which way it goes', () => {
+    expect(formatCurveLabel(curve())).toBe('CURVE 90m >')
+    expect(formatCurveLabel(curve({ curvature: -2.0 }))).toBe('CURVE 90m <')
+  })
+
+  it('rounds to 10 m like the surface warning', () => {
+    expect(formatCurveLabel(curve({ distanceM: 94 }))).toBe('CURVE 90m >')
+    expect(formatCurveLabel(curve({ distanceM: 96 }))).toBe('CURVE 100m >')
+  })
+
+  it('reads sensibly once you are in the bend', () => {
+    expect(formatCurveLabel(curve({ distanceM: 0 }))).toBe('CURVE 0m >')
+  })
+
+  it('fits the status bar at the furthest distance it can report', () => {
+    // Same 12-column budget as formatDangerLabel — TIME mm:ss owns columns 0-9.
+    // This is why the bend gets one chevron and the surface warning gets two.
+    const label = formatCurveLabel(curve({ distanceM: CURVE_AHEAD_LOOK_M }))
+    expect(label.length, label).toBeLessThanOrEqual(COLS - 20)
   })
 })

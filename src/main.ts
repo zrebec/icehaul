@@ -17,6 +17,7 @@ import {
 import { CANVAS_SCALE, GAME_HEIGHT, GAME_WIDTH, SCANLINE_ALPHA, CRT_CURVE_INTENSITY } from './config.ts'
 import { createDriveScene } from './scenes/drive.ts'
 import { createGameOverScene } from './scenes/gameover.ts'
+import { roadSeedFromSearch } from './game/seed.ts'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 const ctx = setupCanvas(canvas, CANVAS_SCALE, GAME_WIDTH, GAME_HEIGHT)
@@ -34,10 +35,15 @@ window.addEventListener('keydown', () => {
 
 const scenes = createSceneManager()
 
+// One route per local calendar day, overridable with ?seed= so a specific road,
+// traffic stream and canister layout can be replayed for physics A/B tests.
+// Read once at boot: the route must not change under the player at midnight.
+const gameSeed = roadSeedFromSearch(window.location.search)
+
 function startDrive() {
   const drive = createDriveScene((stats) => {
     replaceScene(scenes, createGameOverScene(stats))
-  })
+  }, gameSeed)
   pushScene(scenes, drive)
 }
 

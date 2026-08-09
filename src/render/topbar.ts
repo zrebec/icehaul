@@ -1,6 +1,6 @@
 import { C, CELL, drawText, drawTextCentered } from 'zx-kit'
 import { type Surface, COLS, GAME_WIDTH, STATUS_BAR_ROWS, CURVE_WARN_CURVATURE } from '../config.ts'
-import type { DangerAhead } from '../game/road.ts'
+import type { CurveAhead, DangerAhead } from '../game/road.ts'
 
 function fmtKm(distM: number): string {
   return (distM / 1000).toFixed(1)
@@ -34,6 +34,19 @@ export function formatDangerLabel(danger: DangerAhead): string {
   return text
 }
 
+/**
+ * `CURVE 90m >` — a sharp bend while already on something slippery.
+ *
+ * One chevron, not two, and that is a width decision rather than a taste one:
+ * `TIME mm:ss` owns columns 0-9 and this strip is centred across COLS, leaving
+ * exactly 12. `CURVE 180m >` is 12; a second chevron would slide the text under
+ * the clock.
+ */
+export function formatCurveLabel(curve: CurveAhead): string {
+  const metres = Math.max(0, Math.round(curve.distanceM / 10) * 10)
+  return `CURVE ${metres}m ${curve.curvature < 0 ? '<' : '>'}`
+}
+
 export function drawTopBar(
   ctx: CanvasRenderingContext2D,
   state: {
@@ -41,6 +54,7 @@ export function drawTopBar(
     score: number
     elapsedMs: number
     dangerAhead: DangerAhead | null
+    curveAhead: CurveAhead | null
     iceAheadBlink: boolean
     lowFuel?: boolean
     lowFuelBlink?: boolean
@@ -67,5 +81,9 @@ export function drawTopBar(
   } else if (state.dangerAhead && state.iceAheadBlink) {
     const label = formatDangerLabel(state.dangerAhead)
     if (label) drawTextCentered(ctx, label, CELL, COLS, C.B_RED, C.B_YELLOW)
+  } else if (state.curveAhead && state.iceAheadBlink) {
+    // Only reachable while standing on a hazard, since dangerAhead goes quiet
+    // exactly then — the two warnings cannot contend for the strip.
+    drawTextCentered(ctx, formatCurveLabel(state.curveAhead), CELL, COLS, C.B_RED, C.B_YELLOW)
   }
 }

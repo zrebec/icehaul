@@ -112,6 +112,26 @@ instead of producing a plausible-looking PNG.
 non-asphalt segment at `START_ASPHALT_M = 1000`. Capturing ice or a surface transition would need
 clutch + upshift automation.
 
+## Route seeds are mixed into the hash additively · generation · low priority
+
+**Status:** open by choice, 2026-08-09. Cosmetic today, but it constrains any future change.
+
+`game/road.ts` derives every roll as `hash(idx * K + C + _seed)` — the seed is *added* to the
+index term rather than mixed independently. Two consequences:
+
+- Seed `S + 17` produces, for segment `idx`, the same surface roll that seed `S` produces for
+  `idx + 1`. Certain seed pairs are therefore shifted copies of one another rather than
+  independent routes. The same holds for the length rolls at their own multipliers (31, 37, 53).
+- Structured seed families sample this lattice rather than the hash's full space. The daily seed
+  (`YYYYMMDD`) steps by 1 per day, which the avalanche decorrelates fine, so this is not a
+  practical problem — but a future "seed = level number" scheme stepping by 17 would be.
+
+The fix is to mix the seed separately, e.g. `hash(idx * 17 + 3 + hash32(seed))`. **Not applied on
+purpose:** it changes what every existing seed means, including `ICE_PLAYTEST_SEED = 1443866`,
+which is the owner's hand-verified difficulty benchmark and the reference the parallel codex
+working copy is compared against. Worth doing only alongside a deliberate re-hunt for benchmark
+seeds.
+
 ## Puppeteer's browser is not installed by `npm ci` · dev tooling
 
 **Status:** open, 2026-08-09.
