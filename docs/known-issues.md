@@ -86,14 +86,31 @@ No code change here.
 
 ---
 
-## `scripts/drive-shot.mjs` cannot start the engine · dev tooling
+## ~~`scripts/drive-shot.mjs` cannot start the engine~~ · fixed 2026-08-09
 
-**Status:** open, 2026-08-09. Low priority, but it fails silently.
+**Status:** closed. The script now holds ENTER and asserts the truck actually moved.
 
-The script sends `page.keyboard.press('Enter')`, a tap. Starting the engine requires **holding**
-ENTER for `CRANK_NEEDED_MS = 1800`, so the capture is of a stalled truck that never moves — the
-screenshot looks plausible, which is what makes it a trap. Fix is `keyboard.down('Enter')`, wait
-~2 s, `keyboard.up('Enter')`.
+Original diagnosis was right — `keyboard.press('Enter')` is a tap, and the crank needs ENTER
+**held** for `CRANK_NEEDED_MS = 1800` — but the suggested "~2 s" hold is not enough, and two
+further faults were hiding behind the first:
+
+1. **The crank counts game `dt`, not wall clock.** `main.ts` clamps `dt` to 50 ms per frame, so
+   every longer frame is under-counted and game time drifts behind real time — measured ~10%
+   behind on a headless page still warming up, i.e. `crankMs` was 1799.9 after 2000 ms of holding.
+   Releasing ENTER even fractionally early makes the keyup handler reset the crank to zero, so the
+   run silently starts over. The hold is now 3500 ms.
+2. **Holding ArrowRight the whole time drove the truck off the road.** Lateral authority barely
+   scales with speed, so steering from a standstill reached the kerb in under two seconds and
+   crashed at 0.25 m. This fault predates the ignition bug; it was simply unreachable while the
+   engine never started. Steering is now a 300 ms pulse just before the capture.
+
+The script also asserts movement now: two frame signatures across 1 s must differ by at least 0.5%
+of sampled pixels. Driving measures ~2.3%, a parked truck 0.00%, so a stalled capture fails loudly
+instead of producing a plausible-looking PNG.
+
+**Remaining limitation:** the run stays in 1st gear (~25 km/h), so it cannot reach the first
+non-asphalt segment at `START_ASPHALT_M = 1000`. Capturing ice or a surface transition would need
+clutch + upshift automation.
 
 ## Puppeteer's browser is not installed by `npm ci` · dev tooling
 
