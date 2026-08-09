@@ -81,6 +81,83 @@ If a future change must insert segments, key the rolls off a decision counter ra
 
 ---
 
+## Graphics direction
+
+Decided 2026-08-09, after the owner reported that traffic reads as a blob at the horizon and still
+does not read as a car up close. Full measurements and reasoning live in the Slovak note
+`retro/docs/sk/iceroads-grafika.md`; the decisions and their order live here.
+
+### The measured constraint is the source sprite, not the screen
+
+| | |
+|---|---|
+| Car source sprite | **22 × 15** (`SAME_CAR_ROWS`, `road3d.ts`) |
+| Peak draw scale | **1.45 → 1.60** (`projectTrafficVehicle`) |
+| Closest car on screen | **~35 × 24 px**, on a 256 px-wide canvas |
+
+A car occupies 35 of 256 pixels. Nothing stops it being drawn 60 px wide today. The limit is that a
+22 px source is upscaled 1.6×.
+
+### Raising the resolution is rejected for this purpose
+
+At 320 × 240 the car becomes 44 px **from the same 22 px source** — an upscale ratio of 2.0 instead
+of 1.6, so it would look *more* mushy, not less. The cost is 10–20 h (nine pixel-tuned constants
+plus a truck redraw; see `iceroads-rozlisenie.md`) for the opposite of the intended effect.
+
+Distant vehicles are also *supposed* to be blobs — that is what distance looks like. The fix there
+is silhouette and lights, not detail.
+
+If the resolution is ever raised it will be for HUD space, and to 320 × 240 rather than 320 × 200.
+
+### Likely the biggest single culprit, and it is in none of the proposals
+
+`drawScaledRows` maps source to destination through `floor(sx * w / srcW)`, and `w` grows
+continuously with distance. Every one-pixel change in `w` reshuffles *which* source columns get
+doubled, so the sprite boils between frames. The eye reads that as an unstable smear long before it
+gets to judging detail. Quantising the scale to a small ladder fixes it in a few lines.
+
+### Agreed order
+
+| # | Item | Effort |
+|---|---|---|
+| A | Quantise sprite scale to a ladder (0.5 / 0.75 / 1.0 / 1.25 / 1.5) | S · 2–3 h |
+| B | Contact shadow under each vehicle | XS · 1 h |
+| C | Head/tail lights through the `glow` layer | S/M · 3–5 h |
+| D | Far LOD tier — clean silhouette plus lights, *less* detail | S · 2–4 h |
+| E | Near LOD tier at ~36 × 24 source, tier chosen by `worldZ` | M/L · 8–14 h |
+| H | Timeboxed maths-drawn vehicle spike, one type, behind a flag | S/M · 4–6 h |
+
+**20–33 h before night mode.** The order matters: A and B are cheap and change how everything else
+looks, so D and E should be re-judged after them. Starting with sprite art would be the mistake.
+
+`glow` (`createGlowLayer` / `drawGlowSource` / `renderGlow`) and `lighting` (`ditherBlack`,
+`brightnessAt`, `DarknessLayer`) both ship in zx-kit 0.42 and have **zero consumers here**.
+
+### Night mode — open, both paths costed
+
+| Path | Contents | Effort |
+|---|---|---|
+| Night soon | glow lights → minimal dusk (fixed darkness + headlight cone) → distance fog | 11–17 h |
+| Daylight only | glow at low alpha (oncoming lights are on anyway) + distance fog | 7–11 h |
+
+A full day/night cycle is a further 10–16 h and belongs with roadmap phase 9. Distance fog is worth
+doing on either path — it is the strongest depth cue available and it turns "blob in the distance"
+from a defect into an intention.
+
+### Rules that hold whatever gets built
+
+- **Glow stays opt-in.** The module promises a byte-identical frame when unused; assert it. Glow is
+  an effect on the glass and never widens the palette.
+- **Collisions stay pixel-perfect and screen-space** — `ROADMAP.md` and `docs/collision-study.md`.
+  World-space may filter, never decide.
+- **Quantising the scale changes the collision rect.** Re-check `offroad.test.ts` and
+  `road3d-scaling.test.ts`, and add a test for the property itself: sprite width must be *stable*
+  across a range of `worldZ`.
+- **LOD tier switching flickers at the boundary** without hysteresis. Test that the tier is
+  monotonic in `worldZ` and that `mini < car < bus` holds inside each tier.
+- No bilinear filtering, no full-screen antialiasing. If distant sprites shimmer, the answer is
+  deterministic dither and a stable scale.
+
 ## Open decisions
 
 ### Braking on ice is deliberately harsh
