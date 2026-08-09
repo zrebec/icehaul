@@ -196,7 +196,11 @@ export interface BrakeProfile {
 export const SURFACE_BRAKE: Record<Surface, BrakeProfile> = {
   asphalt: { decel: 18, speedFade: 0.40, lockSpeed: 100, lateralLoss: 0.10, sound: 'screech' },
   snow: { decel: 12, speedFade: 0.40, lockSpeed: 55, lateralLoss: 0.30, sound: 'none' },
-  ice: { decel: 8, speedFade: 0.55, lockSpeed: 30, lateralLoss: 0.50, sound: 'grind' },
+  // ice lateralLoss was 0.50 with lockSpeed 30, which left steeringGrip ≈ 0.09 —
+  // braking, the correct response to ICE AHEAD, all but removed the wheel and the
+  // player had no counter (no ABS, the brake is a binary key). Still the harshest
+  // profile of the five; it no longer punishes the right decision outright.
+  ice: { decel: 8, speedFade: 0.55, lockSpeed: 45, lateralLoss: 0.35, sound: 'grind' },
   sand: { decel: 10, speedFade: 0.30, lockSpeed: 80, lateralLoss: 0.15, sound: 'none' },
   mud: { decel: 11, speedFade: 0.35, lockSpeed: 65, lateralLoss: 0.25, sound: 'none' },
 }
@@ -224,6 +228,34 @@ export const SURFACE_STEER_DAMP_MULT: Record<Surface, number> = {
   ice: 1.0,
   sand: 2.5,
   mud: 1.5,
+}
+
+/**
+ * Per-surface multiplier on the centrifugal push out of a curve, scaling
+ * {@link CURVE_DRIFT}. See `game/vehicle.ts` — the lateral force block.
+ *
+ * ── WHY THIS IS A TABLE AND NOT DERIVED FROM GRIP ───────────────────────────
+ * It used to be `(1 − grip × 0.7)`, which made ice 0.825 against asphalt's 0.30.
+ * Grip was therefore counted twice: once weakening the steering that fights the
+ * curve, once strengthening the curve itself. Ice ended up 11× worse than
+ * asphalt off a 4× grip difference, and the sharpest curve was unholdable above
+ * 13 km/h — see `__tests__/controllability.test.ts`.
+ *
+ * It was also wrong in principle. Centrifugal force does not depend on grip at
+ * all; grip is what lets the tyre resist it, and that already lives in the
+ * steering and damping terms. Two effects, two knobs.
+ *
+ * The spread is deliberately narrow, and ice is NOT the worst entry. On sand and
+ * mud the wheels plough and the line genuinely washes wide; on ice the loss is
+ * grip, and grip is already modelled three other ways. Making ice worst here
+ * would be counting it twice again, in a new place.
+ */
+export const SURFACE_CURVE_DRIFT_MULT: Record<Surface, number> = {
+  asphalt: 0.30,
+  snow: 0.36,
+  ice: 0.36,
+  sand: 0.38,
+  mud: 0.35,
 }
 
 /**

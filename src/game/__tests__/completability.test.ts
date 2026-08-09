@@ -44,12 +44,17 @@ import {
 type Strategy = Record<Surface, number>
 
 const STRATEGIES: Record<string, Strategy> = {
+  // Straight-line targets; every strategy eases off for bends via curveSpeedFactor.
+  // Aggressive was recalibrated when the lateral envelope was fixed — its brief is
+  // "as fast as the surface allows", and the surface now allows more. Left at the
+  // old numbers it could no longer burn a tank inside 5 km, which cost the sweep
+  // its proof that the FUEL OUT game-over is reachable at all.
   aggressive: {
-    asphalt: 80,
-    snow:    60,
-    ice:     38,
-    sand:    60,
-    mud:     55,
+    asphalt: 115,
+    snow:    80,
+    ice:     50,
+    sand:    80,
+    mud:     75,
   },
   moderate: {
     asphalt: 65,
@@ -107,6 +112,53 @@ interface SimResult {
 
 const DT_MS = 16
 const SEED  = 42
+
+/**
+ * How far ahead the driver reads the road, and how hard they lift for what they
+ * see. A strategy's number is its speed on a *straight* stretch of that surface;
+ * this is the part that says "and you ease off for the bend", which is the whole
+ * premise of the game and was missing from the model entirely.
+ *
+ * Deliberately a crude human heuristic and NOT derived from any physics
+ * constant. If the driver picked its speed from the real lateral envelope the
+ * off-road assertion would be circular — the sim would be steering by the same
+ * numbers it exists to audit.
+ */
+const CURVE_CAUTION = 0.35
+const CURVE_LOOKAHEAD_M = 90
+const CURVE_SAMPLE_M = 15
+
+/**
+ * How far ahead the driver reads the *surface*. Deliberately shorter than
+ * `ICE_AHEAD_LOOK_M` (220 m): the sim must never plan on more warning than the
+ * top bar actually gives a human.
+ *
+ * Without this the driver only reacted to the surface under its own wheels, and
+ * on ice — decel 8 km/h/s against speedFade 0.55 — that is far too late. You
+ * brake for ice while still on asphalt or you do not brake at all.
+ */
+const SURFACE_LOOKAHEAD_M = 150
+const SURFACE_SAMPLE_M = 25
+
+/** Sharpest curvature within the driver's look-ahead, as a speed multiplier. */
+function curveSpeedFactor(distM: number): number {
+  let peak = 0
+  for (let d = distM; d <= distM + CURVE_LOOKAHEAD_M; d += CURVE_SAMPLE_M) {
+    const c = Math.abs(getCurvatureAt(d))
+    if (c > peak) peak = c
+  }
+  return 1 / (1 + peak * CURVE_CAUTION)
+}
+
+/** Speed to hold now: slowest surface in sight, eased further for the bend. */
+function plannedTarget(distM: number, targetKph: Strategy): number {
+  let slowest = Infinity
+  for (let d = distM; d <= distM + SURFACE_LOOKAHEAD_M; d += SURFACE_SAMPLE_M) {
+    const t = targetKph[getSurfaceAt(d) as Surface]
+    if (t < slowest) slowest = t
+  }
+  return slowest * curveSpeedFactor(distM)
+}
 
 /** Mirrors `drive.ts:547` — where the truck is drawn for a given lateral state. */
 function truckDrawPos(playerX: number, lateralV: number) {
@@ -172,7 +224,8 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
     const curvature = getCurvatureAt(v.distance)
     const grip     = gripFor(surface)
     const accel    = accelFor(surface)
-    const target   = targetKph[surface]
+    // Straight-line speed for the worst surface in sight, eased off for the bend.
+    const target   = plannedTarget(v.distance, targetKph)
 
     // Speed controller
     const throttle = v.speed < target

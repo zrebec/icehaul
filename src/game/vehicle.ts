@@ -11,9 +11,9 @@
  *   F_surface   = SURFACE_DRAG × (v/MAX)         (sand/mud/snow resistance)
  *
  * Key forces (lateral):
- *   Steering    = STEER_ACCEL × grip × gripMult × speedFactor
+ *   Steering    = STEER_ACCEL × √grip × speedFactor
  *   Damping     = STEER_DAMP × grip × gripMult × dampMult
- *   Centrifugal = curvature × speed × CURVE_DRIFT × (1 - grip×0.7)
+ *   Centrifugal = curvature × speed × CURVE_DRIFT × SURFACE_CURVE_DRIFT_MULT
  *
  * Grip curve (slip angle approximation):
  *   gripMult = 1.0                      if |vx| ≤ SLIP_PEAK  (linear zone)
@@ -21,6 +21,18 @@
  *   Minimum 5% residual grip to prevent infinite slides.
  *
  * This naturally produces understeer/oversteer without explicit thresholds.
+ *
+ * ── Why steering uses √grip while damping uses grip ─────────────────────────
+ * Low grip lowers the *limit* of lateral force a tyre can pass, but the wheel is
+ * still turned and the contact patch still transmits something — the response
+ * does not fade in proportion. Damping is different: it is the tyre correcting
+ * *itself*, so it keeps the linear grip and the full slip collapse, which is why
+ * a slide on ice still persists once you are past the slip peak.
+ *
+ * With both on linear grip, ice was 4× weaker at steering AND 2.75× stronger at
+ * being pushed out (the old grip-derived centrifugal term) — 11× worse than
+ * asphalt in a curve, and mathematically unholdable. `controllability.test.ts`
+ * pins the resulting envelope so this cannot silently regress.
  */
 
 import {
@@ -32,7 +44,7 @@ import {
   OFF_ROAD_DRAG, OFF_ROAD_RETURN,
   FUEL_BURN_RATE, FUEL_IDLE_THRESHOLD,
   SURFACE_DRAG, SURFACE_BRAKE,
-  SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT,
+  SURFACE_STEER_DAMP_MULT, SURFACE_FUEL_MULT, SURFACE_CURVE_DRIFT_MULT,
   SURFACE_SLIP_PEAK,
   GEARS, GEAR_COUNT, BOG_RPM, BOG_FLOOR, POWER_RPM, REDLINE_FLOOR, OVERREV_ENGINE_BRAKE,
   LUG_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
@@ -431,17 +443,20 @@ export function tickVehicle(
     }
   }
 
-  // steeringGrip: what the driver's input can do — base grip minus brake loss.
-  // NOT reduced by the slip curve: the wheel is still turned, force still exists.
-  const steeringGrip = grip * (1 - brakeLoss)
+  // steeringGrip: what the driver's input can do — steering authority minus brake
+  // loss. NOT reduced by the slip curve: the wheel is still turned, force still
+  // exists. √grip, not grip: see the header note on why response does not fade
+  // in proportion to grip.
+  const steeringGrip = Math.sqrt(grip) * (1 - brakeLoss)
 
   // effectiveGrip: physics self-correction — full model including slip collapse.
   // When sliding, the tire cannot self-correct (this is the "drift persists" behaviour).
   const effectiveGrip = grip * gripMult * (1 - brakeLoss)
 
-  // Centrifugal drift from road curvature
+  // Centrifugal drift from road curvature. Independent of grip by design —
+  // see SURFACE_CURVE_DRIFT_MULT in config.ts.
   if (curvature !== 0 && v.speed > 5) {
-    v.vx += -curvature * v.speed * CURVE_DRIFT * (1 - grip * 0.7) * dt
+    v.vx += -curvature * v.speed * CURVE_DRIFT * SURFACE_CURVE_DRIFT_MULT[surface] * dt
   }
 
   // Steering input — uses steeringGrip so the player always has agency
