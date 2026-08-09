@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { createVehicle, tickVehicle, massAccelMult, massBrakeMult, massStallMult, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
-import { STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, GEAR_COUNT, REFERENCE_MASS_T, CLUTCH_IDLE_RPM, GEARS } from '../../config.ts'
+import {
+  STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, REDLINE_RPM,
+  GEAR_COUNT, REFERENCE_MASS_T, CLUTCH_IDLE_RPM, CLUTCH_GOVERNOR_RPM,
+  CLUTCH_REV_RESPONSE, GEARS,
+} from '../../config.ts'
 
 const noInput: VehicleInput = { throttle: false, brake: false, steerLeft: false, steerRight: false }
 const dt16 = 16
@@ -416,9 +420,8 @@ describe('tickVehicle — redline burn-out', () => {
     const v = freshVehicle({ speed: 76, gear: 3 })
     tickVehicle(v, { ...noInput, throttle: true }, 'asphalt', 1.0, 1.0, REDLINE_WARN_DELAY_MS + 100)
     expect(v.redlineWarning).toBe(true)
-    // Clutch in and OFF the throttle — keeping your foot down through a shift is
-    // still over-revving (the engine is now spinning against nothing at all),
-    // and the warning correctly stays on for it. Lifting is part of the shift.
+    // Clutch in disconnects the wheel-driven redline. Off throttle, inertia now
+    // starts a smooth fall toward idle while the upshift selects a lower target.
     tickVehicle(v, { ...noInput, clutch: true, shiftUp: true }, 'asphalt', 1.0, 1.0, dt16)  // 3 → 4
     expect(v.gear).toBe(4)
     expect(v.redlineWarning).toBe(false)
@@ -426,13 +429,18 @@ describe('tickVehicle — redline burn-out', () => {
     expect(v.redlineMs).toBe(0)
   })
 
-  it('holding the throttle with the clutch in keeps over-revving', () => {
-    // The new way to cook the engine: free-rev it into the limiter with nothing
-    // connected. There is no gear to hide behind, so even top gear burns out.
+  it('the declutched governor prevents burn-out with the throttle held', () => {
     const v = freshVehicle({ speed: 76, gear: GEAR_COUNT })
-    tickVehicle(v, { ...noInput, clutch: true, throttle: true }, 'asphalt', 1.0, 1.0, 2000)
-    expect(v.engineRpm).toBeCloseTo(1, 5)
-    expect(v.redlineWarning).toBe(true)
+    tickVehicle(
+      v,
+      { ...noInput, clutch: true, throttle: true },
+      'asphalt', 1.0, 1.0, REDLINE_BURN_MS + 1000,
+    )
+    expect(v.engineRpm).toBeCloseTo(CLUTCH_GOVERNOR_RPM, 8)
+    expect(v.engineRpm).toBeLessThan(REDLINE_RPM)
+    expect(v.redlineWarning).toBe(false)
+    expect(v.redlineMs).toBe(0)
+    expect(v.stalled).toBe(false)
   })
 
   it('coasting at the limiter (no throttle) never burns out', () => {
@@ -492,6 +500,46 @@ describe('tickVehicle — clutch', () => {
     expect(v.speed).toBeLessThanOrEqual(before)           // …the truck did not
   })
 
+  it('pressing the clutch under throttle does not launch high revs into the limiter', () => {
+    const v = freshVehicle({ speed: 72, gear: 3 })
+    // Prime engineRpm from the engaged drivetrain, as a real preceding frame does.
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
+    const before = v.engineRpm
+    expect(before).toBeGreaterThan(0.9)
+
+    tickVehicle(v, clutchIn({ throttle: true }), 'asphalt', 1.0, 1.0, 250)
+    expect(v.engineRpm).toBeLessThanOrEqual(before)
+    expect(v.engineRpm).toBeLessThan(REDLINE_RPM)
+  })
+
+  it('declutching below idle raises revs smoothly instead of snapping to idle', () => {
+    const v = freshVehicle({ speed: 6, gear: 5 })
+    tickVehicle(v, noInput, 'asphalt', 1.0, 1.0, dt16)
+    const before = v.engineRpm
+    expect(before).toBeLessThan(CLUTCH_IDLE_RPM)
+
+    tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, dt16)
+    expect(v.engineRpm).toBeGreaterThan(before)
+    expect(v.engineRpm).toBeLessThan(CLUTCH_IDLE_RPM)
+  })
+
+  it('free-rev inertia is stable across different physics tick sizes', () => {
+    const run = (ticks: number, dtMs: number): number => {
+      const v = freshVehicle({ engineRpm: 0.4 })
+      for (let i = 0; i < ticks; i++) {
+        tickVehicle(v, clutchIn({ throttle: true }), 'asphalt', 1.0, 1.0, dtMs)
+      }
+      return v.engineRpm
+    }
+
+    const oneLongTick = run(1, 1000)
+    const tenShortTicks = run(10, 100)
+    const expected = CLUTCH_GOVERNOR_RPM
+      - (CLUTCH_GOVERNOR_RPM - 0.4) * Math.exp(-CLUTCH_REV_RESPONSE)
+    expect(oneLongTick).toBeCloseTo(tenShortTicks, 10)
+    expect(oneLongTick).toBeCloseTo(expected, 10)
+  })
+
   it('a rev-matched release is clean: no jolt', () => {
     // 3rd at 60 km/h wants 60/76 ≈ 0.79. Blip to there, then let it out.
     const v = freshVehicle({ speed: 60, gear: 3 })
@@ -531,7 +579,13 @@ describe('tickVehicle — clutch', () => {
     }
     const before = v.speed
     tickVehicle(v, { ...noInput }, 'asphalt', 1.0, 1.0, dt16)
-    expect(before - v.speed).toBeLessThan(1.5)
+    // Bound moved 1.5 -> 1.6 with the switch to exponential free-rev decay, and
+    // the reason is real rather than cosmetic: over this 300 ms dip the engine
+    // now falls to ~0.44 instead of ~0.58, because a first-order response is
+    // steep at high rpm where the old flat 0.7/s ramp was not. A free flywheel
+    // does spool down fast, so the bite finds a wider mismatch and costs a little
+    // more. Still nothing like the 6.7 km/h that prompted this test.
+    expect(before - v.speed).toBeLessThan(1.6)
   })
 
   it('letting the clutch out in far too tall a gear kills the engine on the spot', () => {

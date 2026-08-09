@@ -50,6 +50,15 @@ describe('checkTruckOffroad', () => {
     expect(result.marginRight).toBeGreaterThan(50)
   })
 
+  it('the wide kerb is a recoverable shoulder, not already off-road', () => {
+    // KERB_WIDTH_BOTTOM is 16 px so an ordinary wobble has somewhere to go. This
+    // pins that the shoulder is driveable rather than decorative.
+    const result = checkAtPosition(0.95)
+    expect(result.severity).toBe(0)
+    expect(result.offRoadPixels).toBe(0)
+    expect(result.marginRight).toBeGreaterThanOrEqual(0)
+  })
+
   it('total pixel count is positive and consistent', () => {
     const r1 = checkAtPosition(0)
     const r2 = checkAtPosition(0.5)

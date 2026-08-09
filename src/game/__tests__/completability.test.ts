@@ -3,8 +3,8 @@
  *
  * Runs the vehicle physics frame-by-frame (16 ms ticks, ~60 fps) with a
  * proportional speed controller and a simple steering P-controller that
- * keeps the truck centred. Off-road is not checked — this is an ideal-
- * driver lower-bound: if it fails here, no human can complete it either.
+ * keeps the truck centred. This is an ideal-driver lower bound: if it fails
+ * here, no human can complete it either.
  *
  * Three strategies are compared:
  *   aggressive  — push speed as high as surface allows
@@ -14,14 +14,29 @@
  * The test asserts that at least ONE strategy can complete 5 km within
  * 7 minutes without running out of fuel.  A detailed surface/speed table
  * is always printed so you can see what's eating the budget.
+ *
+ * ── Off-road ────────────────────────────────────────────────────────────────
+ * This file used to say "off-road is not checked", and that hole is exactly how
+ * an ice-in-a-sharp-curve layout — which no human can hold — kept passing. Every
+ * tick now also asks the game's own geometry whether the truck left the road, and
+ * a separate assertion forbids the run drive.ts would have ended.
+ *
+ * The excursion is *recorded, not acted on*: the sim keeps driving afterwards, so
+ * "is there enough time and fuel" stays answerable independently of "can it be
+ * steered". Two questions, two verdicts — collapsing them would mean one broken
+ * axis blinds the other. See `controllability.test.ts` for the lateral envelope.
  */
 
 import { describe, it, expect } from 'vitest'
-import { resetRoad, getSurfaceAt, getCurvatureAt, gripFor, accelFor, type Surface } from '../road.ts'
+import { resetRoad, getSurfaceAt, getCurvatureAt, getGripAt, accelFor, type Surface } from '../road.ts'
 import { createVehicle, tickVehicle } from '../vehicle.ts'
+import { computeRoadEdges } from '../roadgeometry.ts'
+import { checkTruckOffroad } from '../offroad.ts'
+import { TRUCK_BMP_W, TRUCK_BMP_H } from '../../render/truck.ts'
 import {
   DELIVERY_TIME_LIMIT_MS, FIRST_TARGET_DIST_M,
   SURFACE_FUEL_MULT, GEARS, GEAR_COUNT, CLUTCH_MATCH_TOLERANCE,
+  GAME_WIDTH, VIEWPORT_BOTTOM, OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S,
 } from '../../config.ts'
 
 // ─── Strategies ──────────────────────────────────────────────────────────────
@@ -29,12 +44,17 @@ import {
 type Strategy = Record<Surface, number>
 
 const STRATEGIES: Record<string, Strategy> = {
+  // Straight-line targets; every strategy eases off for bends via curveSpeedFactor.
+  // Aggressive was recalibrated when the lateral envelope was fixed — its brief is
+  // "as fast as the surface allows", and the surface now allows more. Left at the
+  // old numbers it could no longer burn a tank inside 5 km, which cost the sweep
+  // its proof that the FUEL OUT game-over is reachable at all.
   aggressive: {
-    asphalt: 80,
-    snow:    60,
-    ice:     38,
-    sand:    60,
-    mud:     55,
+    asphalt: 115,
+    snow:    80,
+    ice:     50,
+    sand:    80,
+    mud:     75,
   },
   moderate: {
     asphalt: 65,
@@ -76,6 +96,16 @@ interface SimResult {
   fuelRemaining: number
   avgKph: number
   segments: SegmentSummary[]
+  /** Worst off-road severity seen (0 = never left the road). */
+  maxOffroadSeverity: number
+  /** Surface the truck was on when it first left the road, if it ever did. */
+  offroadSurface: Surface | null
+  /**
+   * Distance at which drive.ts would have ended the run off-road, or null.
+   * Recorded rather than acted on: the sim keeps driving so that the time and
+   * fuel verdicts stay independent of the lateral verdict.
+   */
+  offroadCrashAtM: number | null
 }
 
 // ─── Core simulation ─────────────────────────────────────────────────────────
@@ -83,9 +113,68 @@ interface SimResult {
 const DT_MS = 16
 const SEED  = 42
 
-// 20 diverse seeds that cover a wide range of generated surfaces
+/**
+ * How far ahead the driver reads the road, and how hard they lift for what they
+ * see. A strategy's number is its speed on a *straight* stretch of that surface;
+ * this is the part that says "and you ease off for the bend", which is the whole
+ * premise of the game and was missing from the model entirely.
+ *
+ * Deliberately a crude human heuristic and NOT derived from any physics
+ * constant. If the driver picked its speed from the real lateral envelope the
+ * off-road assertion would be circular — the sim would be steering by the same
+ * numbers it exists to audit.
+ */
+const CURVE_CAUTION = 0.35
+const CURVE_LOOKAHEAD_M = 90
+const CURVE_SAMPLE_M = 15
+
+/**
+ * How far ahead the driver reads the *surface*. Deliberately shorter than
+ * `ICE_AHEAD_LOOK_M` (220 m): the sim must never plan on more warning than the
+ * top bar actually gives a human.
+ *
+ * Without this the driver only reacted to the surface under its own wheels, and
+ * on ice — decel 8 km/h/s against speedFade 0.55 — that is far too late. You
+ * brake for ice while still on asphalt or you do not brake at all.
+ */
+const SURFACE_LOOKAHEAD_M = 150
+const SURFACE_SAMPLE_M = 25
+
+/** Sharpest curvature within the driver's look-ahead, as a speed multiplier. */
+function curveSpeedFactor(distM: number): number {
+  let peak = 0
+  for (let d = distM; d <= distM + CURVE_LOOKAHEAD_M; d += CURVE_SAMPLE_M) {
+    const c = Math.abs(getCurvatureAt(d))
+    if (c > peak) peak = c
+  }
+  return 1 / (1 + peak * CURVE_CAUTION)
+}
+
+/** Speed to hold now: slowest surface in sight, eased further for the bend. */
+function plannedTarget(distM: number, targetKph: Strategy): number {
+  let slowest = Infinity
+  for (let d = distM; d <= distM + SURFACE_LOOKAHEAD_M; d += SURFACE_SAMPLE_M) {
+    const t = targetKph[getSurfaceAt(d) as Surface]
+    if (t < slowest) slowest = t
+  }
+  return slowest * curveSpeedFactor(distM)
+}
+
+/** Mirrors `drive.ts:547` — where the truck is drawn for a given lateral state. */
+function truckDrawPos(playerX: number, lateralV: number) {
+  return {
+    x: Math.round(GAME_WIDTH / 2 + playerX * 50 - TRUCK_BMP_W / 2 + (-lateralV * 1.5)),
+    y: Math.round(VIEWPORT_BOTTOM - 2 - TRUCK_BMP_H),
+  }
+}
+
+// 20 diverse seeds that cover a wide range of generated surfaces, plus 1443866 —
+// the owner's hand-verified worst case: a mostly-ice route completed in a real
+// playtest with ~12 s to spare. It is the one entry here backed by a human hand
+// on the keys rather than by sampling, so it stays in the sweep permanently.
 const MULTI_SEEDS = [0, 1, 7, 42, 99, 137, 256, 500, 777, 999,
-                     1234, 2025, 4096, 8888, 12345, 19999, 55555, 99999, 123456, 999999]
+                     1234, 2025, 4096, 8888, 12345, 19999, 55555, 99999, 123456, 999999,
+                     1443866]
 
 function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResult {
   resetRoad(seed)
@@ -99,6 +188,16 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
   const segments: SegmentSummary[] = []
   // Clutch driver state (see the shift block in the loop below).
   let clutchPhase: 'in' | 'out' = 'out'
+
+  // Off-road tracking. This used to be absent — the header said so — which is why
+  // an ice-in-a-curve layout no human could survive still passed. The two failure
+  // conditions below are exactly the ones drive.ts:419-420 and :440-443 act on.
+  // Noting them does NOT stop the sim: time and fuel are separate questions and
+  // must stay answerable even on a route that also happens to be undriveable.
+  let maxOffroadSeverity = 0
+  let offroadAccumS = 0
+  let offroadSurface: Surface | null = null
+  let offroadCrashAtM: number | null = null
 
   function flushSegment(currentSurface: Surface, nowDist: number, nowTime: number, nowFuel: number) {
     const lengthM = nowDist - segStartDist
@@ -127,9 +226,10 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
   while (v.distance < FIRST_TARGET_DIST_M && elapsedMs < DELIVERY_TIME_LIMIT_MS) {
     const surface  = getSurfaceAt(v.distance) as Surface
     const curvature = getCurvatureAt(v.distance)
-    const grip     = gripFor(surface)
+    const grip     = getGripAt(v.distance)
     const accel    = accelFor(surface)
-    const target   = targetKph[surface]
+    // Straight-line speed for the worst surface in sight, eased off for the bend.
+    const target   = plannedTarget(v.distance, targetKph)
 
     // Speed controller
     const throttle = v.speed < target
@@ -194,6 +294,21 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
       surface, grip, accel, DT_MS, curvature,
     )
 
+    // ── Did the truck leave the road? ──────────────────────────────────────
+    // Measured through the game's own geometry, not a re-derived threshold.
+    const pos = truckDrawPos(v.x, v.vx)
+    const off = checkTruckOffroad(pos.x, pos.y, computeRoadEdges(v.distance, v.x, getCurvatureAt))
+    if (off.severity > 0) {
+      if (offroadSurface === null) offroadSurface = surface
+      if (off.severity > maxOffroadSeverity) maxOffroadSeverity = off.severity
+      offroadAccumS += DT_MS / 1000
+      // Instant crash on a deep excursion, or three seconds of any excursion.
+      const wouldCrash = off.severity >= OFFROAD_CRASH_SEVERITY || offroadAccumS > OFFROAD_TIMEOUT_S
+      if (wouldCrash && offroadCrashAtM === null) offroadCrashAtM = v.distance
+    } else {
+      offroadAccumS = 0
+    }
+
     // Segment tracking
     if (surface !== lastSurface) {
       flushSegment(surface, v.distance, elapsedMs, v.fuel)
@@ -212,6 +327,9 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
         fuelRemaining: 0,
         avgKph: v.distance / 1000 / (elapsedMs / 3_600_000),
         segments,
+        maxOffroadSeverity,
+        offroadSurface,
+        offroadCrashAtM,
       }
     }
   }
@@ -229,6 +347,9 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
     fuelRemaining: Math.round(v.fuel * 1000) / 1000,
     avgKph: Math.round(v.distance / 1000 / (elapsedMs / 3_600_000) * 10) / 10,
     segments,
+    maxOffroadSeverity,
+    offroadSurface,
+    offroadCrashAtM,
   }
 }
 
@@ -393,6 +514,29 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
   it('at least one strategy completes every seed', () => {
     const failed = sweep.filter(s => !s.best.completed)
     expect(failed.length).toBe(0)
+  })
+
+  it('no strategy is ever thrown off the road — the route is driveable, not just reachable', () => {
+    // The assertion this file was missing. "Completable" used to mean only
+    // "enough time and fuel"; a layout that puts ice inside a sharp curve is
+    // unreachable for a different reason, and this is what catches it.
+    const crashed = sweep.flatMap(s =>
+      s.allResults
+        .filter(r => r.offroadCrashAtM !== null)
+        .map(r => ({ seed: s.seed, surfaces: s.surfaces, r })),
+    )
+    if (crashed.length > 0) {
+      const total = sweep.length * Object.keys(STRATEGIES).length
+      console.log(`\n❌ Off-road crash on ${crashed.length}/${total} strategy/seed combination(s):`)
+      for (const { seed, surfaces, r } of crashed) {
+        console.log(
+          `  seed ${seed} (${surfaces}): ${r.strategy} left the road at ` +
+          `${Math.round(r.offroadCrashAtM!)}m on ${r.offroadSurface}, ` +
+          `worst severity ${(r.maxOffroadSeverity * 100).toFixed(0)}%`,
+        )
+      }
+    }
+    expect(crashed.length).toBe(0)
   })
 
   it('aggressive strategy is fuel-limited on at least one seed — FUEL OUT path is reachable', () => {

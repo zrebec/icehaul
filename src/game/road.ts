@@ -1,9 +1,10 @@
 import {
   type Surface,
   SURFACE_GRIP, SURFACE_ACCEL, SURFACE_PROBABILITY, SURFACE_LENGTH_RANGE,
-  RECOVERY_ASPHALT_PCT, RECOVERY_ASPHALT_RANGE, START_ASPHALT_M,
+  RECOVERY_ASPHALT_PCT, RECOVERY_ASPHALT_RANGE, START_ASPHALT_M, SURFACE_TRANSITION_M,
   ICE_AHEAD_LOOK_M,
   CURVE_INTENSITY_RANGE, STRAIGHT_LENGTH_RANGE, TURN_LENGTH_RANGE, TURN_RAMP_M,
+  CURVE_AHEAD_LOOK_M, CURVE_WARN_GRIP_MAX, CURVE_WARN_CURVATURE,
 } from '../config.ts'
 
 export type { Surface }
@@ -66,7 +67,12 @@ function ensureGenerated(upToDist: number): void {
       continue
     }
 
-    // Normal segment
+    // Normal segment. Surfaces and curves are generated independently on purpose:
+    // ice forms where water sits and the sun does not reach, which on a real road
+    // is the inside of a bend more often than a straight. Forcing a flat entry was
+    // tried and removed — it paved over a fifth of the route and made the game
+    // arcade-ish. The promise to the player is not "hazards are never awkward", it
+    // is "slow down enough and you can hold it", which controllability.test.ts pins.
     const surface = pickSurface(hash(idx * 17 + 3 + _seed))
     const [minLen, maxLen] = SURFACE_LENGTH_RANGE[surface]
     const length = minLen + (maxLen - minLen) * hash(idx * 31 + 11 + _seed)
@@ -88,13 +94,125 @@ export function getSurfaceAt(distanceMeters: number, _seed = 0): Surface {
 export function gripFor(surface: Surface): number { return SURFACE_GRIP[surface] }
 export function accelFor(surface: Surface): number { return SURFACE_ACCEL[surface] }
 
-/** Warn when a different dangerous surface is approaching. No warning when already on it. */
-export function isDangerAhead(currentDist: number): Surface | null {
+/**
+ * Grip at a point, blended across segment boundaries over
+ * {@link SURFACE_TRANSITION_M} centred on the seam — see that constant for why.
+ *
+ * Deliberately NOT `gripFor(getSurfaceAt(d))`: surface identity stays a hard
+ * edge (visuals, drag, fuel, audio all key off it), only the number moves.
+ */
+export function getGripAt(distanceMeters: number): number {
+  if (distanceMeters < 0) return SURFACE_GRIP.asphalt
+
+  const half = SURFACE_TRANSITION_M / 2
+  ensureGenerated(distanceMeters + half)
+
+  let i = -1
+  for (let k = _segments.length - 1; k >= 0; k--) {
+    if (distanceMeters >= _segments[k]!.start) { i = k; break }
+  }
+  if (i < 0) return SURFACE_GRIP.asphalt
+
+  const seg = _segments[i]!
+  const here = SURFACE_GRIP[seg.surface]
+
+  // Entering: blend up from the previous segment. The first segment has no
+  // predecessor, so it starts flat.
+  if (i > 0 && distanceMeters < seg.start + half) {
+    const prev = SURFACE_GRIP[_segments[i - 1]!.surface]
+    const t = (distanceMeters - (seg.start - half)) / SURFACE_TRANSITION_M
+    return prev + (here - prev) * smoothstep(Math.max(0, Math.min(1, t)))
+  }
+
+  // Leaving: blend down into the next segment.
+  const next = _segments[i + 1]
+  if (next && distanceMeters > seg.end - half) {
+    const there = SURFACE_GRIP[next.surface]
+    const t = (distanceMeters - (seg.end - half)) / SURFACE_TRANSITION_M
+    return here + (there - here) * smoothstep(Math.max(0, Math.min(1, t)))
+  }
+
+  return here
+}
+
+export interface DangerAhead {
+  surface: Surface
+  /** Metres from the player to where it starts. */
+  distanceM: number
+  /**
+   * Sharpest signed curvature inside the hazard within the look-ahead window.
+   * Negative left, positive right, 0 if the visible part of it is straight.
+   */
+  curvature: number
+}
+
+/**
+ * Nearest different dangerous surface within {@link ICE_AHEAD_LOOK_M}, with how
+ * far off it is and whether it bends. Silent when already on it.
+ *
+ * Scans the interval rather than sampling the single point at the far end of it,
+ * which is what this used to do. That point sample was silent about any hazard
+ * shorter than the look-ahead — the segment could open and close between the
+ * player and the probe — and it could only ever say "something is coming", never
+ * how far, so the strip read the same at 220 m as at 10 m.
+ */
+export function isDangerAhead(currentDist: number): DangerAhead | null {
   const current = getSurfaceAt(currentDist)
-  const ahead = getSurfaceAt(currentDist + ICE_AHEAD_LOOK_M)
-  if (ahead === 'asphalt') return null
-  if (ahead === current) return null
-  return ahead
+  const end = currentDist + ICE_AHEAD_LOOK_M
+  const STEP = 5
+
+  // Walk past the surface underfoot first: more of what you are already on is
+  // not news, and neither is the asphalt in between.
+  let d = currentDist
+  while (d <= end && getSurfaceAt(d) === current) d += STEP
+  while (d <= end && getSurfaceAt(d) === 'asphalt') d += STEP
+  if (d > end) return null
+
+  const surface = getSurfaceAt(d)
+  const startsAt = d
+
+  // How the hazard bends, as far into it as the player can see.
+  let curvature = 0
+  for (; d <= end && getSurfaceAt(d) === surface; d += STEP) {
+    const c = getCurvatureAt(d)
+    if (Math.abs(c) > Math.abs(curvature)) curvature = c
+  }
+
+  return { surface, distanceM: startsAt - currentDist, curvature }
+}
+
+export interface CurveAhead {
+  /** Metres to where the bend reaches warning sharpness. 0 means you are in it. */
+  distanceM: number
+  /** Signed curvature there — negative left, positive right. */
+  curvature: number
+}
+
+/**
+ * Sharp bend ahead, but only while the truck is on a surface that cannot simply
+ * be steered through — see {@link CURVE_WARN_GRIP_MAX}.
+ *
+ * This covers the gap {@link isDangerAhead} leaves by design: that one goes quiet
+ * once you are standing on the hazard, and a 2.0 bend in the middle of a long ice
+ * run is exactly where quiet is wrong. Surfaces and curves are generated
+ * independently, so this case is common rather than exotic.
+ *
+ * Keys off surface *identity*, not {@link getGripAt}: the blended value would
+ * cross the threshold somewhere inside a 20 m seam and make the strip flicker on
+ * and off as the truck crawled across it.
+ */
+export function sharpCurveAhead(currentDist: number): CurveAhead | null {
+  if (currentDist < 0) return null
+  if (SURFACE_GRIP[getSurfaceAt(currentDist)] > CURVE_WARN_GRIP_MAX) return null
+
+  const end = currentDist + CURVE_AHEAD_LOOK_M
+  for (let d = currentDist; d <= end; d += 5) {
+    const c = getCurvatureAt(d)
+    if (Math.abs(c) >= CURVE_WARN_CURVATURE) {
+      return { distanceM: d - currentDist, curvature: c }
+    }
+  }
+  return null
 }
 
 // ── Curvature pattern: straight → ramp → turn → ramp → straight ────────────

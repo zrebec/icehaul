@@ -9,6 +9,18 @@ Guidance for Claude Code when working in this repository.
 > Alerts dismissed as `tolerable_risk`. Full analysis, including why `allow:`/`ignore:` in
 > `dependabot.yml` is the wrong lever: `docs/known-issues.md`.
 
+> **See `AGENTS.md`** for the playtest seed catalogue, open tuning decisions, and the read-only
+> rule for the parallel `../iceroads-codex` working copy. Keep those there, not here.
+
+## Route seeds
+
+The road, traffic and canisters are all deterministic functions of one seed, so a seed *is* the
+route. `src/game/seed.ts` picks it: one route per **local** calendar day (`YYYYMMDD`), overridable
+with **`?seed=<decimal>`** for repeatable playtests and physics A/B tests. Invalid overrides fall
+back to the daily seed. Read once at boot — the route never changes under the player.
+
+Which seeds are worth playing, and what each one exercises, is catalogued in `AGENTS.md`.
+
 ## What this is
 
 **Ice Haul** is a ZX-Spectrum-flavoured micro-simulator of ice-road trucking. Not ETS2 — its ZX hallucination. The fantasy is *risk management*, not speed: tyre pressure, cargo balance, ice patches, wind, fuel, driver fatigue. Every metre is a small decision.

@@ -196,6 +196,25 @@ export interface BrakeProfile {
 export const SURFACE_BRAKE: Record<Surface, BrakeProfile> = {
   asphalt: { decel: 18, speedFade: 0.40, lockSpeed: 100, lateralLoss: 0.10, sound: 'screech' },
   snow: { decel: 12, speedFade: 0.40, lockSpeed: 55, lateralLoss: 0.30, sound: 'none' },
+  // ── Ice: harsh on purpose, and the harshness is the correct model ──────────
+  // lateralLoss IS the friction circle. A tyre has one force budget of μ·N, and
+  // whatever braking spends is not available to turn; on ice that budget is tiny,
+  // so braking and steering at once genuinely does not work. 0.50 already leaves
+  // half the wheel, which is generous against the physics.
+  //
+  // A 0.35 / lockSpeed 45 variant was tried and reverted. It made braking mid-
+  // corner work, which is the one thing real ice forbids, and raising lockSpeed
+  // had it backwards — wheels lock at LOWER speeds on ice, not higher. The
+  // player's counter is not a better brake, it is the ICE AHEAD warning: brake
+  // early, in a straight line, then coast the corner.
+  //
+  // ── KNOWN INCONSISTENCY, worth fixing after a playtest ─────────────────────
+  // Cornering implies μ_ice ≈ 0.155 (see SURFACE_CURVE_DRIFT_MULT), but
+  // decel 8 km/h/s = 2.22 m/s² implies μ ≈ 0.227. Today it is easier to stop on
+  // ice than to turn on it, which is backwards. The consistent value is
+  // decel ≈ 5.5, taking the 40 km/h stopping distance from ~28 m to ~42 m — the
+  // real figure for bare ice. That is a difficulty increase, so it needs a
+  // playtest and a check that ICE_AHEAD_LOOK_M still gives room to act.
   ice: { decel: 8, speedFade: 0.55, lockSpeed: 30, lateralLoss: 0.50, sound: 'grind' },
   sand: { decel: 10, speedFade: 0.30, lockSpeed: 80, lateralLoss: 0.15, sound: 'none' },
   mud: { decel: 11, speedFade: 0.35, lockSpeed: 65, lateralLoss: 0.25, sound: 'none' },
@@ -224,6 +243,43 @@ export const SURFACE_STEER_DAMP_MULT: Record<Surface, number> = {
   ice: 1.0,
   sand: 2.5,
   mud: 1.5,
+}
+
+/**
+ * Per-surface multiplier on the centrifugal push out of a curve, scaling
+ * {@link CURVE_DRIFT}. See `game/vehicle.ts` — the lateral force block.
+ *
+ * ── WHY THIS IS A TABLE AND NOT DERIVED FROM GRIP ───────────────────────────
+ * It used to be `(1 − grip × 0.7)`, which made ice 0.825 against asphalt's 0.30.
+ * Grip was therefore counted twice: once weakening the steering that fights the
+ * curve, once strengthening the curve itself. Ice ended up 11× worse than
+ * asphalt off a 4× grip difference, and the sharpest curve was unholdable above
+ * 13 km/h — see `__tests__/controllability.test.ts`.
+ *
+ * It was also wrong in principle. Centrifugal force does not depend on grip at
+ * all; grip is what lets the tyre resist it, and that already lives in the
+ * steering and damping terms. Two effects, two knobs.
+ *
+ * ── WHERE THE ICE NUMBER COMES FROM ────────────────────────────────────────
+ * Maximum cornering force is `μ·g`, so safe curve speed scales as `√μ`. Asphalt
+ * holds the sharpest curve (c=2.0) at 85 km/h, so an ice figure of X km/h claims
+ * a friction ratio of `(X/85)²`:
+ *
+ *   40 km/h → μ_ice ≈ 0.155 · bare ice, no studs      ← what we model
+ *   45 km/h → μ_ice ≈ 0.19  · studded or chained ice
+ *   51 km/h → μ_ice ≈ 0.25  · good winter tyres on ice
+ *
+ * 0.42 lands ice at 40. A briefly-tried 0.36 gave 45 and measurably drained the
+ * tension out of a playtest — it was also quietly claiming studs the truck does
+ * not have. Ice being the worst entry here is therefore not double-counting
+ * grip; it is the surface genuinely having the least of it.
+ */
+export const SURFACE_CURVE_DRIFT_MULT: Record<Surface, number> = {
+  asphalt: 0.30,
+  snow: 0.36,
+  ice: 0.42,
+  sand: 0.38,
+  mud: 0.35,
 }
 
 /**
@@ -464,13 +520,18 @@ export const CRANK_NEEDED_MS = 1800
 /** Idle revs (rpm fraction) the engine settles to when declutched off throttle. */
 export const CLUTCH_IDLE_RPM = 0.20
 /**
- * Free-rev climb rate (rpm fraction per second) on throttle with the clutch in.
- * A loaded diesel does not scream up instantly — 0.9 means idle → redline in
- * roughly a second, which is enough time to overshoot if you are careless.
+ * Governed no-load rpm under full throttle with the clutch disengaged.
+ * A truck diesel cannot free-rev through its limiter; 0.90 leaves deliberate
+ * headroom below {@link REDLINE_RPM} while still covering normal downshift
+ * targets inside {@link CLUTCH_MATCH_TOLERANCE}.
  */
-export const CLUTCH_REV_RATE = 0.9
-/** Free-rev decay rate (rpm fraction per second) off throttle with the clutch in. */
-export const CLUTCH_DECAY_RATE = 0.7
+export const CLUTCH_GOVERNOR_RPM = 0.90
+/**
+ * First-order engine response toward idle/governed rpm, in 1/s.
+ * Applied through `1 - exp(-response * dt)`, so a long frame cannot overshoot
+ * and the same elapsed time gives the same response at every frame rate.
+ */
+export const CLUTCH_REV_RESPONSE = 3.0
 /**
  * Mismatch (|engineRpm − targetRpm|) inside which a release counts as CLEAN: no
  * jolt at all. Wide enough that a deliberate rev-match is reliably rewarded,
@@ -552,6 +613,49 @@ export const SURFACE_LENGTH_RANGE: Record<Surface, readonly [number, number]> = 
  * After a non-asphalt surface, probability of a recovery asphalt segment.
  * Gives the driver a breather. 0.85 = 85% chance.
  */
+/**
+ * Length of the grip blend across a surface boundary, in metres, centred on the
+ * boundary itself (half before, half after).
+ *
+ * A real road does not change grip on a painted line — ice starts patchy and the
+ * asphalt on its far side stays glazed for a while. Mechanically this matters
+ * because the jump used to be one tick wide: grip 1.0, then 0.25, with no moment
+ * in between where the truck felt light and the player could still act.
+ *
+ * Only the grip *number* is blended. {@link SURFACE_LENGTH_RANGE} segment
+ * identity stays hard-edged, because it also drives the visuals, drag, fuel burn
+ * and skid audio — smearing those would desync what you see from what you feel.
+ */
+export const SURFACE_TRANSITION_M = 20
+
+/**
+ * Curvature at or above which a warning carries a direction arrow. The midpoint
+ * of {@link CURVE_INTENSITY_RANGE}: gentler bends are not worth the ink, since
+ * ice holds a 0.4 bend at 120 km/h and a 1.0 bend at ~70.
+ */
+export const CURVE_WARN_CURVATURE = 1.0
+
+/**
+ * How far ahead a sharp bend is announced while the truck is already on a
+ * slippery surface — see `road.ts` `sharpCurveAhead`.
+ *
+ * Derived from the worst realistic case rather than picked: shedding 80 → 40 km/h
+ * on ice, where `decel` is 8 km/h/s against `speedFade` 0.55, takes about 7.9 s
+ * and eats ~132 m. 180 leaves room to notice and react on top of that.
+ *
+ * Shorter than {@link ICE_AHEAD_LOOK_M} (220) on purpose. A surface change needs
+ * the longer horizon because you must brake *before* reaching it; a bend is
+ * already visible in the road itself, so this only has to beat the reaction gap.
+ */
+export const CURVE_AHEAD_LOOK_M = 180
+
+/**
+ * Only surfaces at or below this grip get the bend warning. Snow 0.55, ice 0.25,
+ * sand 0.35 and mud 0.45 qualify; asphalt at 1.0 does not — on a road that grips,
+ * reading the bend yourself is the game.
+ */
+export const CURVE_WARN_GRIP_MAX = 0.6
+
 export const RECOVERY_ASPHALT_PCT = 0.85
 /** Recovery asphalt segment length range [min, max] in metres. */
 export const RECOVERY_ASPHALT_RANGE: readonly [number, number] = [150, 400]
@@ -598,8 +702,23 @@ export const TRAFFIC_VIEW_DISTANCE_M = 220
 export const ROAD_HALF_TOP = 14
 export const ROAD_HALF_BOTTOM = 120
 export const KERB_STRIPE_M = 2.0
-export const KERB_WIDTH_BOTTOM = 4
+/**
+ * Driveable kerb/shoulder width in projected game pixels.
+ *
+ * Shared by `render/road3d.ts` and `game/roadgeometry.ts`, so the painted
+ * shoulder and the off-road boundary stay pixel-identical — if these ever drift
+ * apart the player leaves the road somewhere other than where it looks like they
+ * do, which is the worst kind of unfair.
+ *
+ * The foreground kerb is deliberately broad. Its inner part is calm recovery
+ * space for an ordinary wobble; its outer 8 px overlap EDGE_MARGIN_WARN_PX, so
+ * the edge warning fires while there is still shoulder left rather than at the
+ * moment terrain begins. Widening it does not change the controllability
+ * envelope — a slide on ice runs to the lateral clamp rather than stopping just
+ * over the line — it buys room for small mistakes, which is a different thing.
+ */
 export const KERB_WIDTH_TOP = 1
+export const KERB_WIDTH_BOTTOM = 16
 /**
  * Road segment marker spacing in metres. Thin horizontal lines across
  * the road that rush toward the player — primary speed perception cue.
