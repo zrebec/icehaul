@@ -2,6 +2,13 @@
 
 Guidance for Claude Code when working in this repository.
 
+> **Known issue — don't re-investigate.** `npm audit` and Dependabot flag `undici`, `ip-address`,
+> `tar` and `brace-expansion` — all **bundled inside the `npm` CLI** that semantic-release pulls in.
+> **Unfixable downstream** (overrides and `audit fix` cannot touch bundled deps; even `npm@12` ships
+> the same versions), **dev/CI-only**, **never shipped** — the game deploys a static Vite bundle.
+> Alerts dismissed as `tolerable_risk`. Full analysis, including why `allow:`/`ignore:` in
+> `dependabot.yml` is the wrong lever: `docs/known-issues.md`.
+
 ## What this is
 
 **Ice Haul** is a ZX-Spectrum-flavoured micro-simulator of ice-road trucking. Not ETS2 — its ZX hallucination. The fantasy is *risk management*, not speed: tyre pressure, cargo balance, ice patches, wind, fuel, driver fatigue. Every metre is a small decision.
