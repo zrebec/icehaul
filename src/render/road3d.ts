@@ -2,11 +2,16 @@ import { C, type SpectrumColor } from 'zx-kit'
 import {
   type Surface,
   GAME_WIDTH, HORIZON_PCT,
-  LATERAL_SHIFT, CURVE_STRENGTH, PERSPECTIVE_K,
+  LATERAL_SHIFT, PERSPECTIVE_K,
   TRAFFIC_VIEW_DISTANCE_M,
   ROAD_HALF_TOP, ROAD_HALF_BOTTOM,
-  KERB_STRIPE_M, KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP, ROAD_MARKER_SPACING_M,
+  KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
 } from '../config.ts'
+import { computeCurveOffsets } from './projection.ts'
+import {
+  visibleMarkers, visibleKerbStripes, visibleCentreDashes,
+  kerbDetailScanline, centreDetailScanline,
+} from './roadpattern.ts'
 
 // ── Star field ──────────────────────────────────────────────────────────────
 
@@ -33,6 +38,12 @@ export function drawStarField(
 
 const KERB_A: SpectrumColor = C.B_WHITE
 const KERB_B: SpectrumColor = C.B_YELLOW
+/** Kerb beyond the resolvable distance: one flat colour, dimmed to read as depth. */
+const KERB_FAR: SpectrumColor = C.WHITE
+/** Centre line beyond the resolvable distance — solid, dimmed, same reason. */
+const CENTRE_FAR: SpectrumColor = C.WHITE
+const CENTRE_NEAR: SpectrumColor = C.B_WHITE
+const MARKER_COLOR: SpectrumColor = C.WHITE
 
 // ── Road ────────────────────────────────────────────────────────────────────
 
@@ -54,60 +65,107 @@ export function drawRoad(
   ctx.fillStyle = C.BLUE
   ctx.fillRect(0, horizonY, GAME_WIDTH, 1)
 
-  const curveOffset = new Float32Array(scanlines)
-  let acc = 0
-  for (let i = scanlines - 1; i >= 0; i--) {
-    const distFromBottom = (scanlines - 1 - i) / scanlines
-    const dy = i + 1
-    const worldZ = PERSPECTIVE_K / dy
-    const absDist = cameraDistance + worldZ
-    acc += getCurvature(absDist) * CURVE_STRENGTH * distFromBottom
-    curveOffset[i] = acc
-  }
+  const curveOffset = computeCurveOffsets(cameraDistance, scanlines, getCurvature)
+
+  // ── Pass 0: per-scanline geometry ──
+  // Cached once so the pattern passes below can address any scanline directly
+  // instead of re-deriving edges while walking world indices.
+  const leftX = new Int16Array(scanlines)
+  const rightX = new Int16Array(scanlines)
+  const centreX = new Int16Array(scanlines)
+  const kerbW = new Int16Array(scanlines)
 
   for (let i = 0; i < scanlines; i++) {
-    const dy = i + 1
-    const y = horizonY + dy
-    const worldZ = PERSPECTIVE_K / dy
-    const absDist = cameraDistance + worldZ
-    const surface = getSurface(absDist)
-
-    const t = dy / roadHeight
+    const t = (i + 1) / roadHeight
     const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
-    const centerX = baseVanX + (curveOffset[i] ?? 0)
-    const leftX = Math.round(centerX - half)
-    const rightX = Math.round(centerX + half)
+    const cx = baseVanX + (curveOffset[i] ?? 0)
+    leftX[i] = Math.round(cx - half)
+    rightX[i] = Math.round(cx + half)
+    centreX[i] = Math.round(cx)
+    kerbW[i] = Math.max(1, Math.round(KERB_WIDTH_TOP + (KERB_WIDTH_BOTTOM - KERB_WIDTH_TOP) * t))
+  }
 
-    drawSurfaceScanline(ctx, surface, left(leftX), clampW(leftX, rightX), y, absDist)
+  // ── Pass 1: surface ──
+  for (let i = 0; i < scanlines; i++) {
+    const dy = i + 1
+    const absDist = cameraDistance + PERSPECTIVE_K / dy
+    const l = leftX[i] ?? 0
+    const r = rightX[i] ?? 0
+    drawSurfaceScanline(ctx, getSurface(absDist), left(l), clampW(l, r), horizonY + dy, absDist)
+  }
 
-    // Kerb stripes
-    const stripeIdx = Math.floor(absDist / KERB_STRIPE_M)
-    const kerbColor: SpectrumColor = stripeIdx % 2 === 0 ? KERB_A : KERB_B
-    const kerbW = Math.max(1, Math.round(KERB_WIDTH_TOP + (KERB_WIDTH_BOTTOM - KERB_WIDTH_TOP) * t))
-    ctx.fillStyle = kerbColor
-    const kl = leftX - kerbW
-    const kr = rightX + 1
-    if (kl + kerbW > 0 && kl < GAME_WIDTH) ctx.fillRect(Math.max(0, kl), y, Math.min(kerbW, GAME_WIDTH - kl), 1)
-    if (kr >= 0 && kr < GAME_WIDTH) ctx.fillRect(kr, y, Math.min(kerbW, GAME_WIDTH - kr), 1)
+  // ── Pass 2: kerb stripes ──
+  // Flat colour where a 2 m stripe would be sub-pixel, real stripes below that.
+  // The flat fill covers every scanline so the stripe spans can only paint over
+  // it — no seam is possible between the two regions.
+  ctx.fillStyle = KERB_FAR
+  for (let dy = 1; dy <= scanlines; dy++) drawKerbPair(ctx, dy, horizonY, leftX, rightX, kerbW)
 
-    // Road segment markers — horizontal lines that rush toward the player
-    const markerPhase = absDist % ROAD_MARKER_SPACING_M
-    if (markerPhase < 0.8) {
-      ctx.fillStyle = C.WHITE
-      const ml = Math.max(0, leftX + 2)
-      const mr = Math.min(GAME_WIDTH, rightX - 1)
-      if (mr > ml) ctx.fillRect(ml, y, mr - ml, 1)
-    }
-
-    // Centre dashed line
-    if ((dy + Math.floor(cameraDistance * 8)) % 10 < 5) {
-      const cx = Math.round(centerX)
-      if (cx >= 0 && cx < GAME_WIDTH) {
-        ctx.fillStyle = C.B_WHITE
-        ctx.fillRect(cx, y, 1, 1)
-      }
+  for (const stripe of visibleKerbStripes(cameraDistance, scanlines)) {
+    ctx.fillStyle = stripe.alt ? KERB_B : KERB_A
+    for (let dy = stripe.fromDy; dy <= stripe.toDy; dy++) {
+      drawKerbPair(ctx, dy, horizonY, leftX, rightX, kerbW)
     }
   }
+
+  // ── Pass 3: segment markers ──
+  // One line per world marker, thickened upward by the painted band's depth.
+  ctx.fillStyle = MARKER_COLOR
+  for (const marker of visibleMarkers(cameraDistance, scanlines)) {
+    for (let k = 0; k < marker.thicknessPx; k++) {
+      const dy = marker.dy - k
+      if (dy < 1) break
+      const i = dy - 1
+      const ml = Math.max(0, (leftX[i] ?? 0) + 2)
+      const mr = Math.min(GAME_WIDTH, (rightX[i] ?? 0) - 1)
+      if (mr > ml) ctx.fillRect(ml, horizonY + dy, mr - ml, 1)
+    }
+  }
+
+  // ── Pass 4: centre line ──
+  // Solid where the dashes would be sub-pixel — which is how a dashed line
+  // reads at distance anyway — then real dashes nearer the camera.
+  const centreDetail = centreDetailScanline()
+  ctx.fillStyle = CENTRE_FAR
+  for (let dy = 1; dy < centreDetail && dy <= scanlines; dy++) {
+    drawCentrePixel(ctx, dy, horizonY, centreX)
+  }
+
+  ctx.fillStyle = CENTRE_NEAR
+  for (const dash of visibleCentreDashes(cameraDistance, scanlines)) {
+    for (let dy = dash.fromDy; dy <= dash.toDy; dy++) {
+      drawCentrePixel(ctx, dy, horizonY, centreX)
+    }
+  }
+}
+
+/** Paints both kerbs on one scanline in the current fillStyle. */
+function drawKerbPair(
+  ctx: CanvasRenderingContext2D,
+  dy: number,
+  horizonY: number,
+  leftX: Int16Array,
+  rightX: Int16Array,
+  kerbW: Int16Array,
+): void {
+  const i = dy - 1
+  const y = horizonY + dy
+  const w = kerbW[i] ?? 1
+  const kl = (leftX[i] ?? 0) - w
+  const kr = (rightX[i] ?? 0) + 1
+  if (kl + w > 0 && kl < GAME_WIDTH) ctx.fillRect(Math.max(0, kl), y, Math.min(w, GAME_WIDTH - kl), 1)
+  if (kr >= 0 && kr < GAME_WIDTH) ctx.fillRect(kr, y, Math.min(w, GAME_WIDTH - kr), 1)
+}
+
+/** Paints the centre-line pixel on one scanline in the current fillStyle. */
+function drawCentrePixel(
+  ctx: CanvasRenderingContext2D,
+  dy: number,
+  horizonY: number,
+  centreX: Int16Array,
+): void {
+  const cx = centreX[dy - 1] ?? 0
+  if (cx >= 0 && cx < GAME_WIDTH) ctx.fillRect(cx, horizonY + dy, 1, 1)
 }
 
 // ── Surface scanline renderers ──────────────────────────────────────────────
@@ -182,16 +240,7 @@ export function drawCanisters(
   const scanlines = roadHeight - 1
   const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
 
-  // Re-compute curve offsets (same as drawRoad — needed for correct x placement)
-  const curveOffset = new Float32Array(scanlines)
-  let acc = 0
-  for (let i = scanlines - 1; i >= 0; i--) {
-    const distFromBottom = (scanlines - 1 - i) / scanlines
-    const dy = i + 1
-    const worldZ = PERSPECTIVE_K / dy
-    acc += getCurvature(cameraDistance + worldZ) * CURVE_STRENGTH * distFromBottom
-    curveOffset[i] = acc
-  }
+  const curveOffset = computeCurveOffsets(cameraDistance, scanlines, getCurvature)
 
   for (const can of canisters) {
     const worldZ = can.distM - cameraDistance
@@ -316,12 +365,8 @@ export function projectTrafficVehicle(
   const i = Math.min(scanlines - 1, projectedScanline)
 
   const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
-  let curveOffset = 0
-  for (let ci = scanlines - 1; ci >= i; ci--) {
-    const distFromBottom = (scanlines - 1 - ci) / scanlines
-    const cdy = ci + 1
-    curveOffset += getCurvature(cameraDistance + PERSPECTIVE_K / cdy) * CURVE_STRENGTH * distFromBottom
-  }
+  // Accumulating from the bottom down to scanline `i` is exactly curveOffset[i].
+  const curveOffset = computeCurveOffsets(cameraDistance, scanlines, getCurvature)[i] ?? 0
 
   const y = horizonY + i + 1
   const t = (i + 1) / roadHeight
@@ -655,15 +700,7 @@ export function drawRoadsideObjects(
   const scanlines = roadHeight - 1
   const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
 
-  // Curve offsets (same accumulation as drawRoad)
-  const curveOffset = new Float32Array(scanlines)
-  let acc = 0
-  for (let i = scanlines - 1; i >= 0; i--) {
-    const distFromBottom = (scanlines - 1 - i) / scanlines
-    const dy = i + 1
-    acc += getCurvature(cameraDistance + PERSPECTIVE_K / dy) * CURVE_STRENGTH * distFromBottom
-    curveOffset[i] = acc
-  }
+  const curveOffset = computeCurveOffsets(cameraDistance, scanlines, getCurvature)
 
   for (const obj of objects) {
     const worldZ = obj.distM - cameraDistance
