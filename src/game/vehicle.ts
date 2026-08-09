@@ -48,7 +48,7 @@ import {
   SURFACE_SLIP_PEAK,
   GEARS, GEAR_COUNT, BOG_RPM, BOG_FLOOR, POWER_RPM, REDLINE_FLOOR, OVERREV_ENGINE_BRAKE,
   LUG_RPM, STALL_GRACE_MS, REDLINE_RPM, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS,
-  CLUTCH_IDLE_RPM, CLUTCH_REV_RATE, CLUTCH_DECAY_RATE, CLUTCH_MATCH_TOLERANCE,
+  CLUTCH_IDLE_RPM, CLUTCH_GOVERNOR_RPM, CLUTCH_REV_RESPONSE, CLUTCH_MATCH_TOLERANCE,
   CLUTCH_SHOCK, CLUTCH_STALL_RPM, CLUTCH_LAUNCH_FRACTION,
   type Surface,
 } from '../config.ts'
@@ -273,10 +273,15 @@ export function tickVehicle(
   if (v.stalled) {
     v.engineRpm = 0
   } else if (clutchIn) {
-    // Disconnected: the engine answers only to the throttle. Overshooting past
-    // the redline is possible and is its own punishment — see the redline block.
-    v.engineRpm += (input.throttle && v.fuel > 0 ? CLUTCH_REV_RATE : -CLUTCH_DECAY_RATE) * dt
-    v.engineRpm = Math.max(CLUTCH_IDLE_RPM, Math.min(1, v.engineRpm))
+    // Disconnected: engine inertia approaches idle or the no-load governor.
+    // Exact exponential smoothing is frame-rate stable and cannot overshoot,
+    // unlike the old constant ramp that hit the limiter in a fraction of a
+    // second when SHIFT was pressed while the road already held revs high.
+    const freeRevTarget = input.throttle && v.fuel > 0
+      ? CLUTCH_GOVERNOR_RPM
+      : CLUTCH_IDLE_RPM
+    const response = 1 - Math.exp(-CLUTCH_REV_RESPONSE * dt)
+    v.engineRpm += (freeRevTarget - v.engineRpm) * response
   } else if (clutchReleased) {
     // THE BITE. Everything the mechanic is about happens on this one tick.
     const bite = v.engineRpm - rpmRaw
@@ -341,12 +346,11 @@ export function tickVehicle(
   // cooks the engine. Only in gears you can upshift out of: the top gear's redline
   // is just the speed limiter (no recourse), so it never burns out.
   //
-  // Measured on ENGINE revs, not wheel revs, so this now also covers the new way
-  // to over-rev: holding the throttle with the clutch in and free-revving into
-  // the limiter. That case ignores the top-gear exemption — a floored engine
-  // spinning against nothing has no gear to hide behind.
+  // Measured on ENGINE revs, not road speed. A disconnected engine is protected
+  // by CLUTCH_GOVERNOR_RPM; damaging over-rev therefore only comes from an
+  // engaged, non-top gear whose wheels force the engine through the limiter.
   const overRevving = !v.stalled && v.engineRpm >= REDLINE_RPM
-  const atRedline = overRevving && (clutchIn || v.gear < GEAR_COUNT)
+  const atRedline = overRevving && !clutchIn && v.gear < GEAR_COUNT
   if (atRedline && input.throttle) {
     v.redlineMs += dtMs
     if (v.redlineMs >= REDLINE_BURN_MS) {

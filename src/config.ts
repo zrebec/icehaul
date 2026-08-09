@@ -496,13 +496,18 @@ export const CRANK_NEEDED_MS = 1800
 /** Idle revs (rpm fraction) the engine settles to when declutched off throttle. */
 export const CLUTCH_IDLE_RPM = 0.20
 /**
- * Free-rev climb rate (rpm fraction per second) on throttle with the clutch in.
- * A loaded diesel does not scream up instantly — 0.9 means idle → redline in
- * roughly a second, which is enough time to overshoot if you are careless.
+ * Governed no-load rpm under full throttle with the clutch disengaged.
+ * A truck diesel cannot free-rev through its limiter; 0.90 leaves deliberate
+ * headroom below {@link REDLINE_RPM} while still covering normal downshift
+ * targets inside {@link CLUTCH_MATCH_TOLERANCE}.
  */
-export const CLUTCH_REV_RATE = 0.9
-/** Free-rev decay rate (rpm fraction per second) off throttle with the clutch in. */
-export const CLUTCH_DECAY_RATE = 0.7
+export const CLUTCH_GOVERNOR_RPM = 0.90
+/**
+ * First-order engine response toward idle/governed rpm, in 1/s.
+ * Applied through `1 - exp(-response * dt)`, so a long frame cannot overshoot
+ * and the same elapsed time gives the same response at every frame rate.
+ */
+export const CLUTCH_REV_RESPONSE = 3.0
 /**
  * Mismatch (|engineRpm − targetRpm|) inside which a release counts as CLEAN: no
  * jolt at all. Wide enough that a deliberate rev-match is reliably rewarded,
