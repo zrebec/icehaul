@@ -9,18 +9,8 @@ Guidance for Claude Code when working in this repository.
 > Alerts dismissed as `tolerable_risk`. Full analysis, including why `allow:`/`ignore:` in
 > `dependabot.yml` is the wrong lever: `docs/known-issues.md`.
 
-> **`../iceroads-codex` is READ-ONLY.** A parallel working copy of this game lives at
-> `/Users/zrebec/Projects/retro/games/iceroads-codex`, with its own unpublished branches
-> (e.g. `fix/codex-ice-controllability`) and a map editor. **Never write to it** — no edits, no
-> commits, no branch switching, no `git` state changes of any kind. Read and compare only.
-> Note it has several branches; comparisons are usually against a feature branch, not `main`.
-
-> **Reference seed `1443866`** — load with `?seed=1443866`. Mostly-ice route: 48.5% ice over the
-> first 5 km, 56.5% non-asphalt, and 475 m of that ice inside a bend of |c| ≥ 1.5. Owner
-> playtested it end to end — 5 km completed with about 12 s to spare, and it required deliberately
-> exceeding the "safe ice speed" in places. The hand-verified difficulty benchmark for any
-> controllability or road-generation change. Alternatives with even more ice-in-bends, all
-> confirmed completable: `534501`, `1399375`, `52662`.
+> **See `AGENTS.md`** for the playtest seed catalogue, open tuning decisions, and the read-only
+> rule for the parallel `../iceroads-codex` working copy. Keep those there, not here.
 
 ## Route seeds
 
@@ -29,11 +19,7 @@ route. `src/game/seed.ts` picks it: one route per **local** calendar day (`YYYYM
 with **`?seed=<decimal>`** for repeatable playtests and physics A/B tests. Invalid overrides fall
 back to the daily seed. Read once at boot — the route never changes under the player.
 
-Seeds are stable across changes to the *surface* generator only as long as the roll sequence is
-untouched. A "hazards must start on a straight" constraint was tried and reverted; it inserted
-asphalt fillers that shifted every later roll and silently turned 1443866 into a different road.
-If a future change must insert segments, key the rolls off a decision counter, not
-`_segments.length`. See also the additive seed-mixing note in `docs/known-issues.md`.
+Which seeds are worth playing, and what each one exercises, is catalogued in `AGENTS.md`.
 
 ## What this is
 
