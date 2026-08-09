@@ -1,3 +1,10 @@
+## [0.3.2](https://github.com/zrebec/icehaul/compare/v0.3.1...v0.3.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **render:** road markers flashed at the horizon instead of approaching ([#20](https://github.com/zrebec/icehaul/issues/20)) ([08f6812](https://github.com/zrebec/icehaul/commit/08f6812e3eac2f1aa1753fd10539ed602b090455))
+
 ## [0.3.1](https://github.com/zrebec/icehaul/compare/v0.3.0...v0.3.1) (2026-07-31)
 
 
