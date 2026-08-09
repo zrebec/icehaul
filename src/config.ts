@@ -606,6 +606,24 @@ export const KERB_WIDTH_TOP = 1
  * At 120 km/h: ~1.3 markers/s. At 30 km/h: ~0.33 markers/s.
  */
 export const ROAD_MARKER_SPACING_M = 25
+/**
+ * How far ahead markers are drawn, in metres.
+ *
+ * Deliberately equal to the spacing, so exactly ONE marker is on screen at a
+ * time: it appears near the horizon, walks down, and the next one only shows up
+ * after it has passed under the cab. Raising this to 37.5 puts two markers on
+ * screen (the far one parked a few pixels under the horizon), which reads as
+ * clutter rather than speed.
+ */
+export const ROAD_MARKER_VIEW_M = 25
+/** Depth of the painted band in metres — gives near markers perspective thickness. */
+export const ROAD_MARKER_DEPTH_M = 0.4
+/** Thickness cap in pixels, so a marker at the player's feet stays a line, not a slab. */
+export const ROAD_MARKER_MAX_PX = 3
+/** Centre line: painted dash length in metres. */
+export const CENTRE_DASH_M = 2
+/** Centre line: gap between dashes in metres. */
+export const CENTRE_GAP_M = 4
 
 // ── Audio ───────────────────────────────────────────────────────────────────
 
