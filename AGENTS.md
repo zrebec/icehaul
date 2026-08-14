@@ -5,6 +5,53 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ---
 
+## Where to pick up
+
+State at 0.5.0 (2026-08-14), 330 tests. Everything below is done and merged unless marked.
+
+**Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
+speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
+inside a bend, which is deliberate. `?seed=` and a daily route make any run reproducible; the seed
+catalogue below is the benchmark set.
+
+**Graphics** — steps 0 to 2 of the order below are done, plus the growth curve, which was not in the
+order and came out of a playtest:
+
+| | what landed | PR |
+|---|---|---|
+| 0 | Contact sheet harness, `?matrix=1` | #26 |
+| 1 | One shared raster for draw and collide | #28 |
+| 2 | Far LOD tier — meaning, not a shrunken car | #29 |
+| — | Hyperbolic growth curve in world depth | #30 |
+
+**Next, in order:**
+
+1. **Middle LOD tier** — silhouette enough to tell mini, car and bus apart. The far tier deliberately
+   does not distinguish type; the detailed sprite only starts at ~40 m.
+2. **Cheap wins** — contact shadow, contrast outline, lamps through the `glow` layer. `glow` and
+   `lighting` still have zero consumers here.
+3. **Distance fog**, then night per the open decision below.
+4. **Resolution** — still rejected; revisit only for HUD space.
+
+### Owner feedback still unanswered
+
+After #29 and #30 the owner reported approach reads *"much better, but still a bit steppy"*, and
+that #30 was a smaller felt improvement than #29. Two suspects, neither measured yet — do that
+before changing anything:
+
+- **The tier pop.** The drawing changes from the far symbol to the detailed sprite in one frame at
+  about 40 m. Adding a middle tier adds a *second* pop unless the boundaries are placed where the
+  two drawings already look alike. This is the first thing to check, and it directly constrains how
+  the next step is built.
+- **Integer size steps.** Scale quantisation was dropped down the order on the assumption that the
+  coverage resampler would carry it. Measured after #28: it does not — a one-pixel size step still
+  redraws 8.9% of the sprite against 9.0% before. Each step is a small visible jump, and at 4x
+  display scale a one-pixel change is four screen pixels.
+
+The contact sheet cannot see either: it shows single frames, and both faults are about *change
+between* frames. Judging them needs a capture of consecutive frames during an approach, which does
+not exist yet.
+
 ## Branch workflow
 
 **One branch is one pull request. Once the PR is open, that branch is finished — go back to `main`.**
