@@ -25,7 +25,7 @@ import {
 import { getSurfaceAt, getGripAt, accelFor, isDangerAhead, sharpCurveAhead, getCurvatureAt, resetRoad, type Surface } from '../game/road.ts'
 import {
   drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic,
-  getTrafficRaster, projectTrafficVehicle,
+  projectTrafficVehicle,
 } from '../render/road3d.ts'
 import { drawTruck, TRUCK_BMP_H, TRUCK_BMP_W } from '../render/truck.ts'
 import { drawHUD } from '../render/hud.ts'
@@ -361,7 +361,7 @@ export function createDriveScene(
         if (checkTruckTrafficCollision(
           truckDrawX, truckDrawY,
           projected.left, projected.top, projected.w, projected.h,
-          getTrafficRaster(tv.dir, tv.type, projected.w, projected.h, projected.lod),
+          projected.raster,
         )) {
           startCrash('crash')
           return

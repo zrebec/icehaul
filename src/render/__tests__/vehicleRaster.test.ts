@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { getTrafficRaster, projectTrafficVehicle } from '../road3d.ts'
-import { rasteriseVehicle, resetVehicleRasterCache, vehicleRasterCacheSize } from '../vehicleRaster.ts'
+import { projectTrafficVehicle } from '../road3d.ts'
+import { rasteriseVehicleAtScale, resetVehicleRasterCache, vehicleRasterCacheSize } from '../vehicleRaster.ts'
 import { checkTruckTrafficCollision } from '../../game/offroad.ts'
 import { bitmapPixelMask } from 'zx-kit'
 import { TRUCK_BMP_H, TRUCK_BMP_W, TRUCK_COLLISION_BMP } from '../truck.ts'
@@ -22,36 +22,81 @@ const veh = (distM: number, dir: TrafficDir, type: VehicleType): TrafficVehicle 
 
 beforeEach(resetVehicleRasterCache)
 
-describe('rasteriseVehicle', () => {
-  it('produces exactly the requested target size', () => {
-    const raster = rasteriseVehicle('t', ['XXXX', 'X..X', 'XXXX'], 7, 5)
-    expect(raster).toHaveLength(5)
-    for (const row of raster) expect(row).toHaveLength(7)
+describe('rasteriseVehicleAtScale', () => {
+  const SQUARE = ['XXXX', 'XXXX', 'XXXX', 'XXXX']
+
+  it('fills the box that contains the sprite at that scale', () => {
+    const r = rasteriseVehicleAtScale('t', SQUARE, 1.5, 100, 100)!
+    // 4 source px at 1.5 is 6 px of sprite, so 6 whole cells hold it.
+    expect(r.w).toBe(6)
+    expect(r.h).toBe(6)
+    expect(r.raster).toHaveLength(6)
+    for (const row of r.raster) expect(row).toHaveLength(6)
+  })
+
+  it('sits on its anchor: bottom edge on y, centred within half a pixel on x', () => {
+    for (const scale of [0.3, 0.55, 0.8, 1.0, 1.43]) {
+      const r = rasteriseVehicleAtScale('t', SQUARE, scale, 100, 100)!
+      expect(r.top + r.h, `scale ${scale} bottom`).toBe(100)
+      const centre = r.left + r.w / 2
+      expect(Math.abs(centre - 100), `scale ${scale} centre`).toBeLessThanOrEqual(0.5)
+    }
+  })
+
+  it('grows the box by one pixel at a time, never two', () => {
+    // The whole point. Centring the box exactly on the anchor would force an
+    // even width and it would grow two columns at a time — see the geometry note
+    // in `resampleSpriteAtScale`.
+    let prev = rasteriseVehicleAtScale('t', SQUARE, 0.2, 100, 100)!
+    for (let s = 0.2; s <= 1.43; s += 1 / 256) {
+      const cur = rasteriseVehicleAtScale('t', SQUARE, s, 100, 100)!
+      expect(cur.w - prev.w, `w at scale ${s.toFixed(3)}`).toBeGreaterThanOrEqual(0)
+      expect(cur.w - prev.w, `w at scale ${s.toFixed(3)}`).toBeLessThanOrEqual(1)
+      expect(cur.h - prev.h, `h at scale ${s.toFixed(3)}`).toBeGreaterThanOrEqual(0)
+      expect(cur.h - prev.h, `h at scale ${s.toFixed(3)}`).toBeLessThanOrEqual(1)
+      prev = cur
+    }
+  })
+
+  it('changes the drawing between two scales that share a box size', () => {
+    // What separates this from the integer path it replaced: the same `w × h`
+    // can hold two different drawings, and that is where the extra cadence
+    // during an approach comes from.
+    const rows = ['..XX..', '.XXXX.', 'XXXXXX', 'XX..XX']
+    const seen = new Set<string>()
+    for (let s = 0.5; s <= 1.2; s += 1 / 256) {
+      const r = rasteriseVehicleAtScale('t', rows, s, 100, 100)
+      if (r) seen.add(`${r.w}x${r.h}:${r.raster.join('|')}`)
+    }
+    const sizes = new Set([...seen].map(k => k.split(':')[0]))
+    expect(seen.size, 'distinct drawings').toBeGreaterThan(sizes.size)
   })
 
   it('is deterministic — the same request gives the same pixels', () => {
-    const a = rasteriseVehicle('t', ['XX.', '.XX'], 6, 4)
+    const a = rasteriseVehicleAtScale('t', ['XX.', '.XX'], 0.7, 50, 60)
     resetVehicleRasterCache()
-    const b = rasteriseVehicle('t', ['XX.', '.XX'], 6, 4)
+    const b = rasteriseVehicleAtScale('t', ['XX.', '.XX'], 0.7, 50, 60)
     expect(b).toEqual(a)
   })
 
-  it('caches by sprite identity and size', () => {
+  it('caches by sprite identity and quantised scale, not by position', () => {
     const rows = ['XX', 'XX']
-    rasteriseVehicle('a', rows, 4, 4)
+    rasteriseVehicleAtScale('a', rows, 0.8, 100, 100)
     expect(vehicleRasterCacheSize()).toBe(1)
-    rasteriseVehicle('a', rows, 4, 4)
+    rasteriseVehicleAtScale('a', rows, 0.8, 100, 100)
     expect(vehicleRasterCacheSize()).toBe(1)   // same key, no growth
-    rasteriseVehicle('a', rows, 5, 4)
-    expect(vehicleRasterCacheSize()).toBe(2)   // different size
-    rasteriseVehicle('b', rows, 4, 4)
+    rasteriseVehicleAtScale('a', rows, 0.8, 40, 70)
+    expect(vehicleRasterCacheSize()).toBe(1)   // elsewhere on the road, same raster
+    rasteriseVehicleAtScale('a', rows, 1.2, 100, 100)
+    expect(vehicleRasterCacheSize()).toBe(2)   // different scale
+    rasteriseVehicleAtScale('b', rows, 0.8, 100, 100)
     expect(vehicleRasterCacheSize()).toBe(3)   // different sprite
   })
 
-  it('never returns rows for a degenerate size', () => {
-    expect(rasteriseVehicle('t', ['XX'], 0, 4)).toEqual([])
-    expect(rasteriseVehicle('t', ['XX'], 4, 0)).toEqual([])
-    expect(rasteriseVehicle('t', [], 4, 4)).toEqual([])
+  it('refuses a degenerate request rather than inventing one', () => {
+    expect(rasteriseVehicleAtScale('t', ['XX'], 0, 10, 10)).toBeNull()
+    expect(rasteriseVehicleAtScale('t', ['XX'], -1, 10, 10)).toBeNull()
+    expect(rasteriseVehicleAtScale('t', [], 1, 10, 10)).toBeNull()
   })
 })
 
@@ -98,7 +143,7 @@ describe('the drawn pixels are the colliding pixels', () => {
             VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, veh(dist, dir, type), noCurve,
           )
           expect(p, `${dir}/${type} at ${dist}m must project`).not.toBeNull()
-          const raster = getTrafficRaster(dir, type, p!.w, p!.h, p!.lod)
+          const raster = p!.raster
 
           // The raster covers the projected rect exactly: collision can neither
           // see a pixel outside the drawn area nor miss one inside it.
@@ -129,7 +174,7 @@ describe('the drawn pixels are the colliding pixels', () => {
 
   it('a solid raster pixel under a truck pixel does collide', () => {
     const p = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, veh(5, 'same', 'car'), noCurve)!
-    const raster = getTrafficRaster('same', 'car', p.w, p.h, p.lod)
+    const raster = p.raster
     let tested = 0
     for (let y = 0; y < p.h; y++) {
       for (let x = 0; x < p.w; x++) {

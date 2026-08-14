@@ -698,7 +698,16 @@ export const TRAFFIC_SCALE_B =
   (TRAFFIC_SCALE_NEAR - TRAFFIC_SCALE_FAR)
 export const TRAFFIC_SCALE_A = TRAFFIC_SCALE_NEAR * (TRAFFIC_SCALE_NEAR_Z_M + TRAFFIC_SCALE_B)
 
-export const LOD_FAR_MAX_HEIGHT = 9
+/**
+ * Tallest projected height still drawn by the far tier, in pixels.
+ *
+ * Raised from 9 to 10 when the sprite started being sampled at a fractional
+ * size: the height is now the box that *contains* the sprite (`ceil`) rather
+ * than the sprite rounded to whole pixels, so the same physical vehicle reports
+ * about one pixel more. The extra pixel keeps the boundary where it was — a car
+ * hands over at roughly 50 m, as before — rather than moving it.
+ */
+export const LOD_FAR_MAX_HEIGHT = 10
 
 /**
  * Dead-band around {@link LOD_FAR_MAX_HEIGHT}, in pixels. Same-direction traffic

@@ -7,7 +7,7 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.6.0 (2026-08-14), 338 tests. Everything below is done and merged unless marked.
+State at 0.6.1 (2026-08-14), 345 tests. Everything below is done and merged unless marked.
 
 **Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
 speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
@@ -24,17 +24,21 @@ order and came out of a playtest:
 | 2 | Far LOD tier — meaning, not a shrunken car | #29 |
 | — | Hyperbolic growth curve in world depth | #30 |
 | — | Area-weighted resample: growth costs only what the grid forces | #33 |
+| — | Fractional scale: the drawing grows a pixel at a time, and the far tier only recolours | #34 |
 
 **Next, in order:**
 
-1. **The tier handover** — now the one large picture change left in an approach, and by a wide
-   margin: 35% at 38 m, against 5–10% for every size step around it. It was cleared as a suspect
-   before, on a measurement that could not see it (below). A middle LOD tier is the same job seen
-   from the other side and is still open, but the handover is now the thing to measure first.
-2. **Cheap wins** — contact shadow, contrast outline, lamps through the `glow` layer. `glow` and
+1. **Cheap wins** — contact shadow, contrast outline, lamps through the `glow` layer. `glow` and
    `lighting` still have zero consumers here.
-3. **Distance fog**, then night per the open decision below.
+2. **Distance fog**, then night per the open decision below.
+3. **The far field's remaining stillness** — a mini at 200 m holds one drawing for 1.97 s because
+   it is four pixels wide and its true size grows by a tenth of a pixel in that time. The
+   resampler cannot touch this; the levers are `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`,
+   and both change how distance reads. **Owner's call, deliberately not pulled.**
 4. **Resolution** — still rejected; revisit only for HUD space.
+
+A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
+costs anything, and a third tier would only put back a boundary where there is currently none.
 
 ### What the approach measurement found
 
@@ -91,18 +95,67 @@ box than the source does.
 **Scale quantisation is now off the table** — there is nothing left for it to buy. So is a nested or
 column-stable resample: the property those were reaching for is what area weighting already gives.
 
-### What is left of the owner's "still a bit steppy"
+### The last suspect was the rate, not the cleanliness (#34)
 
-Two of the three suspects are now closed. The tier pop was cleared by the first measurement, integer
-size steps by this one. What the picture metric shows that the cell metric hid:
+Every measurement up to here asked how *cleanly* each change was made, and by 0.6.1 the answer was
+"at the floor the grid forces". The owner still read the approach as steppy. The question nobody had
+asked was how *often* a change arrives, and asked in those terms the fault was obvious:
 
-- **The tier handover is the one big change left.** 35% of the picture at 38 m, against 5–10% for
-  every size step near it. The earlier reading put it at 34% of *cells* — indistinguishable from the
-  ordinary steps around it on that metric, which is exactly why it was dismissed. On the metric that
-  tracks what the eye sees it stands alone.
-- **Everything else is the floor.** 44 changes across 785 frames, each as small as having only `w`
-  columns permits. If that still reads as steppy, the remaining lever is the *rate* of change, not
-  its cleanliness — and that is the projection's business, not the resampler's.
+| | changes / 785 frames | median run | **longest freeze** |
+|---|---|---|---|
+| mini | 28 | 10 frames | **3.07 s** at 220 m |
+| car | 44 | 7 | 1.87 s at 169 m |
+| bus | 51 | 6 | 2.12 s at 220 m |
+
+Three seconds of a completely motionless vehicle. Counting changes hid it — 44 sounds continuous —
+because they bunch up near the player. `approachCadence.test.ts` measures the longest run instead,
+and that is the number that matches what a player feels.
+
+**The ceiling had already been reached.** A car takes 28 distinct widths and 19 heights over an
+approach, so at most 47 of 785 frames can differ from the one before while *integer size* is the
+quantisation. The renderer was using 44 of them. No scale curve could have bought more; the
+quantisation itself had to go.
+
+**Two things then had to change together, and measuring told us so.** Splitting by tier showed the
+detail tier was already fine — worst freeze 0.22–0.30 s — and the far tier owned the whole fault at
+1.87–3.07 s. The far tier covers 220 m down to 28 m (mini), 50 m (car), 67 m (bus), and it composed a
+near-rectangle at integer size, which can only grow a whole column at a time. So fixing the resampler
+alone would have polished the part that was not broken.
+
+What landed:
+
+- **Sprites are sampled at a fractional scale.** `w`/`h` became outputs — the box is `ceil(span)`
+  and the sprite sits inside it at a sub-pixel offset, so each edge cell crosses the coverage
+  threshold at its own scale and the drawing grows a pixel at a time.
+- **The far tier stopped composing a symbol** and now writes the lamps back onto the resampled
+  sprite: outermost body pixels of one row, colour only, never shape. It inherits the fractional
+  growth, and the handover has no shape left to change.
+
+| | changes | median run | longest freeze | handover |
+|---|---|---|---|---|
+| before | 28 / 44 / 51 | 10 / 7 / 6 | 3.07 / 1.87 / 2.12 s | 35% of the picture |
+| after | 124 / 187 / 211 | **2 frames** | **1.97 / 0.98 / 0.83 s** | 17%, and no shape change |
+
+**One geometry detail is worth not rediscovering.** Centring the box exactly on the anchor forces an
+*even* width — `floor(x - span/2)` and `ceil(x + span/2)` are mirror images about a whole pixel — so
+it grows two columns at a time, twice as coarse as the thing being removed. Rounding the box's left
+edge instead lets the width follow `ceil(span)` and the vehicle grows alternately leftward and
+rightward. The cost is a drawn centre within half a pixel of the anchor, which the display cannot
+show. The vertical axis needs none of this, being anchored on an edge rather than a centre.
+
+**What the new tests hold**, replacing "the drawing may only change when the size changes" — a rule
+that was right about the symptom and, it turned out, was the fault:
+
+- **The box never shrinks.** Exact, by construction.
+- **A frame gives back at most one column's worth of pixels, or a tenth of the silhouette.** Not
+  zero, and the reason is honest: resampling a sprite with interior holes — a wheel gap, a tapered
+  corner — at a larger scale slides those holes. A whole approach gives back 152 pixels; the worst
+  share is 16.7%, which is two pixels off a 5 × 4 mini.
+- **The far tier changes colour and never shape**, which is what makes the handover cheap.
+
+**What is left is the floor, and it is in the far field.** A mini at 200 m is a 4 × 3 box whose true
+size grows by a tenth of a pixel over two seconds. No resampler can invent a change there. The levers
+are `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`, both of which change how distance reads.
 
 ## Branch workflow
 
@@ -276,6 +329,10 @@ that sentence was counting cells rather than picture** — see "The measurement 
 thing" above. Area weighting puts every size step at the floor a far finer source would force, and
 scale quantisation has nothing left to buy.
 
+*(Postscript, #34: the instinct behind "quantise the scale" was pointed the wrong way round. The
+integer size was not too coarsely quantised — quantising to an integer size **at all** was the
+fault. Sampling at the fractional scale removes the step rather than tidying it.)*
+
 **3 · Render and collision do not build the same raster.** The renderer maps source → target with
 overdraw; collision maps target → source. At downscale these are **not the same algorithm**, so
 "pixel-perfect collision" is weaker than claimed at small sprite sizes. This one is a correctness
@@ -293,7 +350,7 @@ not. The fix is largely reuse, not invention. *(It was correct in shape but not 
 |---|---|---|
 | 0 | Screenshot matrix + `?trafficRenderer=` / `?glow=0` switches, fixed seed from the catalogue above — so every later change is judged against the same frames | 2–4 h |
 | 1 | **One shared raster.** `scaleRoadsideRows` for traffic too; the same raster feeds draw, collision and emissive; cache by size | 4–8 h |
-| 2 | ~~Far LOD by meaning, tier chosen by **projected height** with hysteresis~~ **far tier done**; a middle tier is still open | 1–2 days |
+| 2 | ~~Far LOD by meaning, tier chosen by **projected height** with hysteresis~~ **done**; a middle tier is closed, not deferred — see "What the far tier settled" | 1–2 days |
 | 3 | Cheap wins: contact shadow, contrast outline, lights through restrained `glow` | 0.5–1 day |
 | 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | 1–2 days |
 | 5 | Distance fog; night per the decision below | 4–6 h + night |
@@ -354,18 +411,29 @@ Canisters and roadside objects still use their own scaling and were left alone.
 
 ### What the far tier settled
 
-Two tiers exist today: `far` and `detail`. The far one is **composed at the target size, not
-resampled down to it** — the first attempt drew it from a 7 × 5 source and lost, because a mini at
-220 m projects to 5 × 4 and the dominant-colour vote deletes a one-pixel lamp exactly where it is
-the only thing that matters. Anything whose meaning lives in a handful of pixels has to be built for
-the size it will occupy.
+Two tiers exist: `far` and `detail`. What separates them is **colour in one row and nothing else**.
+The far tier takes the resampled sprite and writes lamp colour into the outermost body pixels of a
+row near the base, where an edge pixel survives and an interior one is swallowed.
+
+It reached that shape in two steps, and both are worth keeping straight:
+
+- **First it composed a blob at the target size** rather than resampling one down, because a mini at
+  220 m projects to about 5 × 4 and the dominant-colour vote deletes a one-pixel lamp exactly where
+  it is the only thing that matters. That reasoning was right and still is — the lamps must be
+  *placed*, not hoped for.
+- **Then it stopped drawing its own shape** (#34). Composing a separate drawing cost 35% of the
+  picture at the handover, and being a near-rectangle it could only grow a column at a time, which
+  made it the source of the whole approach's steppiness. Recolouring the real silhouette keeps the
+  guarantee and drops both costs.
 
 Direction is carried by **lamp colour, never body colour**: a same-direction bus is red bodywork, so
-"red means going away" only holds if it is the lamps that are red. Type is deliberately not
-distinguished in the far tier — mini, car and bus already differ in projected size, and at six
-pixels of height nothing else about them can be told apart honestly.
+"red means going away" only holds if it is the lamps that are red. Note the source art also puts red
+and yellow *inside* the bodywork, so a test looking for the lamps must look for the flanking pair at
+the ends of a row, not for the colour anywhere.
 
-A middle tier — silhouette enough to tell the three types apart — is still open.
+Type is still not really distinguished at this size — the silhouettes exist now, but at six pixels of
+height they carry no more than the size difference already did. **A middle tier is closed**, not
+deferred: it existed to soften a handover that no longer costs anything.
 
 ### Rules that hold whatever gets built
 
@@ -395,8 +463,15 @@ A middle tier — silhouette enough to tell the three types apart — is still o
   deterministic dither and a stable raster.
 - **Resampling weights by area covered, never by pixels touched.** Weighting is what keeps a sprite
   the size it really is at every scale and what keeps growth free of jumps the world cannot explain.
-  Anything that resolves a target cell from a source region obeys this — the far tier sidesteps it
-  by being composed at the target size instead.
+  Anything that resolves a target cell from a source region obeys this.
+- **A vehicle's size is an output, never an input.** Rounding a scale to whole pixels and rasterising
+  into that box makes growth arrive a column at a time, and that is measurably what "steppy" means.
+  Sample at the fractional scale and read `w`/`h` off the result. Anything that wants a size first —
+  a cache key, a tier boundary, a collision box — reads it afterwards.
+- **Growth may add pixels and must not rearrange them.** The eye reads added pixels as motion and
+  moved ones as substitution. Test it in the sprite's *own* frame, anchored bottom-centre: raster-
+  local coordinates call growth a rearrangement, and screen coordinates call the vehicle's rush down
+  the frame a loss.
 - **Judge a change of size by the picture, not by the cells.** Two rasters of different sizes have
   no shared cell identity; compare them on a common fine grid (`__tests__/pictureChurn.ts`), and
   measure against what an eight-times finer source would force rather than against a guess.
