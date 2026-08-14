@@ -5,6 +5,33 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ---
 
+## Branch workflow
+
+**One branch is one pull request. Once the PR is open, that branch is finished — go back to `main`.**
+
+Start every piece of work from a fresh branch off an up-to-date `main`:
+
+```
+git checkout main && git pull
+git checkout -b <type>/<short-name>
+```
+
+The reason is specific to how this repository merges. `main` takes **squash merges only**, which
+collapse a branch's commits into one *new* commit; the branch's own commits never appear on `main`.
+Carry on committing to a branch whose PR has merged and it now holds work already applied under a
+different hash, so the next diff offers those lines a second time and the PR goes `DIRTY`. That
+happened twice — #25 had to be rebuilt as #27, and #30 was rebuilt pre-emptively — and both times
+the cost was rework, not a lost change.
+
+Two habits that avoid it entirely:
+
+- **Check before branching, not after.** `git log --oneline -3 origin/main` should already contain
+  the previous piece of work. If it does not, the PR is not merged yet and the new work either waits
+  or branches from the old branch deliberately, knowing it stacks.
+- **Never reuse a branch as a workbench.** Its life ends at the PR. `delete_branch_on_merge` is on,
+  so the remote tidies itself; a local leftover needs `git branch -D` rather than `-d`, because
+  squash means git cannot see its commits on `main` and will refuse the safe delete.
+
 ## Playtest seed catalogue
 
 The road, traffic and canisters are all deterministic functions of one seed, so **a seed is the
