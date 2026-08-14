@@ -1,3 +1,10 @@
+# [0.7.0](https://github.com/zrebec/icehaul/compare/v0.6.1...v0.7.0) (2026-08-14)
+
+
+### Features
+
+* **render:** grow approaching traffic a pixel at a time, not a column at a time ([#34](https://github.com/zrebec/icehaul/issues/34)) ([0d9ae26](https://github.com/zrebec/icehaul/commit/0d9ae262d1248739b28a92a9a4a5bd77fa329385))
+
 ## [0.6.1](https://github.com/zrebec/icehaul/compare/v0.6.0...v0.6.1) (2026-08-14)
 
 
