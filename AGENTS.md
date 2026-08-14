@@ -7,7 +7,7 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.5.0 (2026-08-14), 330 tests. Everything below is done and merged unless marked.
+State at 0.6.0 (2026-08-14), 338 tests. Everything below is done and merged unless marked.
 
 **Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
 speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
@@ -23,11 +23,14 @@ order and came out of a playtest:
 | 1 | One shared raster for draw and collide | #28 |
 | 2 | Far LOD tier — meaning, not a shrunken car | #29 |
 | — | Hyperbolic growth curve in world depth | #30 |
+| — | Area-weighted resample: growth costs only what the grid forces | #33 |
 
 **Next, in order:**
 
-1. **Middle LOD tier** — silhouette enough to tell mini, car and bus apart. The far tier deliberately
-   does not distinguish type; the detailed sprite only starts at ~40 m.
+1. **The tier handover** — now the one large picture change left in an approach, and by a wide
+   margin: 35% at 38 m, against 5–10% for every size step around it. It was cleared as a suspect
+   before, on a measurement that could not see it (below). A middle LOD tier is the same job seen
+   from the other side and is still open, but the handover is now the thing to measure first.
 2. **Cheap wins** — contact shadow, contrast outline, lamps through the `glow` layer. `glow` and
    `lighting` still have zero consumers here.
 3. **Distance fog**, then night per the open decision below.
@@ -45,39 +48,61 @@ frames. Both original suspects were wrong, and the real one is neither:
 - **The drawing is static, then jumps.** Across 785 frames from 220 m to 2 m at 60 km/h it changes
   only **44 times** — still for about 18 frames, then a fifth to two fifths replaced at once. That
   is the tick.
-- **It is worst where the sprite is smallest, and well above the floor.** Integer sizing forces a
-  minimum share per one-pixel step; the measured share is two to five times that:
+- **It looked worst where the sprite is smallest** — one pixel of growth is a large share of a
+  20-cell raster. That part is real and unavoidable.
 
-| sprite area | worst step | unavoidable floor | changes |
+### The measurement was counting the wrong thing (#33)
+
+`approachChurn` compared **cells**, aligned top-left. A sprite that grew by stretching evenly has
+every cell past the growth sitting one column over, so an honest stretch scores as change. On a car
+the two numbers are about **16% of cells against 10% of the picture** — and the conclusion drawn
+from the first, that the resampler had two to five times the floor in headroom, does not survive
+the second.
+
+The fix is to compare the *picture*: blow both rasters up to one common fine grid, so which cell is
+which stops mattering (`__tests__/pictureChurn.ts`). And the floor is measurable rather than
+estimated — resample the same sprite from an eight-times finer copy of itself, where the source grid
+has stopped being the limit, and whatever change is left is what the target grid forces.
+
+**Against that floor the resampler had almost no headroom at all — except in one specific way.**
+Excess over the floor, per one-pixel step, worst case:
+
+| | mini | car | bus |
 |---|---|---|---|
-| under 40 cells | **40%** | 20% | 5 |
-| 40–100 | 25% | 13% | 8 |
-| 100–250 | 29% | 7% | 12 |
-| over 250 | 23% | 4% | 19 |
+| unweighted (through 0.6.0) | 12.1 pp | **13.6 pp** | 9.0 pp |
+| area-weighted (#33) | 0.0 pp | 0.5 pp | 0.2 pp |
 
-The gap between measured and floor is the headroom: a resample that stayed stable under growth —
-adding a column rather than redistributing every column — would approach the floor. That is the
-lead worth following before anything else, and it is the scale-quantisation idea arriving from a
-different direction.
+The fault was not "the resample redistributes columns", which is what the earlier reading suggested
+and which no amount of scale quantisation would have fixed. It was that **every source pixel a
+target cell touched voted at full strength however little of it was inside**. Scaling 22 px to 21,
+most cells sit within one source pixel but the ones straddling a boundary took both at equal weight
+— a local 2:1 downscale inside an otherwise 1:1 image. Two consequences, both measured:
 
-### Owner feedback still unanswered
+- Every downscale drew the vehicle **fatter than it is** — at 13 px wide a mini covered 94% of its
+  box against the source's 75% — and the inflation then vanished in a single frame as the sprite
+  grew past 1:1. That was the largest step in the whole approach.
+- Rasters sat far off the source picture: 16.5% wrong for a car, against 11.2% weighted.
 
-After #29 and #30 the owner reported approach reads *"much better, but still a bit steppy"*, and
-that #30 was a smaller felt improvement than #29. Two suspects, neither measured yet — do that
-before changing anything:
+Weighting each source pixel by the area actually covered removes the excess entirely and needs no
+new state, no quantisation and no cache changes. `resampleStability.test.ts` holds it: no size step
+may change the picture more than a far finer source would, and no downscale may cover more of its
+box than the source does.
 
-- **The tier pop.** The drawing changes from the far symbol to the detailed sprite in one frame at
-  about 40 m. Adding a middle tier adds a *second* pop unless the boundaries are placed where the
-  two drawings already look alike. This is the first thing to check, and it directly constrains how
-  the next step is built.
-- **Integer size steps.** Scale quantisation was dropped down the order on the assumption that the
-  coverage resampler would carry it. Measured after #28: it does not — a one-pixel size step still
-  redraws 8.9% of the sprite against 9.0% before. Each step is a small visible jump, and at 4x
-  display scale a one-pixel change is four screen pixels.
+**Scale quantisation is now off the table** — there is nothing left for it to buy. So is a nested or
+column-stable resample: the property those were reaching for is what area weighting already gives.
 
-The contact sheet cannot see either: it shows single frames, and both faults are about *change
-between* frames. Judging them needs a capture of consecutive frames during an approach, which does
-not exist yet.
+### What is left of the owner's "still a bit steppy"
+
+Two of the three suspects are now closed. The tier pop was cleared by the first measurement, integer
+size steps by this one. What the picture metric shows that the cell metric hid:
+
+- **The tier handover is the one big change left.** 35% of the picture at 38 m, against 5–10% for
+  every size step near it. The earlier reading put it at 34% of *cells* — indistinguishable from the
+  ordinary steps around it on that metric, which is exactly why it was dismissed. On the metric that
+  tracks what the eye sees it stands alone.
+- **Everything else is the floor.** 44 changes across 785 frames, each as small as having only `w`
+  columns permits. If that still reads as steppy, the remaining lever is the *rate* of change, not
+  its cleanliness — and that is the projection's business, not the resampler's.
 
 ## Branch workflow
 
@@ -244,11 +269,12 @@ rect per *source* pixel. Scaling 22 px down to 8, several source pixels land on 
 horizon mush, and it is the fault the owner actually reported.
 
 **2 · Upscale reshuffles between frames.** Near the player `w > srcW`, and every one-pixel change in
-`w` changes *which* source columns get doubled, so the pattern boils. **Measured after the shared
-raster landed: a one-pixel size step still redraws 8.9% of the sprite, against 9.0% before.** The
-coverage resampler was expected to soften this and does not — averaged over widths 8 to 30 the two
-are indistinguishable. Quantising the scale is therefore still needed as its own step, and this
-note is corrected from the earlier claim that fault 1's fix would carry it.
+`w` changes *which* source columns get doubled, so the pattern boils. ~~Measured after the shared
+raster landed: a one-pixel size step still redraws 8.9% of the sprite, against 9.0% before, so
+quantising the scale is still needed as its own step.~~ **Closed by #33, and the measurement behind
+that sentence was counting cells rather than picture** — see "The measurement was counting the wrong
+thing" above. Area weighting puts every size step at the floor a far finer source would force, and
+scale quantisation has nothing left to buy.
 
 **3 · Render and collision do not build the same raster.** The renderer maps source → target with
 overdraw; collision maps target → source. At downscale these are **not the same algorithm**, so
@@ -258,7 +284,8 @@ collision and the emissive mask alike.**
 
 `scaleRoadsideRows()` already implements the correct target-driven coverage resampler — aggregate
 the source region, track coverage, pick the dominant opaque colour. Roadside uses it; traffic does
-not. The fix is largely reuse, not invention.
+not. The fix is largely reuse, not invention. *(It was correct in shape but not in weight — see
+#33 above. Roadside inherited the fix and comes out 3–6% leaner at small sizes, nothing lost.)*
 
 ### Agreed order
 
@@ -366,6 +393,13 @@ A middle tier — silhouette enough to tell the three types apart — is still o
   World-space may filter, never decide.
 - No bilinear filtering, no full-screen antialiasing. If distant sprites shimmer, the answer is a
   deterministic dither and a stable raster.
+- **Resampling weights by area covered, never by pixels touched.** Weighting is what keeps a sprite
+  the size it really is at every scale and what keeps growth free of jumps the world cannot explain.
+  Anything that resolves a target cell from a source region obeys this — the far tier sidesteps it
+  by being composed at the target size instead.
+- **Judge a change of size by the picture, not by the cells.** Two rasters of different sizes have
+  no shared cell identity; compare them on a common fine grid (`__tests__/pictureChurn.ts`), and
+  measure against what an eight-times finer source would force rather than against a guess.
 
 ## Open decisions
 

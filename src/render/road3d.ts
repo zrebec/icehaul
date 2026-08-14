@@ -510,6 +510,36 @@ export function getTrafficRaster(
   return rasteriseVehicle(`${dir}:${type}`, getTrafficSpriteRows(dir, type), w, h)
 }
 
+/** Fraction of a target cell that must be opaque for it to be drawn at all. */
+const COVERAGE_THRESHOLD = 0.2
+
+/**
+ * Resample a character sprite to exactly `targetW × targetH`.
+ *
+ * Each target cell covers a rectangle of the source, and every source pixel it
+ * touches votes **by how much of that pixel actually falls inside** — the
+ * dominant colour by area wins, and the cell is dropped when opaque area is
+ * under {@link COVERAGE_THRESHOLD}.
+ *
+ * ── Why the weighting is not optional ───────────────────────────────────────
+ * Counting each touched pixel once instead was stable at plain ratios and wrong
+ * everywhere else. Scaling 22 px to 21, most target cells sit inside one source
+ * pixel, but each cell whose interval straddles a boundary took *both* pixels at
+ * equal weight — a local 2:1 downscale inside an otherwise 1:1 image. That was
+ * measurable twice over:
+ *
+ * - **A step that grew the sprite past 1:1 replaced a quarter of the picture.**
+ *   The inflation vanished in a single frame at `w = srcW`. Weighting removes
+ *   the whole excess: no size step now changes the picture more than an eight-
+ *   times finer source would force (worst 13.6 pp of excess → 0.5 pp).
+ * - **Rasters were far off the source.** 16.5% of a car's picture wrong at a
+ *   typical width, against 11.2% weighted — and what was wrong was silhouette:
+ *   a 20%-covered edge cell counted as a full pixel, so every downscale drew the
+ *   vehicle fatter than it is.
+ *
+ * The dominant-colour vote is unchanged and still loses small features to
+ * bodywork; that is the far tier's job, not this function's.
+ */
 export function scaleRoadsideRows(
   rows: readonly string[],
   targetW: number,
@@ -521,39 +551,46 @@ export function scaleRoadsideRows(
 
   const scaled: string[] = []
   for (let dy = 0; dy < targetH; dy++) {
-    const sy0 = Math.floor(dy * srcH / targetH)
-    const sy1 = Math.max(sy0 + 1, Math.ceil((dy + 1) * srcH / targetH))
+    const top = dy * srcH / targetH
+    const bottom = (dy + 1) * srcH / targetH
     let row = ''
 
     for (let dx = 0; dx < targetW; dx++) {
-      const sx0 = Math.floor(dx * srcW / targetW)
-      const sx1 = Math.max(sx0 + 1, Math.ceil((dx + 1) * srcW / targetW))
-      const counts = new Map<string, number>()
-      let samples = 0
-      let opaqueSamples = 0
+      const left = dx * srcW / targetW
+      const right = (dx + 1) * srcW / targetW
+      const area = new Map<string, number>()
+      let total = 0
+      let opaque = 0
 
-      for (let sy = sy0; sy < Math.min(sy1, srcH); sy++) {
+      for (let sy = Math.floor(top); sy < Math.min(Math.ceil(bottom), srcH); sy++) {
+        const rowOverlap = Math.min(bottom, sy + 1) - Math.max(top, sy)
+        if (rowOverlap <= 0) continue
         const sourceRow = rows[sy]!
-        for (let sx = sx0; sx < Math.min(sx1, srcW); sx++) {
+
+        for (let sx = Math.floor(left); sx < Math.min(Math.ceil(right), srcW); sx++) {
+          const colOverlap = Math.min(right, sx + 1) - Math.max(left, sx)
+          if (colOverlap <= 0) continue
+
+          const covered = colOverlap * rowOverlap
           const char = sourceRow[sx] ?? '.'
-          samples++
-          if (char !== '.') opaqueSamples++
-          counts.set(char, (counts.get(char) ?? 0) + 1)
+          total += covered
+          if (char !== '.') opaque += covered
+          area.set(char, (area.get(char) ?? 0) + covered)
         }
       }
 
-      if (opaqueSamples / samples < 0.2) {
+      if (total <= 0 || opaque / total < COVERAGE_THRESHOLD) {
         row += '.'
         continue
       }
 
       let winner = ''
-      let winnerCount = 0
-      for (const [char, count] of counts) {
+      let winnerArea = 0
+      for (const [char, covered] of area) {
         if (char === '.') continue
-        if (count > winnerCount) {
+        if (covered > winnerArea) {
           winner = char
-          winnerCount = count
+          winnerArea = covered
         }
       }
       row += winner || '.'
