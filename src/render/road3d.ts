@@ -11,6 +11,7 @@ import {
 import { computeCurveOffsets } from './projection.ts'
 import { rasteriseVehicleAtScale } from './vehicleRaster.ts'
 import { applyFarLamps, chooseLodTier, type LodTier } from './vehicleLod.ts'
+import { CONTOUR_CHAR, type VehicleContour } from './vehicleContour.ts'
 import {
   visibleMarkers, visibleKerbStripes, visibleCentreDashes,
   kerbDetailScanline, centreDetailScanline,
@@ -321,6 +322,11 @@ export interface TrafficProjection {
    * size could hold different drawings.
    */
   raster: readonly string[]
+  /**
+   * Dark outline and contact shadow, drawn behind the vehicle. Separate from
+   * `raster` so the collision check cannot see it — see `vehicleContour.ts`.
+   */
+  contour: VehicleContour | null
 }
 
 const TRAFFIC_PASS_BEHIND_M = 5
@@ -414,7 +420,10 @@ function scaleTrafficSprite(
   x: number,
   y: number,
   previousTier: LodTier | undefined,
-): { left: number; top: number; w: number; h: number; lod: LodTier; raster: readonly string[] } | null {
+): {
+  left: number; top: number; w: number; h: number
+  lod: LodTier; raster: readonly string[]; contour: VehicleContour | null
+} | null {
   const key = `${dir}:${type}`
   const rows = getTrafficSpriteRows(dir, type)
   const detail = rasteriseVehicleAtScale(key, rows, scale, x, y)
@@ -430,11 +439,51 @@ function scaleTrafficSprite(
 }
 
 function drawSameDirVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
+  drawVehicleContour(ctx, p)
   drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('same', p.type), p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
+  drawVehicleContour(ctx, p)
   drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('oncoming', p.type), p)
+}
+
+/**
+ * The dark pass, painted before the vehicle so the body covers any cell the two
+ * disagree about. Drawn per vehicle rather than as one sweep over all of them:
+ * traffic is painted far to near, and a global pass would let a nearer vehicle's
+ * outline sit on top of a farther one's body.
+ */
+function drawVehicleContour(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
+  if (!p.contour || !contourEnabled) return
+  const { rows, dx, dy } = p.contour
+  ctx.fillStyle = C.BLACK
+  for (let y = 0; y < rows.length; y++) {
+    const row = rows[y]!
+    let x = 0
+    while (x < row.length) {
+      if (row[x] !== CONTOUR_CHAR) { x++; continue }
+      let run = 1
+      while (x + run < row.length && row[x + run] === CONTOUR_CHAR) run++
+      ctx.fillRect(p.left + dx + x, p.top + dy + y, run, 1)
+      x += run
+    }
+  }
+}
+
+/**
+ * `?outline=0` turns the dark pass off for an instant A/B, the same way the
+ * contact sheet is used to judge every other visual change here. It is a module
+ * flag rather than a parameter because it exists to be compared, not tuned.
+ */
+let contourEnabled = true
+
+export function setContourEnabled(on: boolean): void {
+  contourEnabled = on
+}
+
+export function isContourEnabled(): boolean {
+  return contourEnabled
 }
 
 // The sprite's own dimensions are no longer declared separately from its art:

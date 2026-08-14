@@ -162,6 +162,7 @@ node scripts/traffic-matrix.mjs matrix     # traffic contact sheets — the rend
 ```
 ?seed=1443866        a specific route; no parameter means today's daily route
 ?matrix=1            the traffic contact sheet instead of the game
+?outline=0           traffic without its dark outline and contact shadow (A/B)
 ?matrix=1&surface=ice&curve=2&zoom=4&types=car&dist=220,50,10,2
 ```
 
@@ -210,7 +211,10 @@ Each phase is self-contained, ends with a runnable build, and leaves the previou
 > longest a vehicle stands still fell from 3.07 s to under 2 s, and the typical gap between changes
 > from ten frames to two. The far LOD tier stopped drawing its own symbol and now only writes the
 > lamps onto the resampled sprite, so crossing between tiers changes colour and never shape.
-> 345 tests. Decisions and what is still open live in **`AGENTS.md`**.
+> Traffic then gained a **contrast outline and contact shadow**, derived from the silhouette and
+> drawn behind it — the fix for a white oncoming car dissolving into snow. It lives outside the
+> raster, so the collision box is untouched; `?outline=0` turns it off for an A/B.
+> 355 tests. Decisions and what is still open live in **`AGENTS.md`**.
 >
 > **Older (post-phase-1, through B47 2026-06-03):** manual 5-speed gearbox, RPM gauge, **A/D** shifting, stall + redline burn-out, synchro downshift limits, tachometer HUD, RPM-driven engine pitch, **hold-ENTER crank start** (1.8 s, both initial and restart), harder torque curve (quadratic bog zone, `BOG_FLOOR=0.12`), surface drag double-penalty fix (mud/sand gears now work correctly), traffic perspective fix (1/z projection matches canisters). Delivery budget 8 min; 20-seed completability sim all pass.
 

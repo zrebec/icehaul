@@ -25,26 +25,26 @@ order and came out of a playtest:
 | — | Hyperbolic growth curve in world depth | #30 |
 | — | Area-weighted resample: growth costs only what the grid forces | #33 |
 | — | Fractional scale: the drawing grows a pixel at a time, and the far tier only recolours | #34 |
+| 3a | Contrast outline + contact shadow, drawn behind the vehicle | #35 |
 
 **The pipeline is done. The drawings are not** — see "The sprites themselves are the bottleneck now"
 below, which is the finding that should drive everything next.
 
 **Next, in order:**
 
-1. **Outline and contact shadow** — computed from the raster, no art needed. Highest readability per
-   hour available, and this file has said so since 2026-08-09 without it being built.
-2. **Redraw the six traffic sprites by hand.** They were auto-imported and are asymmetric, have
-   their rear lamps in the middle of the car, and have no wheel gap. No renderer can fix that.
-3. **Lamps through the `glow` layer.** `glow` and `lighting` ship in zx-kit 0.42 with zero consumers
+1. **Redraw the six traffic sprites by hand.** They were auto-imported and are asymmetric, have
+   their rear lamps in the middle of the car, and have no wheel gap. No renderer can fix that, and
+   after #35 it is unambiguously the largest thing left.
+2. **Lamps through the `glow` layer.** `glow` and `lighting` ship in zx-kit 0.42 with zero consumers
    here.
-4. **Distance fog**, then night per the open decision below.
-5. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
+3. **Distance fog**, then night per the open decision below.
+4. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
    "Parametric, vector, and what each would actually buy".
-6. **The far field's remaining stillness** — a mini at 200 m holds one drawing for 1.97 s because
+5. **The far field's remaining stillness** — a mini at 200 m holds one drawing for 1.97 s because
    it is four pixels wide and its true size grows by a tenth of a pixel in that time. The
    resampler cannot touch this; the levers are `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`,
    and both change how distance reads. **Owner's call, deliberately not pulled.**
-7. **Resolution** — still rejected; revisit only for HUD space.
+6. **Resolution** — still rejected; revisit only for HUD space.
 
 A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
 costs anything, and a third tier would only put back a boundary where there is currently none.
@@ -82,8 +82,8 @@ Four defects, all in the art:
 - **It is not symmetric.** A car is bilaterally symmetric and this one is not, because it came out
   of `sprite-import.mjs` block-density segmentation of an AI image. Asymmetry at this size reads as
   noise, not as a vehicle.
-- **No outline.** Bare body colour against the road. This file has said since 2026-08-09 that a
-  one-pixel dark contour is worth more than five interior details, and there still is not one.
+- ~~**No outline.**~~ **Fixed in #35** — and it was the cheapest of the four by a wide margin. The
+  outline is derived from the silhouette, so it needed no art at all. The other three still stand.
 - **The wheels never separate.** Rows 10–13 mix black and body colour with no gap for the road to
   show through, so the car has no visible ground contact.
 
@@ -436,7 +436,7 @@ not. The fix is largely reuse, not invention. *(It was correct in shape but not 
 | — | *(not in the original order)* Hyperbolic growth curve in world depth | **DONE** #30 | — |
 | — | *(not in the original order)* Area-weighted resample | **DONE** #33 | — |
 | — | *(not in the original order)* Fractional scale — growth a pixel at a time | **DONE** #34 | — |
-| 3a | Contact shadow + contrast outline | **TODO** — computed from the raster, no art needed | 0.5 day |
+| 3a | Contact shadow + contrast outline | **DONE** #35. Derived from the raster, no art. Kept *outside* the raster so the hitbox is unchanged; `?outline=0` for A/B | 0.5 day |
 | 3b | **Redraw the six traffic sprites by hand** | **TODO** — new, and now the top of the list. See "The sprites themselves are the bottleneck now" | 1–2 days |
 | 3c | Lights through restrained `glow` | **TODO** — `glow` and `lighting` still have zero consumers | 0.5 day |
 | 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | **TODO**, and easier than when it was written: #34 already made size an output. Not the same as 3D vector — see the table above | 1–2 days |
@@ -539,7 +539,13 @@ deferred: it existed to soften a handover that no longer costs anything.
   Needs hysteresis or stable integer boundaries; test that the tier is monotonic and that
   `mini < car < bus` holds inside each tier.
 - **A white oncoming vehicle disappears on snow and ice.** A one-pixel dark outline is worth more
-  than five interior details.
+  than five interior details. **Built in #35**, and the contact sheets settle it: on snow the lower
+  half of an oncoming car used to dissolve into the road, leaving a windscreen and two lamps
+  floating. Black on black asphalt is invisible, so the outline costs nothing on the one surface
+  where the body already separated — it is self-limiting rather than something to switch per surface.
+- **Decoration drawn around a vehicle must stay out of its raster.** Outline, shadow and anything
+  else that is *not* the vehicle goes in a parallel mask. Put it in the raster and every hitbox
+  quietly grows a pixel on all four sides, which turns a graphics change into a difficulty change.
 - **Vehicles are flat billboards even when passing.** Three yaw buckets (left / straight / right)
   would help more than pixel count up close; no continuous 3D yaw needed.
 - **Performance:** horizontal spans rather than per-pixel `fillRect`, rasterise only on a cache-key

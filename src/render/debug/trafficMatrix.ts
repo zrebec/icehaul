@@ -253,3 +253,15 @@ export function matrixOptionsFromSearch(search: string): Partial<MatrixOptions> 
 export function isMatrixRequested(search: string): boolean {
   return new URLSearchParams(search).get('matrix') === '1'
 }
+
+/**
+ * `?outline=0` draws traffic without its dark outline and contact shadow.
+ *
+ * Opt-*out*, unlike every other switch here: the outline is the intended look,
+ * and the flag exists so the same frame can be captured both ways. Only the
+ * exact string `0` turns it off — a typo should not silently change the picture
+ * a judgement is about to be made on.
+ */
+export function contourEnabledFromSearch(search: string): boolean {
+  return new URLSearchParams(search).get('outline') !== '0'
+}

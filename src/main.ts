@@ -19,10 +19,17 @@ import { createDriveScene } from './scenes/drive.ts'
 import { createGameOverScene } from './scenes/gameover.ts'
 import { roadSeedFromSearch } from './game/seed.ts'
 import {
+  contourEnabledFromSearch,
   drawTrafficMatrix, isMatrixRequested, matrixLayoutFor, matrixOptionsFromSearch,
 } from './render/debug/trafficMatrix.ts'
+import { setContourEnabled } from './render/road3d.ts'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
+
+// ?outline=0 — draw traffic without its dark outline and contact shadow, so the
+// two can be compared on identical frames. Read before anything renders, and it
+// applies to the contact sheet as well as to the game.
+setContourEnabled(contourEnabledFromSearch(window.location.search))
 
 // ?matrix=1 — the traffic contact sheet, not the game. Renders one static image
 // and stops: no scene manager, no input, no audio, no frame loop. It exists so a
