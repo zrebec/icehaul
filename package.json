@@ -1,7 +1,7 @@
 {
   "name": "ice-haul",
   "private": true,
-  "version": "0.3.3",
+  "version": "0.4.0",
   "type": "module",
   "description": "Ice Haul — ZX Spectrum ice-road trucking micro-sim. Risk management, not speed. Built on zx-kit.",
   "scripts": {

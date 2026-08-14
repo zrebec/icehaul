@@ -1,3 +1,10 @@
+# [0.4.0](https://github.com/zrebec/icehaul/compare/v0.3.3...v0.4.0) (2026-08-14)
+
+
+### Features
+
+* **debug:** traffic contact sheet, the harness step 0 asks for ([#26](https://github.com/zrebec/icehaul/issues/26)) ([6ed02ed](https://github.com/zrebec/icehaul/commit/6ed02edc23ee1c4cd5dbed7a112c19e5b3107f6f))
+
 ## [0.3.3](https://github.com/zrebec/icehaul/compare/v0.3.2...v0.3.3) (2026-08-09)
 
 
