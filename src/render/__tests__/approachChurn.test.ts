@@ -16,18 +16,33 @@
  *
  * What the measurement found instead: across 785 frames from 220 m to 2 m the
  * drawing changes only **44 times** — it is still for about 18 frames, then a
- * fifth to two fifths of it is replaced at once. That is the tick. It is worst
- * where the sprite is smallest, because one pixel of growth is a large share of a
- * 20-cell raster, and the measured share sits well above the floor that integer
- * sizing forces, so there is real headroom in how the resample handles growth.
+ * fifth to two fifths of its cells are replaced at once. That is the tick, and it
+ * is worst where the sprite is smallest, because one pixel of growth is a large
+ * share of a 20-cell raster.
  *
- * Content is compared aligned at the top-left corner rather than at the screen
- * position, deliberately. Aligning on screen would count the vehicle's motion
- * down and across the frame as change, which is exactly what should be happening.
+ * ── Two numbers, and why both are here ──────────────────────────────────────
+ * Cells are compared aligned at the top-left corner, deliberately: aligning on
+ * screen would count the vehicle's motion down and across the frame as change,
+ * which is exactly what should be happening. But that alignment also counts a
+ * sprite that merely *stretched* as changed, because every cell past the growth
+ * sits one column over.
+ *
+ * So each frame carries a second number: the share of the **picture** that
+ * changed, both rasters blown up to a common grid so cell identity stops
+ * mattering (`pictureChurn.ts`). Cells-moved is the upper bound on what the eye
+ * could notice; picture-changed is what is actually different. The gap between
+ * them is large — about 16% against 10% on a car — and reading the first as if
+ * it were the second is what made the resampler look like it had headroom.
+ *
+ * It does not: `resampleStability.test.ts` measures every size step against what
+ * a far finer source would force and finds under a percentage point of excess.
+ * Steppiness is not the resampler adding change; it is 44 changes arriving in
+ * 785 frames however cleanly each one is made.
  */
 
 import { describe, it, expect } from 'vitest'
 import { getTrafficRaster, projectTrafficVehicle } from '../road3d.ts'
+import { pictureChurn } from './pictureChurn.ts'
 import { resetVehicleRasterCache } from '../vehicleRaster.ts'
 import { VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
 import type { LodTier } from '../vehicleLod.ts'
@@ -46,6 +61,8 @@ interface Frame {
   lod: LodTier
   /** Fraction of overlapping raster cells that differ from the previous frame. */
   churn: number
+  /** Fraction of the *picture* that differs — see the header. */
+  picture: number
   /** True when this frame is drawn at exactly the size of the one before it. */
   sameSize: boolean
 }
@@ -62,7 +79,17 @@ function contentChurn(a: readonly string[], b: readonly string[]): number {
   return diff / (w * h)
 }
 
-function walkApproach(dir: TrafficDir, type: VehicleType, fromM = 220, toM = 2): Frame[] {
+/**
+ * `withPicture` costs a blow-up to a fine grid per changed frame, so the
+ * assertions below — which only ask *when* the drawing changed — leave it off.
+ */
+function walkApproach(
+  dir: TrafficDir,
+  type: VehicleType,
+  withPicture = false,
+  fromM = 220,
+  toM = 2,
+): Frame[] {
   resetVehicleRasterCache()
   const frames: Frame[] = []
   let prev: { raster: readonly string[]; w: number; h: number } | null = null
@@ -76,13 +103,15 @@ function walkApproach(dir: TrafficDir, type: VehicleType, fromM = 220, toM = 2):
     const p = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, vehicle, noCurve)
     if (!p) continue
     const raster = getTrafficRaster(dir, type, p.w, p.h, p.lod)
+    const churn = prev ? contentChurn(prev.raster, raster) : 0
 
     frames.push({
       distM,
       w: p.w,
       h: p.h,
       lod: p.lod,
-      churn: prev ? contentChurn(prev.raster, raster) : 0,
+      churn,
+      picture: withPicture && prev && churn > 0 ? pictureChurn(prev.raster, raster) : 0,
       sameSize: prev ? prev.w === p.w && prev.h === p.h : true,
     })
     prev = { raster, w: p.w, h: p.h }
@@ -92,7 +121,7 @@ function walkApproach(dir: TrafficDir, type: VehicleType, fromM = 220, toM = 2):
 
 describe('what changes between frames during an approach', () => {
   it('prints the profile', () => {
-    const frames = walkApproach('same', 'car')
+    const frames = walkApproach('same', 'car', true)
     const changed = frames.filter(f => f.churn > 0)
     const pops = frames.filter(f => f.sameSize && f.churn > 0)
 
@@ -105,26 +134,31 @@ describe('what changes between frames during an approach', () => {
     const handover = frames.findIndex((f, i) => i > 0 && f.lod !== frames[i - 1]!.lod)
     if (handover > 0) {
       const f = frames[handover]!
-      console.log(`  tier handover at ${f.distM.toFixed(1)} m (${f.w}x${f.h}): ${(f.churn * 100).toFixed(0)}% redrawn`)
+      console.log(`  tier handover at ${f.distM.toFixed(1)} m (${f.w}x${f.h}): ` +
+        `${(f.churn * 100).toFixed(0)}% of cells moved, ${(f.picture * 100).toFixed(0)}% of the picture changed`)
     }
 
-    console.log('  five largest single-frame changes:')
+    console.log('  five largest single-frame changes (cells moved / picture changed):')
     for (const f of [...frames].sort((a, b) => b.churn - a.churn).slice(0, 5)) {
-      console.log(`    ${(f.churn * 100).toFixed(0).padStart(3)}% at ${f.distM.toFixed(1).padStart(6)} m — ${f.w}x${f.h}, ${f.lod}`)
+      console.log(`    ${(f.churn * 100).toFixed(0).padStart(3)}% / ${(f.picture * 100).toFixed(0).padStart(3)}%` +
+        ` at ${f.distM.toFixed(1).padStart(6)} m — ${f.w}x${f.h}, ${f.lod}`)
     }
 
     // Churn is worst where the raster is smallest: one pixel of growth is a large
-    // share of a 20-cell sprite and a small share of a 600-cell one.
-    // Integer sizing forces a floor: growing w by one replaces at least 1/w of the
-    // columns. Comparing against it says whether the resample is adding churn of
-    // its own, or whether the step is simply as large as the geometry demands.
-    console.log('  worst change by sprite area (floor = unavoidable share for a 1 px step):')
+    // share of a 20-cell sprite and a small share of a 600-cell one. The two
+    // columns say different things about that. Cells-moved counts a sprite that
+    // merely stretched, so it stays high however cleanly the step is made;
+    // picture-changed is what is genuinely different, and `resampleStability`
+    // shows it is already at the floor the target grid forces.
+    console.log('  worst change by sprite area:')
     for (const [lo, hi] of [[0, 40], [40, 100], [100, 250], [250, 10000]] as const) {
       const band = frames.filter(f => f.w * f.h >= lo && f.w * f.h < hi && f.churn > 0)
       if (band.length === 0) continue
       const worst = band.reduce((a, b) => (b.churn > a.churn ? b : a))
-      const floor = 1 / worst.w * 100
-      console.log(`    area ${String(lo).padStart(3)}-${String(hi).padStart(5)} cells: worst ${(worst.churn * 100).toFixed(0).padStart(3)}% vs floor ${floor.toFixed(0).padStart(2)}% (${worst.w}x${worst.h} at ${worst.distM.toFixed(0)} m), ${band.length} changes`)
+      console.log(`    area ${String(lo).padStart(3)}-${String(hi).padStart(5)} cells: ` +
+        `worst ${(worst.churn * 100).toFixed(0).padStart(3)}% of cells, ` +
+        `${(worst.picture * 100).toFixed(0).padStart(3)}% of the picture ` +
+        `(${worst.w}x${worst.h} at ${worst.distM.toFixed(0)} m), ${band.length} changes`)
     }
     expect(frames.length).toBeGreaterThan(500)
   })
