@@ -25,7 +25,7 @@ Which seeds are worth playing, and what each one exercises, is catalogued in `AG
 
 **Ice Haul** is a ZX-Spectrum-flavoured micro-simulator of ice-road trucking. Not ETS2 — its ZX hallucination. The fantasy is *risk management*, not speed: tyre pressure, cargo balance, ice patches, wind, fuel, driver fatigue. Every metre is a small decision.
 
-GitHub repo: `zrebec/ice-haul`. Built on **[zx-kit](https://github.com/zrebec/zx-kit)** (npm `zx-kit@^0.21.0`).
+GitHub repo: `zrebec/icehaul`. Built on **[zx-kit](https://github.com/zrebec/zx-kit)** (npm `zx-kit@^0.42.0`).
 
 ## Canvas & resolution
 

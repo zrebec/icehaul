@@ -26,19 +26,101 @@ order and came out of a playtest:
 | — | Area-weighted resample: growth costs only what the grid forces | #33 |
 | — | Fractional scale: the drawing grows a pixel at a time, and the far tier only recolours | #34 |
 
+**The pipeline is done. The drawings are not** — see "The sprites themselves are the bottleneck now"
+below, which is the finding that should drive everything next.
+
 **Next, in order:**
 
-1. **Cheap wins** — contact shadow, contrast outline, lamps through the `glow` layer. `glow` and
-   `lighting` still have zero consumers here.
-2. **Distance fog**, then night per the open decision below.
-3. **The far field's remaining stillness** — a mini at 200 m holds one drawing for 1.97 s because
+1. **Outline and contact shadow** — computed from the raster, no art needed. Highest readability per
+   hour available, and this file has said so since 2026-08-09 without it being built.
+2. **Redraw the six traffic sprites by hand.** They were auto-imported and are asymmetric, have
+   their rear lamps in the middle of the car, and have no wheel gap. No renderer can fix that.
+3. **Lamps through the `glow` layer.** `glow` and `lighting` ship in zx-kit 0.42 with zero consumers
+   here.
+4. **Distance fog**, then night per the open decision below.
+5. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
+   "Parametric, vector, and what each would actually buy".
+6. **The far field's remaining stillness** — a mini at 200 m holds one drawing for 1.97 s because
    it is four pixels wide and its true size grows by a tenth of a pixel in that time. The
    resampler cannot touch this; the levers are `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`,
    and both change how distance reads. **Owner's call, deliberately not pulled.**
-4. **Resolution** — still rejected; revisit only for HUD space.
+7. **Resolution** — still rejected; revisit only for HUD space.
 
 A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
 costs anything, and a third tier would only put back a boundary where there is currently none.
+
+### The sprites themselves are the bottleneck now
+
+Owner, after #34: *"we are at a better level but honestly the sprites are terrible — not even a
+person with imagination could tell it is a car if they did not already know."*
+
+That is a fair reading and it is **not** a rendering fault. Six PRs fixed how a sprite reaches the
+screen; none of them touched what the sprite *is*. Here is `SAME_CAR_ROWS`, the rear of a car, which
+is the drawing the player looks at most:
+
+```
+....XXXXXXXXXXXXXX....
+...XXXXXXXXXXXXXXXX...
+..XXXXWWWWWWXXXXXX....   ← window is off-centre: 2 columns of margin left, 4 right
+.XXXXXWWWWWWXXXXXXX...
+.XXXXXXXXXXXXXXXXXXX..
+XXXXXXXXXXXXXXXXXXXXX.
+XXXXXXXXXXXXXXXXXXXXXX
+XXXXXXRRRRRRRRXXXXXXX.   ← rear lamps as a bar across the MIDDLE
+XXXXXRRRRRRRRRRXXXXXX.
+XXXXXXXYYYYYYXXXXXXXX.
+.XXXXBBBBXXXXBBBBXXX..   ← wheels never separate from the body
+..XXXBBBBXXXXBBBBXX...
+```
+
+Four defects, all in the art:
+
+- **The rear lamps are in the middle.** On a real car, and on every readable 8-bit car, they are at
+  the outer corners — and they are the single feature that says "car, going away from me". The far
+  tier has to *re-add* corner lamps precisely because the source art gets this wrong. When the two
+  tiers disagree about where the lamps are, the art is the one that is wrong.
+- **It is not symmetric.** A car is bilaterally symmetric and this one is not, because it came out
+  of `sprite-import.mjs` block-density segmentation of an AI image. Asymmetry at this size reads as
+  noise, not as a vehicle.
+- **No outline.** Bare body colour against the road. This file has said since 2026-08-09 that a
+  one-pixel dark contour is worth more than five interior details, and there still is not one.
+- **The wheels never separate.** Rows 10–13 mix black and body colour with no gap for the road to
+  show through, so the car has no visible ground contact.
+
+The oncoming sprites are noticeably better — symmetric, headlights at the corners — which is itself
+evidence that the problem is the drawing and not the pipeline.
+
+**Do not re-import these from generated images.** The importer earns its keep on roadside scenery,
+where lumpiness reads as nature. A vehicle at 16 × 11 has about thirty pixels that matter and each
+one has to be placed deliberately.
+
+### Parametric, vector, and what each would actually buy
+
+Owner has raised 3D vector graphics — *"it would be smoother"*. Three different things get conflated
+here and they differ by an order of magnitude in cost, so keep them apart:
+
+| | What it is | Buys | Costs |
+|---|---|---|---|
+| **Hand-drawn sprites** | What exists, drawn properly | Reads as a car. Nothing else changes | 1–2 days |
+| **Parametric 2D** | Body drawn from a few filled shapes whose coordinates are fractions of `w`/`h` | Exact at every scale, no source grid at all, no art to redraw per size | 1–2 days for one type behind a flag |
+| **3D vector** | Polygon model, projected and filled per frame | All of the above **plus** continuous yaw, which billboards cannot do | Model + filled-polygon rasteriser + z-sorting + palette discipline: a week or more |
+
+Three things worth being clear about before that decision:
+
+- **It would not violate the ZX identity.** The Spectrum had filled-vector driving games — Stunt Car
+  Racer, Hard Drivin', the Freescape titles. But it is a *different* Spectrum: Freescape solid-3D
+  rather than Pole Position sprite-scaling. That is an aesthetic choice, not a technical one, and it
+  is the owner's.
+- **It would not remove the LOD tier.** A polygon car at six pixels of height is two or three
+  visible faces. Vector helps up close and is worse than a symbol far away, so the far tier stays
+  whatever happens.
+- **It would slot into the current architecture cleanly.** #34 made the raster an *output* of the
+  projection at a fractional scale, so a model rasterised into that same raster keeps draw, collision
+  and glow sharing one set of pixels. This is why the spike is cheap to try and cheap to throw away.
+
+**Recommendation: draw the sprites properly first.** A vector model with the same proportions — lamps
+in the middle, no ground contact — would read exactly as badly, and would have cost a week to find
+that out.
 
 ### What the approach measurement found
 
@@ -346,15 +428,20 @@ not. The fix is largely reuse, not invention. *(It was correct in shape but not 
 
 ### Agreed order
 
-| # | Item | Effort |
-|---|---|---|
-| 0 | Screenshot matrix + `?trafficRenderer=` / `?glow=0` switches, fixed seed from the catalogue above — so every later change is judged against the same frames | 2–4 h |
-| 1 | **One shared raster.** `scaleRoadsideRows` for traffic too; the same raster feeds draw, collision and emissive; cache by size | 4–8 h |
-| 2 | ~~Far LOD by meaning, tier chosen by **projected height** with hysteresis~~ **done**; a middle tier is closed, not deferred — see "What the far tier settled" | 1–2 days |
-| 3 | Cheap wins: contact shadow, contrast outline, lights through restrained `glow` | 0.5–1 day |
-| 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | 1–2 days |
-| 5 | Distance fog; night per the decision below | 4–6 h + night |
-| 6 | Resolution decision — only here, and probably no | — |
+| # | Item | State | Effort |
+|---|---|---|---|
+| 0 | Screenshot matrix, fixed seed from the catalogue above — so every later change is judged against the same frames | **DONE** #26. `?matrix=1` plus `scripts/traffic-matrix.mjs`. `?trafficRenderer=` was never built — there was never a second renderer to switch to. `?glow=0` **not built**, nothing emits glow yet | 2–4 h |
+| 1 | **One shared raster.** The same raster feeds draw, collision and emissive; cache it | **DONE** #28, and gone further in #34 — the raster now rides on the projection, so there is no size for two readers to re-derive it from | 4–8 h |
+| 2 | Far LOD by meaning, tier chosen by **projected height** with hysteresis | **DONE** #29, reshaped in #34 — the far tier now recolours the real silhouette instead of drawing its own. A middle tier is **closed, not deferred** | 1–2 days |
+| — | *(not in the original order)* Hyperbolic growth curve in world depth | **DONE** #30 | — |
+| — | *(not in the original order)* Area-weighted resample | **DONE** #33 | — |
+| — | *(not in the original order)* Fractional scale — growth a pixel at a time | **DONE** #34 | — |
+| 3a | Contact shadow + contrast outline | **TODO** — computed from the raster, no art needed | 0.5 day |
+| 3b | **Redraw the six traffic sprites by hand** | **TODO** — new, and now the top of the list. See "The sprites themselves are the bottleneck now" | 1–2 days |
+| 3c | Lights through restrained `glow` | **TODO** — `glow` and `lighting` still have zero consumers | 0.5 day |
+| 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | **TODO**, and easier than when it was written: #34 already made size an output. Not the same as 3D vector — see the table above | 1–2 days |
+| 5 | Distance fog; night per the decision below | **TODO** | 4–6 h + night |
+| 6 | Resolution decision — only here, and probably no | **Still no** | — |
 
 Step 0 first because everything after it is a judgement call about how something *looks*, and those
 are worthless without a fixed comparison. Step 1 before any art because it fixes faults 1–3 at once
