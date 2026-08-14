@@ -98,7 +98,7 @@ describe('the drawn pixels are the colliding pixels', () => {
             VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, veh(dist, dir, type), noCurve,
           )
           expect(p, `${dir}/${type} at ${dist}m must project`).not.toBeNull()
-          const raster = getTrafficRaster(dir, type, p!.w, p!.h)
+          const raster = getTrafficRaster(dir, type, p!.w, p!.h, p!.lod)
 
           // The raster covers the projected rect exactly: collision can neither
           // see a pixel outside the drawn area nor miss one inside it.
@@ -129,7 +129,7 @@ describe('the drawn pixels are the colliding pixels', () => {
 
   it('a solid raster pixel under a truck pixel does collide', () => {
     const p = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, veh(5, 'same', 'car'), noCurve)!
-    const raster = getTrafficRaster('same', 'car', p.w, p.h)
+    const raster = getTrafficRaster('same', 'car', p.w, p.h, p.lod)
     let tested = 0
     for (let y = 0; y < p.h; y++) {
       for (let x = 0; x < p.w; x++) {

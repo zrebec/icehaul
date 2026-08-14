@@ -63,13 +63,29 @@ export function rasteriseVehicle(
   w: number,
   h: number,
 ): readonly string[] {
-  if (w <= 0 || h <= 0 || rows.length === 0) return []
+  if (rows.length === 0) return []
+  return cachedRaster(key, w, h, () => scaleRoadsideRows(rows, w, h))
+}
+
+/**
+ * Cache any raster built for a given size — used by the far tier, which composes
+ * its symbol directly at the target size instead of resampling a source sprite.
+ * Resampling one down would defeat the point: a lamp is a single pixel, and the
+ * dominant-colour vote deletes it exactly when it matters most.
+ */
+export function cachedRaster(
+  key: string,
+  w: number,
+  h: number,
+  build: () => readonly string[],
+): readonly string[] {
+  if (w <= 0 || h <= 0) return []
 
   const cacheKey = `${key}:${w}x${h}`
   const hit = cache.get(cacheKey)
   if (hit) return hit
 
-  const raster = scaleRoadsideRows(rows, w, h)
+  const raster = build()
   if (cache.size >= MAX_ENTRIES) cache.clear()
   cache.set(cacheKey, raster)
   return raster

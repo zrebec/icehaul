@@ -11,6 +11,7 @@ import {
   TRAFFIC_START_M,
   TRAFFIC_FOLLOW_TIME_S, TRAFFIC_MIN_FOLLOW_GAP_M, TRAFFIC_FOLLOW_BRAKE_KMH_S,
 } from '../config.ts'
+import type { LodTier } from '../render/vehicleLod.ts'
 
 export type TrafficDir = 'same' | 'oncoming'
 export type VehicleType = 'mini' | 'car' | 'bus'
@@ -28,6 +29,11 @@ export interface TrafficVehicle {
   type: VehicleType
   /** Marked when passed or off-screen. */
   gone: boolean
+  /**
+   * Level of detail drawn last frame. Lives on the vehicle because the choice is
+   * hysteretic — see `render/vehicleLod.ts`. Absent until first projected.
+   */
+  lodTier?: LodTier
 }
 
 function hash(n: number): number {

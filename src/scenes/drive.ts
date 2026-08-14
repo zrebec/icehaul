@@ -361,7 +361,7 @@ export function createDriveScene(
         if (checkTruckTrafficCollision(
           truckDrawX, truckDrawY,
           projected.left, projected.top, projected.w, projected.h,
-          getTrafficRaster(tv.dir, tv.type, projected.w, projected.h),
+          getTrafficRaster(tv.dir, tv.type, projected.w, projected.h, projected.lod),
         )) {
           startCrash('crash')
           return

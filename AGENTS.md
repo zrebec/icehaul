@@ -165,7 +165,7 @@ not. The fix is largely reuse, not invention.
 |---|---|---|
 | 0 | Screenshot matrix + `?trafficRenderer=` / `?glow=0` switches, fixed seed from the catalogue above — so every later change is judged against the same frames | 2–4 h |
 | 1 | **One shared raster.** `scaleRoadsideRows` for traffic too; the same raster feeds draw, collision and emissive; cache by size | 4–8 h |
-| 2 | Far and medium LOD by meaning, tier chosen by **projected height** with hysteresis | 1–2 days |
+| 2 | ~~Far LOD by meaning, tier chosen by **projected height** with hysteresis~~ **far tier done**; a middle tier is still open | 1–2 days |
 | 3 | Cheap wins: contact shadow, contrast outline, lights through restrained `glow` | 0.5–1 day |
 | 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | 1–2 days |
 | 5 | Distance fog; night per the decision below | 4–6 h + night |
@@ -194,6 +194,21 @@ does not use `AttrScreen`, so `stampMono(glow: true)` is not available — go th
 A full day/night cycle is a further 10–16 h and belongs with roadmap phase 9. Distance fog is worth
 doing on either path — the strongest depth cue available, and it turns "blob in the distance" from a
 defect into an intention.
+
+### What the far tier settled
+
+Two tiers exist today: `far` and `detail`. The far one is **composed at the target size, not
+resampled down to it** — the first attempt drew it from a 7 × 5 source and lost, because a mini at
+220 m projects to 5 × 4 and the dominant-colour vote deletes a one-pixel lamp exactly where it is
+the only thing that matters. Anything whose meaning lives in a handful of pixels has to be built for
+the size it will occupy.
+
+Direction is carried by **lamp colour, never body colour**: a same-direction bus is red bodywork, so
+"red means going away" only holds if it is the lamps that are red. Type is deliberately not
+distinguished in the far tier — mini, car and bus already differ in projected size, and at six
+pixels of height nothing else about them can be told apart honestly.
+
+A middle tier — silhouette enough to tell the three types apart — is still open.
 
 ### Rules that hold whatever gets built
 
