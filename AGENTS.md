@@ -7,7 +7,7 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.6.1 (2026-08-14), 345 tests. Everything below is done and merged unless marked.
+State at 0.8.0 (2026-08-15), 355 tests. Everything below is done and merged unless marked.
 
 **Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
 speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
@@ -29,6 +29,16 @@ order and came out of a playtest:
 
 **The pipeline is done. The drawings are not** — see "The sprites themselves are the bottleneck now"
 below, which is the finding that should drive everything next.
+
+Owner after #35: *"the game really has a look now and it comes across a lot better."* The outline
+was the cheapest item on the whole list and the first change since #29 that read as an improvement
+without needing a measurement to argue for it. Worth remembering when the next item looks expensive.
+
+> **The fleet is frozen until the sprite-or-polygon decision.** More vehicle types are wanted —
+> owner asked for them explicitly — but **not yet**. Every new type is an asset that would have to
+> be made twice if the answer turns out to be polygons, and the decision is deliberately weeks away
+> rather than days. So: redraw the six that exist, do not add a seventh. This is a scope gate, not a
+> lack of interest.
 
 **Next, in order:**
 
@@ -121,6 +131,11 @@ Three things worth being clear about before that decision:
 **Recommendation: draw the sprites properly first.** A vector model with the same proportions — lamps
 in the middle, no ground contact — would read exactly as badly, and would have cost a week to find
 that out.
+
+**Timing (owner, 2026-08-15):** the decision is *weeks* away, not days, and it gates the fleet — see
+the note under "Where to pick up". Nothing about this needs deciding to keep working: redrawing the
+six existing sprites is worth doing under either answer, because it is the only way to learn what a
+properly drawn one at this size actually looks like, which is the evidence the decision needs.
 
 ### What the approach measurement found
 
