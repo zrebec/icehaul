@@ -9,8 +9,8 @@ import {
   KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
 } from '../config.ts'
 import { computeCurveOffsets } from './projection.ts'
-import { cachedRaster, rasteriseVehicle } from './vehicleRaster.ts'
-import { buildFarRaster, chooseLodTier, type LodTier } from './vehicleLod.ts'
+import { rasteriseVehicleAtScale } from './vehicleRaster.ts'
+import { applyFarLamps, chooseLodTier, type LodTier } from './vehicleLod.ts'
 import {
   visibleMarkers, visibleKerbStripes, visibleCentreDashes,
   kerbDetailScanline, centreDetailScanline,
@@ -311,8 +311,16 @@ export interface TrafficProjection {
   h: number
   scale: number
   type: VehicleType
-  /** Which drawing to use — see `vehicleLod.ts`. */
+  /** Which drawing was used — see `vehicleLod.ts`. */
   lod: LodTier
+  /**
+   * The pixels, one raster cell per screen pixel. Carried on the projection so
+   * the renderer and the collision check cannot end up with different ones —
+   * they used to re-derive it from `w`/`h`, which stopped being enough once the
+   * sprite was sampled at a fractional scale and two frames of the same integer
+   * size could hold different drawings.
+   */
+  raster: readonly string[]
 }
 
 const TRAFFIC_PASS_BEHIND_M = 5
@@ -345,7 +353,6 @@ export function projectTrafficVehicle(
   if (worldZ < -TRAFFIC_PASS_BEHIND_M || worldZ > TRAFFIC_VIEW_DISTANCE_M) return null
 
   if (worldZ <= 0) {
-    const t = 1
     const pass = Math.min(1, -worldZ / TRAFFIC_PASS_BEHIND_M)
     const half = ROAD_HALF_BOTTOM
     const centerX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
@@ -354,20 +361,12 @@ export function projectTrafficVehicle(
     // Continue the depth curve from where it ends at worldZ = 0, so a vehicle
     // does not change size on the frame it draws level with the player.
     const scale = TRAFFIC_SCALE_A / TRAFFIC_SCALE_B + pass * 0.15
-    const dims = trafficSpriteSize(vehicle.type)
-    const w = Math.max(3, Math.round(dims.w * scale))
-    const h = Math.max(3, Math.round(dims.h * scale))
 
     // Beside or behind the player: always the detailed drawing.
     vehicle.lodTier = 'detail'
-    return {
-      x, y,
-      left: x - Math.floor(w / 2),
-      top: y - h,
-      w, h, scale,
-      type: vehicle.type,
-      lod: 'detail',
-    }
+    const drawn = scaleTrafficSprite(vehicle.dir, vehicle.type, scale, x, y, 'detail')
+    if (!drawn) return null
+    return { x, y, scale, type: vehicle.type, ...drawn }
   }
 
   const projectedScanline = trafficDepthToScanline(worldZ, scanlines)
@@ -389,41 +388,58 @@ export function projectTrafficVehicle(
   // scanlines 1, 2 and 3, so the whole far field lives in two pixels of height and
   // no function of the scanline can spread it.
   const scale = TRAFFIC_SCALE_A / (worldZ + TRAFFIC_SCALE_B)
-  const dims = trafficSpriteSize(vehicle.type)
-  const w = Math.max(3, Math.round(dims.w * scale))
-  const h = Math.max(3, Math.round(dims.h * scale))
 
+  const drawn = scaleTrafficSprite(vehicle.dir, vehicle.type, scale, x, y, vehicle.lodTier)
+  if (!drawn) return null
   // Remembered on the vehicle so the choice can be hysteretic. Idempotent within
   // a frame: update and render both project, and the second call sees a settled
   // tier and keeps it.
-  const lod = chooseLodTier(h, vehicle.lodTier)
-  vehicle.lodTier = lod
+  vehicle.lodTier = drawn.lod
 
-  return {
-    x, y,
-    left: x - Math.floor(w / 2),
-    top: y - h,
-    w, h, scale,
-    type: vehicle.type,
-    lod,
-  }
+  return { x, y, scale, type: vehicle.type, ...drawn }
+}
+
+/**
+ * The sprite at this scale, its screen box, and which tier it ended up in.
+ *
+ * The tier is decided *after* rasterising, because the projected height is now
+ * read off the raster rather than computed ahead of it. That costs nothing: the
+ * far tier only recolours, so both tiers have the same silhouette and the same
+ * height, and the second lookup is a cache hit from the first frame onward.
+ */
+function scaleTrafficSprite(
+  dir: TrafficVehicle['dir'],
+  type: VehicleType,
+  scale: number,
+  x: number,
+  y: number,
+  previousTier: LodTier | undefined,
+): { left: number; top: number; w: number; h: number; lod: LodTier; raster: readonly string[] } | null {
+  const key = `${dir}:${type}`
+  const rows = getTrafficSpriteRows(dir, type)
+  const detail = rasteriseVehicleAtScale(key, rows, scale, x, y)
+  if (!detail) return null
+
+  const lod = chooseLodTier(detail.h, previousTier)
+  if (lod === 'detail') return { ...detail, lod }
+
+  const far = rasteriseVehicleAtScale(
+    `${key}:far`, rows, scale, x, y, raster => applyFarLamps(raster, dir),
+  )
+  return far ? { ...far, lod } : { ...detail, lod: 'detail' }
 }
 
 function drawSameDirVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
-  drawTrafficRows(ctx, getTrafficRaster('same', p.type, p.w, p.h, p.lod), getTrafficSpriteColors('same', p.type), p)
+  drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('same', p.type), p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
-  drawTrafficRows(ctx, getTrafficRaster('oncoming', p.type, p.w, p.h, p.lod), getTrafficSpriteColors('oncoming', p.type), p)
+  drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('oncoming', p.type), p)
 }
 
-function trafficSpriteSize(type: VehicleType): { w: number; h: number } {
-  switch (type) {
-    case 'mini': return { w: 14, h: 11 }
-    case 'car': return { w: 22, h: 15 }
-    case 'bus': return { w: 28, h: 18 }
-  }
-}
+// The sprite's own dimensions are no longer declared separately from its art:
+// the drawn size is `ceil(sourceDimension * scale)`, read straight off the rows.
+// A table that had to be kept in step with the pixel data could only ever drift.
 
 type RowColors = Record<string, SpectrumColor>
 
@@ -489,27 +505,6 @@ function drawTrafficRows(
   }
 }
 
-/**
- * The raster a vehicle is actually drawn from, at its projected size. The
- * collision check must be handed this rather than the source sprite — that
- * difference is the entire point of `vehicleRaster.ts`.
- */
-export function getTrafficRaster(
-  dir: TrafficVehicle['dir'],
-  type: VehicleType,
-  w: number,
-  h: number,
-  lod: LodTier = 'detail',
-): readonly string[] {
-  // The far tier shares one silhouette across types: at this size only size and
-  // lamp colour can be told apart honestly, and both already differ. It is built
-  // at the target size rather than resampled — see buildFarRaster.
-  if (lod === 'far') {
-    return cachedRaster(`${dir}:far`, w, h, () => buildFarRaster(dir, w, h))
-  }
-  return rasteriseVehicle(`${dir}:${type}`, getTrafficSpriteRows(dir, type), w, h)
-}
-
 /** Fraction of a target cell that must be opaque for it to be drawn at all. */
 const COVERAGE_THRESHOLD = 0.2
 
@@ -549,37 +544,79 @@ export function scaleRoadsideRows(
   const srcW = rows[0]?.length ?? 0
   if (srcW === 0 || srcH === 0 || targetW <= 0 || targetH <= 0) return []
 
+  return resampleRows(rows, {
+    w: targetW, h: targetH,
+    x0: 0, y0: 0,
+    stepX: srcW / targetW, stepY: srcH / targetH,
+  })
+}
+
+/**
+ * Where each target cell reads from, in source coordinates.
+ *
+ * Splitting this out from {@link scaleRoadsideRows} is what lets a sprite be
+ * sampled at a size the integer grid cannot express. `scaleRoadsideRows` fits a
+ * sprite to a whole number of cells, so the only way it can grow is a whole
+ * column at a time; a grid whose `step` and origin are free can put the sprite's
+ * edge *between* cells, and then growth arrives one pixel at a time as each edge
+ * cell in turn crosses {@link COVERAGE_THRESHOLD}. See `vehicleRaster.ts`.
+ */
+interface SampleGrid {
+  /** Target cells across and down. */
+  w: number
+  h: number
+  /** Source coordinate at the left/top edge of target cell 0. May be negative. */
+  x0: number
+  y0: number
+  /** Source units spanned by one target cell. `1 / scale` for a uniform scale. */
+  stepX: number
+  stepY: number
+}
+
+function resampleRows(rows: readonly string[], grid: SampleGrid): string[] {
+  const srcH = rows.length
+  const srcW = rows[0]?.length ?? 0
+  if (srcW === 0 || srcH === 0 || grid.w <= 0 || grid.h <= 0) return []
+
+  // The denominator is the cell's **whole** area, not the part of it that found
+  // source pixels to sample. A cell straddling the sprite's edge is mostly
+  // outside it, and counting only the inside would let a sliver of bodywork fill
+  // the cell — the same "drawn fatter than it is" fault the area weighting was
+  // introduced to remove, reappearing at the silhouette instead of inside it.
+  const cellArea = grid.stepX * grid.stepY
+  if (cellArea <= 0) return []
+
   const scaled: string[] = []
-  for (let dy = 0; dy < targetH; dy++) {
-    const top = dy * srcH / targetH
-    const bottom = (dy + 1) * srcH / targetH
+  for (let dy = 0; dy < grid.h; dy++) {
+    const top = grid.y0 + dy * grid.stepY
+    const bottom = top + grid.stepY
     let row = ''
 
-    for (let dx = 0; dx < targetW; dx++) {
-      const left = dx * srcW / targetW
-      const right = (dx + 1) * srcW / targetW
+    for (let dx = 0; dx < grid.w; dx++) {
+      const left = grid.x0 + dx * grid.stepX
+      const right = left + grid.stepX
       const area = new Map<string, number>()
-      let total = 0
       let opaque = 0
 
-      for (let sy = Math.floor(top); sy < Math.min(Math.ceil(bottom), srcH); sy++) {
+      for (let sy = Math.max(0, Math.floor(top)); sy < Math.min(Math.ceil(bottom), srcH); sy++) {
         const rowOverlap = Math.min(bottom, sy + 1) - Math.max(top, sy)
         if (rowOverlap <= 0) continue
         const sourceRow = rows[sy]!
 
-        for (let sx = Math.floor(left); sx < Math.min(Math.ceil(right), srcW); sx++) {
+        for (let sx = Math.max(0, Math.floor(left)); sx < Math.min(Math.ceil(right), srcW); sx++) {
           const colOverlap = Math.min(right, sx + 1) - Math.max(left, sx)
           if (colOverlap <= 0) continue
 
-          const covered = colOverlap * rowOverlap
           const char = sourceRow[sx] ?? '.'
-          total += covered
-          if (char !== '.') opaque += covered
+          if (char === '.') continue
+
+          const covered = colOverlap * rowOverlap
+          opaque += covered
           area.set(char, (area.get(char) ?? 0) + covered)
         }
       }
 
-      if (total <= 0 || opaque / total < COVERAGE_THRESHOLD) {
+      if (opaque / cellArea < COVERAGE_THRESHOLD) {
         row += '.'
         continue
       }
@@ -587,7 +624,6 @@ export function scaleRoadsideRows(
       let winner = ''
       let winnerArea = 0
       for (const [char, covered] of area) {
-        if (char === '.') continue
         if (covered > winnerArea) {
           winner = char
           winnerArea = covered
@@ -599,6 +635,62 @@ export function scaleRoadsideRows(
   }
 
   return scaled
+}
+
+/**
+ * Resample a sprite at a **fractional** size, anchored bottom-centre.
+ *
+ * The box is `ceil(span)` cells on each axis and the sprite sits inside it at a
+ * fractional offset, so growing `scale` by a hair moves one edge cell past the
+ * coverage threshold and lights *it* — not the whole column its neighbours
+ * share. That is where the pixel-at-a-time growth comes from.
+ *
+ * ── Why the box is not simply centred on the anchor ─────────────────────────
+ * Centring it exactly forces an even width. `floor(x - span/2)` and
+ * `ceil(x + span/2)` are mirror images about a whole pixel, so the box can only
+ * ever be `2 * ceil(span / 2)` wide — it grows two columns at a time, which is
+ * twice as coarse as the quantisation this function exists to remove.
+ *
+ * Rounding the box's left edge instead lets the width follow `ceil(span)`, and
+ * the vehicle grows alternately leftward and rightward as the parity changes.
+ * The cost is that the drawn centre sits within half a pixel of the anchor
+ * rather than exactly on it, which is below what the display can show — and the
+ * vertical axis needs none of this, being anchored on an edge and not a centre.
+ */
+export function resampleSpriteAtScale(
+  rows: readonly string[],
+  scale: number,
+  anchorX: number,
+  anchorBottomY: number,
+): { raster: string[]; left: number; top: number; w: number; h: number } | null {
+  const srcH = rows.length
+  const srcW = rows[0]?.length ?? 0
+  if (srcW === 0 || srcH === 0 || scale <= 0) return null
+
+  const spanW = srcW * scale
+  const spanH = srcH * scale
+  const w = Math.max(1, Math.ceil(spanW))
+  const h = Math.max(1, Math.ceil(spanH))
+
+  // Where the sprite's own edges sit inside the box, in cells.
+  const insetX = (w - spanW) / 2
+  const insetY = h - spanH
+
+  const raster = resampleRows(rows, {
+    w, h,
+    x0: -insetX / scale,
+    y0: -insetY / scale,
+    stepX: 1 / scale,
+    stepY: 1 / scale,
+  })
+  if (raster.length === 0) return null
+
+  return {
+    raster,
+    left: anchorX - Math.round(w / 2),
+    top: anchorBottomY - h,
+    w, h,
+  }
 }
 
 function drawRoadsideRows(

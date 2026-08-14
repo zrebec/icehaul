@@ -23,70 +23,128 @@
  * by construction rather than by coincidence.
  *
  * ── What it does not do ─────────────────────────────────────────────────────
- * {@link scaleRoadsideRows} resolves each target pixel to the *most common*
- * opaque source char, so small features lose to bodywork: at 8×6 a car's lights
- * are outvoted by its panels. That is deliberate here. Making meaning survive
- * distance is the job of the far LOD tier, and mixing it in now would make it
- * impossible to tell which change bought which improvement.
+ * The resampler resolves each target pixel to the opaque source char covering
+ * most of it, so small features lose to bodywork: at 8×6 a car's lights are
+ * outvoted by its panels. That is deliberate here. Making meaning survive
+ * distance is the far LOD tier's job, and it does it by writing the lamps back
+ * on afterwards rather than by hoping the vote keeps them.
  */
 
-import { scaleRoadsideRows } from './road3d.ts'
+import { resampleSpriteAtScale } from './road3d.ts'
 
 /**
- * Rasters are keyed by sprite identity and target size, and a vehicle holds the
- * same integer size for many frames as it approaches, so nearly every frame is a
- * cache hit. Sizes are bounded — 3 px to a little over 30 — so the working set
- * is small; the cap only guards against a future renderer widening the range.
+ * Rasters are keyed by sprite identity and the quantised scale it was built at.
+ *
+ * Keying by integer size was enough while the size *was* the quantisation, but
+ * a sprite is now sampled at a fractional size and two different scales that
+ * round to the same `w × h` are two different drawings — that difference is the
+ * whole point.
+ *
+ * The working set is bounded and countable. Scale runs from `TRAFFIC_SCALE_FAR`
+ * to a little past `TRAFFIC_SCALE_NEAR`, about 366 buckets at
+ * {@link SCALE_STEPS}, for each of six sprites — call it 2200 entries. The far
+ * flavour only exists below each sprite's tier boundary, adding about 800 more.
+ * The cap sits above that with room, so eviction (a full clear) is a guard
+ * against a future renderer widening the range, not a thing that happens in
+ * play.
  */
-const MAX_ENTRIES = 512
-const cache = new Map<string, readonly string[]>()
+const MAX_ENTRIES = 4096
+
+/**
+ * Scale is quantised before anything is computed from it, so the cached raster
+ * and the `left`/`top` it is drawn at can never be derived from different
+ * numbers. 1/256 puts roughly one bucket per pixel the sprite gains over the
+ * whole approach — finer than the grid can express, which is what it must be,
+ * or the quantisation would become the thing that limits growth.
+ */
+const SCALE_STEPS = 256
+
+export interface ScaledVehicle {
+  raster: readonly string[]
+  left: number
+  top: number
+  w: number
+  h: number
+}
+
+/** Cached geometry is relative to the anchor, which is why it caches at all. */
+interface CachedScaled {
+  raster: readonly string[]
+  dx: number
+  dy: number
+  w: number
+  h: number
+}
+
+const scaledCache = new Map<string, CachedScaled | null>()
 
 /** Cleared between tests so cache state cannot leak across cases. */
 export function resetVehicleRasterCache(): void {
-  cache.clear()
+  scaledCache.clear()
 }
 
 export function vehicleRasterCacheSize(): number {
-  return cache.size
+  return scaledCache.size
 }
 
 /**
- * The sprite resampled to exactly `w × h` target pixels, as row strings where
- * `.` is transparent. One raster pixel is one screen pixel, so both the renderer
- * and the collision check can index it directly with no further arithmetic.
+ * The sprite drawn at a fractional scale, anchored bottom-centre on `anchorX` /
+ * `anchorBottomY`.
  *
- * `key` must identify the source sprite — direction and type is enough today.
+ * ── Why the size stopped being an input ─────────────────────────────────────
+ * Rounding the scale to whole pixels first made growth arrive a whole column at
+ * a time, and measurement showed that is what "steppy" was: over an approach a
+ * vehicle takes at most 47 distinct integer sizes across 785 frames, and the
+ * renderer was already using 44 of them. There was nothing left to win by
+ * quantising *better* — the quantisation itself had to go.
+ *
+ * Sampling at the true fractional size puts the sprite's edges between cells, so
+ * each edge cell crosses the coverage threshold at its own scale and the drawing
+ * grows a pixel at a time. `w` and `h` are now outputs: the size the vehicle
+ * happens to occupy, read back off the raster.
+ *
+ * Returns `null` when nothing survives the threshold — the caller draws nothing.
  */
-export function rasteriseVehicle(
+export function rasteriseVehicleAtScale(
   key: string,
   rows: readonly string[],
-  w: number,
-  h: number,
-): readonly string[] {
-  if (rows.length === 0) return []
-  return cachedRaster(key, w, h, () => scaleRoadsideRows(rows, w, h))
-}
+  scale: number,
+  anchorX: number,
+  anchorBottomY: number,
+  refine?: (raster: readonly string[]) => readonly string[],
+): ScaledVehicle | null {
+  if (rows.length === 0 || scale <= 0) return null
 
-/**
- * Cache any raster built for a given size — used by the far tier, which composes
- * its symbol directly at the target size instead of resampling a source sprite.
- * Resampling one down would defeat the point: a lamp is a single pixel, and the
- * dominant-colour vote deletes it exactly when it matters most.
- */
-export function cachedRaster(
-  key: string,
-  w: number,
-  h: number,
-  build: () => readonly string[],
-): readonly string[] {
-  if (w <= 0 || h <= 0) return []
+  // Quantise once, then derive everything from the quantised value — the raster
+  // and the position it is drawn at must come from the same number.
+  const steps = Math.max(1, Math.round(scale * SCALE_STEPS))
+  const quantised = steps / SCALE_STEPS
+  const cacheKey = `${key}@${steps}`
 
-  const cacheKey = `${key}:${w}x${h}`
-  const hit = cache.get(cacheKey)
-  if (hit) return hit
+  let hit = scaledCache.get(cacheKey)
+  if (hit === undefined) {
+    // Cached relative to the anchor. `left - anchorX` and `top - anchorBottomY`
+    // depend only on the scale, because both anchors are whole pixels, so one
+    // entry serves the vehicle wherever it sits on the road.
+    const built = resampleSpriteAtScale(rows, quantised, 0, 0)
+    hit = built === null
+      ? null
+      : {
+        // `refine` may only recolour — the cached `w`/`h` come from the
+        // untouched silhouette, and both tiers must agree on them.
+        raster: refine ? refine(built.raster) : built.raster,
+        dx: built.left, dy: built.top, w: built.w, h: built.h,
+      }
+    if (scaledCache.size >= MAX_ENTRIES) scaledCache.clear()
+    scaledCache.set(cacheKey, hit)
+  }
+  if (hit === null) return null
 
-  const raster = build()
-  if (cache.size >= MAX_ENTRIES) cache.clear()
-  cache.set(cacheKey, raster)
-  return raster
+  return {
+    raster: hit.raster,
+    left: anchorX + hit.dx,
+    top: anchorBottomY + hit.dy,
+    w: hit.w,
+    h: hit.h,
+  }
 }

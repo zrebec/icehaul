@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildFarRaster, chooseLodTier } from '../vehicleLod.ts'
-import { getTrafficRaster, projectTrafficVehicle } from '../road3d.ts'
+import { applyFarLamps, chooseLodTier } from '../vehicleLod.ts'
+import { projectTrafficVehicle } from '../road3d.ts'
 import { resetVehicleRasterCache } from '../vehicleRaster.ts'
 import { LOD_FAR_MAX_HEIGHT, LOD_HYSTERESIS_PX, VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
 import type { TrafficDir, TrafficVehicle, VehicleType } from '../../game/traffic.ts'
@@ -42,31 +42,40 @@ describe('chooseLodTier', () => {
   })
 })
 
-describe('buildFarRaster', () => {
-  const SIZES: Array<[number, number]> = [
-    [3, 3], [4, 3], [5, 4], [6, 4], [8, 6], [9, 6], [11, 7], [13, 9],
+describe('applyFarLamps', () => {
+  const SHAPES: Array<[string, readonly string[]]> = [
+    ['tiny', ['.XX.', 'XXXX', 'XXXX']],
+    ['tapered', ['.XXX.', 'XXXXX', 'XXXXX', 'XX.XX']],
+    ['wide', ['..XXXXXX..', '.XXXXXXXX.', 'XXXXXXXXXX', 'XXXXXXXXXX', 'XX..XX..XX']],
   ]
 
-  it('is exactly the size asked for', () => {
-    for (const [w, h] of SIZES) {
-      const r = buildFarRaster('same', w, h)
-      expect(r, `${w}x${h}`).toHaveLength(h)
-      for (const row of r) expect(row, `${w}x${h}`).toHaveLength(w)
+  it('changes colour and never shape', () => {
+    // The property the tier handover rests on. If the far tier could move a
+    // pixel, crossing the boundary would be a redraw rather than a recolour, and
+    // that used to be the single largest change in an approach.
+    for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
+      for (const [name, rows] of SHAPES) {
+        const out = applyFarLamps(rows, dir)
+        const shape = (r: readonly string[]) => r.map(row => row.replace(/[^.]/g, 'X'))
+        expect(shape(out), `${dir} ${name}`).toEqual(shape(rows))
+      }
     }
   })
 
-  it('always shows both lamps, at every size the far tier can ask for', () => {
-    // The regression that motivated composing this instead of resampling a
-    // sprite: a mini at 220 m projects to 5 x 4, the source was 7 x 5, and the
-    // dominant-colour vote deleted the lamps in the one place they matter.
+  it('puts a lamp at each end of one body row', () => {
+    // The regression that motivated writing the lamps back on: a mini at 220 m
+    // projects to about 4 x 3, and the dominant-colour vote deletes a one-pixel
+    // lamp exactly where it is the only thing that matters. The ends are chosen
+    // because an edge pixel survives where an interior one is swallowed.
     for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
       const lamp = dir === 'same' ? 'R' : 'Y'
-      for (const [w, h] of SIZES) {
-        const rows = buildFarRaster(dir, w, h)
-        const row = rows.find(r => r.includes(lamp))
-        expect(row, `${dir} ${w}x${h} has no ${lamp}`).toBeDefined()
-        expect(row![0], `${dir} ${w}x${h} left lamp`).toBe(lamp)
-        expect(row![row!.length - 1], `${dir} ${w}x${h} right lamp`).toBe(lamp)
+      for (const [name, rows] of SHAPES) {
+        const out = applyFarLamps(rows, dir)
+        const row = out.find(r => r.includes(lamp))
+        expect(row, `${dir} ${name} has no ${lamp}`).toBeDefined()
+        const body = row!.split('').map((c, i) => (c === '.' ? -1 : i)).filter(i => i >= 0)
+        expect(row![body[0]!], `${dir} ${name} left lamp`).toBe(lamp)
+        expect(row![body[body.length - 1]!], `${dir} ${name} right lamp`).toBe(lamp)
       }
     }
   })
@@ -74,23 +83,34 @@ describe('buildFarRaster', () => {
   it('carries direction in the lamp colour and nothing else', () => {
     // Body colour cannot do this job: a same-direction bus is red bodywork, so
     // "red means going away" only holds if it is the lamps that are red.
-    expect(buildFarRaster('same', 8, 6).join('')).toContain('R')
-    expect(buildFarRaster('same', 8, 6).join('')).not.toContain('Y')
-    expect(buildFarRaster('oncoming', 8, 6).join('')).toContain('Y')
-    expect(buildFarRaster('oncoming', 8, 6).join('')).not.toContain('R')
+    const plain = ['XXXXXXXX', 'XXXXXXXX', 'XXXXXXXX', 'XXXXXXXX']
+    expect(applyFarLamps(plain, 'same').join('')).toContain('R')
+    expect(applyFarLamps(plain, 'same').join('')).not.toContain('Y')
+    expect(applyFarLamps(plain, 'oncoming').join('')).toContain('Y')
+    expect(applyFarLamps(plain, 'oncoming').join('')).not.toContain('R')
   })
 
   it('is mostly body, so the blob still reads as a vehicle', () => {
-    for (const [w, h] of SIZES) {
-      const rows = buildFarRaster('same', w, h)
-      const body = rows.join('').split('X').length - 1
-      expect(body / (w * h), `${w}x${h}`).toBeGreaterThan(0.4)
+    for (const [name, rows] of SHAPES) {
+      const out = applyFarLamps(rows, 'same')
+      const solid = out.join('').replace(/\./g, '')
+      const body = solid.split('X').length - 1
+      expect(body / solid.length, name).toBeGreaterThan(0.4)
     }
   })
 
-  it('refuses a degenerate size rather than inventing one', () => {
-    expect(buildFarRaster('same', 0, 5)).toEqual([])
-    expect(buildFarRaster('same', 5, 0)).toEqual([])
+  it('finds body to write on when the chosen row is a wheel gap', () => {
+    // A car's wheel gap survives the resample, so the row one above the base can
+    // be entirely transparent. Writing the lamps there would lose them.
+    const rows = ['XXXXXX', 'XXXXXX', '......', 'XX..XX']
+    const out = applyFarLamps(rows, 'same')
+    expect(out.join('')).toContain('R')
+    expect(out[2], 'the empty row must stay empty').toBe('......')
+  })
+
+  it('leaves a fully transparent raster alone rather than inventing a lamp', () => {
+    expect(applyFarLamps(['....', '....'], 'same')).toEqual(['....', '....'])
+    expect(applyFarLamps([], 'same')).toEqual([])
   })
 })
 
@@ -105,11 +125,18 @@ describe('the far tier keeps direction readable', () => {
           const p = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, veh(dist, dir, type), noCurve)!
           if (p.lod !== 'far') continue
           covered++
-          const raster = getTrafficRaster(dir, type, p.w, p.h, p.lod)
-          const row = raster.find(r => r.includes(lamp))
-          expect(row, `${dir}/${type} at ${dist}m (${p.w}x${p.h}) has no ${lamp}`).toBeDefined()
-          expect(row![0], `${dir}/${type} at ${dist}m left lamp`).toBe(lamp)
-          expect(row![row!.length - 1], `${dir}/${type} at ${dist}m right lamp`).toBe(lamp)
+          // A row whose *outermost body pixels* are both lamp colour. Searching
+          // for the colour alone would not do: the source art has rear lamps and
+          // indicators in the middle of the bodywork, and those are exactly the
+          // pixels the resample cannot be trusted to keep. The pair at the ends
+          // is the overlay, and it is what carries direction at this size.
+          const flanked = p.raster.some(row => {
+            const body = row.split('').map((c, i) => (c === '.' ? -1 : i)).filter(i => i >= 0)
+            return body.length > 0
+              && row[body[0]!] === lamp
+              && row[body[body.length - 1]!] === lamp
+          })
+          expect(flanked, `${dir}/${type} at ${dist}m (${p.w}x${p.h}) has no flanking ${lamp} pair`).toBe(true)
         }
       }
     }

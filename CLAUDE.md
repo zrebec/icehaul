@@ -205,7 +205,12 @@ Each phase is self-contained, ends with a runnable build, and leaves the previou
 > size curve is hyperbolic in world depth so distance is readable across the whole approach.
 > Sprite resampling now weights each source pixel by the area a target cell covers, so a vehicle is
 > drawn the size it really is and one pixel of growth costs only what the target grid forces.
-> 338 tests. Decisions and what is still open live in **`AGENTS.md`**.
+> Traffic sprites are then sampled at a **fractional** scale rather than rounded to whole pixels
+> first, so an approaching vehicle grows a pixel at a time instead of a column at a time — the
+> longest a vehicle stands still fell from 3.07 s to under 2 s, and the typical gap between changes
+> from ten frames to two. The far LOD tier stopped drawing its own symbol and now only writes the
+> lamps onto the resampled sprite, so crossing between tiers changes colour and never shape.
+> 345 tests. Decisions and what is still open live in **`AGENTS.md`**.
 >
 > **Older (post-phase-1, through B47 2026-06-03):** manual 5-speed gearbox, RPM gauge, **A/D** shifting, stall + redline burn-out, synchro downshift limits, tachometer HUD, RPM-driven engine pitch, **hold-ENTER crank start** (1.8 s, both initial and restart), harder torque curve (quadratic bog zone, `BOG_FLOOR=0.12`), surface drag double-penalty fix (mud/sand gears now work correctly), traffic perspective fix (1/z projection matches canisters). Delivery budget 8 min; 20-seed completability sim all pass.
 

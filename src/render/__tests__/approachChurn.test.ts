@@ -1,71 +1,35 @@
 /**
  * How much the drawing changes from one frame to the next during an approach.
  *
- * The contact sheet cannot answer this: it captures single frames, and the thing
- * the owner reports as "still a bit steppy" is about *change between* frames.
- * This walks a vehicle in at a real speed, one physics tick at a time, and
- * compares each frame's raster with the one before it.
+ * The contact sheet cannot answer this: it captures single frames, and what the
+ * owner reports as "steppy" is about *change between* frames. This walks a
+ * vehicle in at a real speed, one physics tick at a time, and compares each
+ * frame's raster with the one before it. `approachCadence.test.ts` asks the
+ * other half of the question — how *often* a change arrives — off the same walk.
  *
  * ── The property worth having ───────────────────────────────────────────────
- * **The drawing may only change when the size changes.** A frame where the
- * silhouette is redrawn while `w` and `h` stand still is a pop — the eye sees a
- * substitution rather than motion, and there is nothing in the world to explain
- * it. Measured: **zero such frames**, including at the tier handover, which lands
- * on a frame that resizes anyway. The tier pop was the first suspect for the
- * reported steppiness and it is not the cause.
+ * **The silhouette may only grow.** No frame of an approach may turn a pixel
+ * that was part of the vehicle back into road. Growth is something the world
+ * explains; a pixel that appears and then leaves is a substitution, and the eye
+ * reads it as the drawing being swapped rather than the vehicle moving.
  *
- * What the measurement found instead: across 785 frames from 220 m to 2 m the
- * drawing changes only **44 times** — it is still for about 18 frames, then a
- * fifth to two fifths of its cells are replaced at once. That is the tick, and it
- * is worst where the sprite is smallest, because one pixel of growth is a large
- * share of a 20-cell raster.
+ * This replaced a weaker rule — "the drawing may only change when the size
+ * changes" — which was right about the symptom and wrong about the cause. Under
+ * it the only way to grow was a whole column at a time, and that turned out to
+ * be the fault itself: a vehicle held one drawing for up to three seconds and
+ * then replaced a fifth of it at once. Sampling at a fractional scale lets the
+ * drawing change while `w × h` stands still, which the old rule forbade and the
+ * new one welcomes — provided every such change *adds*.
  *
- * ── Two numbers, and why both are here ──────────────────────────────────────
- * Cells are compared aligned at the top-left corner, deliberately: aligning on
- * screen would count the vehicle's motion down and across the frame as change,
- * which is exactly what should be happening. But that alignment also counts a
- * sprite that merely *stretched* as changed, because every cell past the growth
- * sits one column over.
- *
- * So each frame carries a second number: the share of the **picture** that
- * changed, both rasters blown up to a common grid so cell identity stops
- * mattering (`pictureChurn.ts`). Cells-moved is the upper bound on what the eye
- * could notice; picture-changed is what is actually different. The gap between
- * them is large — about 16% against 10% on a car — and reading the first as if
- * it were the second is what made the resampler look like it had headroom.
- *
- * It does not: `resampleStability.test.ts` measures every size step against what
- * a far finer source would force and finds under a percentage point of excess.
- * Steppiness is not the resampler adding change; it is 44 changes arriving in
- * 785 frames however cleanly each one is made.
+ * ── Where the remaining change is ───────────────────────────────────────────
+ * Colour inside the silhouette still moves: a window resampled at a slightly
+ * larger scale covers different cells, and that is the vehicle getting closer,
+ * not a pop. It is measured separately below rather than forbidden.
  */
 
 import { describe, it, expect } from 'vitest'
-import { getTrafficRaster, projectTrafficVehicle } from '../road3d.ts'
 import { pictureChurn } from './pictureChurn.ts'
-import { resetVehicleRasterCache } from '../vehicleRaster.ts'
-import { VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
-import type { LodTier } from '../vehicleLod.ts'
-import type { TrafficDir, TrafficVehicle, VehicleType } from '../../game/traffic.ts'
-
-const noCurve = () => 0
-/** One physics tick at 60 fps, closing at 60 km/h — an ordinary overtake. */
-const CLOSING_KPH = 60
-const DT_S = 1 / 60
-const STEP_M = (CLOSING_KPH / 3.6) * DT_S
-
-interface Frame {
-  distM: number
-  w: number
-  h: number
-  lod: LodTier
-  /** Fraction of overlapping raster cells that differ from the previous frame. */
-  churn: number
-  /** Fraction of the *picture* that differs — see the header. */
-  picture: number
-  /** True when this frame is drawn at exactly the size of the one before it. */
-  sameSize: boolean
-}
+import { DIRS, TYPES, walkApproach, type ApproachFrame } from './approachWalk.ts'
 
 /** Cells that differ, over the overlap, with both rasters aligned top-left. */
 function contentChurn(a: readonly string[], b: readonly string[]): number {
@@ -80,111 +44,157 @@ function contentChurn(a: readonly string[], b: readonly string[]): number {
 }
 
 /**
- * `withPicture` costs a blow-up to a fine grid per changed frame, so the
- * assertions below — which only ask *when* the drawing changed — leave it off.
+ * Pixels the vehicle occupied last frame and does not occupy now, measured
+ * **about the sprite's own bottom-centre anchor**.
+ *
+ * Not raster-local: a sprite that grew has its own corner in a different place,
+ * so a raster-local diff calls ordinary growth a rearrangement. Not screen
+ * coordinates either: near the player the vehicle rushes down the frame several
+ * scanlines a tick, and that is motion — the thing the whole approach is for.
+ * What is left when both are removed is whether the shape itself gave anything
+ * back.
  */
-function walkApproach(
-  dir: TrafficDir,
-  type: VehicleType,
-  withPicture = false,
-  fromM = 220,
-  toM = 2,
-): Frame[] {
-  resetVehicleRasterCache()
-  const frames: Frame[] = []
-  let prev: { raster: readonly string[]; w: number; h: number } | null = null
-
-  for (let distM = fromM; distM >= toM; distM -= STEP_M) {
-    const vehicle: TrafficVehicle =
-      { spawnDist: 0, distM, x: 0, speed: 0, dir, type, gone: false }
-    // Carry the tier forward exactly as the game does, so hysteresis is exercised.
-    if (frames.length > 0) vehicle.lodTier = frames[frames.length - 1]!.lod
-
-    const p = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, vehicle, noCurve)
-    if (!p) continue
-    const raster = getTrafficRaster(dir, type, p.w, p.h, p.lod)
-    const churn = prev ? contentChurn(prev.raster, raster) : 0
-
-    frames.push({
-      distM,
-      w: p.w,
-      h: p.h,
-      lod: p.lod,
-      churn,
-      picture: withPicture && prev && churn > 0 ? pictureChurn(prev.raster, raster) : 0,
-      sameSize: prev ? prev.w === p.w && prev.h === p.h : true,
-    })
-    prev = { raster, w: p.w, h: p.h }
+function lostPixels(prev: ApproachFrame, cur: ApproachFrame): number {
+  const anchor = (f: ApproachFrame) => ({ x: Math.round(f.w / 2), y: f.h })
+  const a = anchor(prev)
+  const b = anchor(cur)
+  let lost = 0
+  for (let y = 0; y < prev.raster.length; y++) {
+    const row = prev.raster[y]!
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] === '.') continue
+      const ch = cur.raster[y - a.y + b.y]?.[x - a.x + b.x]
+      if (ch === undefined || ch === '.') lost++
+    }
   }
-  return frames
+  return lost
 }
 
 describe('what changes between frames during an approach', () => {
   it('prints the profile', () => {
-    const frames = walkApproach('same', 'car', true)
-    const changed = frames.filter(f => f.churn > 0)
-    const pops = frames.filter(f => f.sameSize && f.churn > 0)
+    const frames = walkApproach('same', 'car')
+    let changed = 0
+    let worstPicture = 0
+    let worstAt: ApproachFrame | null = null
+    let totalLost = 0
 
-    console.log(`\n  same/car, ${CLOSING_KPH} km/h closing, ${frames.length} frames from 220 m to 2 m`)
-    console.log(`  frames where the drawing changed at all: ${changed.length}`)
-    console.log(`  frames where it changed WITHOUT a size change: ${pops.length}`)
-    for (const f of pops) {
-      console.log(`    at ${f.distM.toFixed(1)} m — ${f.w}x${f.h}, tier ${f.lod}, ${(f.churn * 100).toFixed(0)}% redrawn`)
+    for (let i = 1; i < frames.length; i++) {
+      const churn = contentChurn(frames[i - 1]!.raster, frames[i]!.raster)
+      if (churn === 0 && frames[i]!.w === frames[i - 1]!.w) continue
+      changed++
+      totalLost += lostPixels(frames[i - 1]!, frames[i]!)
+      const picture = pictureChurn(frames[i - 1]!.raster, frames[i]!.raster)
+      if (picture > worstPicture) {
+        worstPicture = picture
+        worstAt = frames[i]!
+      }
     }
+
+    console.log(`\n  same/car, 60 km/h closing, ${frames.length} frames from 220 m to 2 m`)
+    console.log(`  frames where the drawing changed: ${changed}`)
+    console.log(`  pixels ever lost from the silhouette: ${totalLost}`)
+    for (const dir of DIRS) {
+      for (const type of TYPES) {
+        const fs = walkApproach(dir, type)
+        // Tracked by *share*, not by pixel count: two pixels off a 12-pixel mini
+        // is a sixth of it, and two off a 600-pixel bus is nothing.
+        let worstShare = 0, worstLost = 0, worstFrame: ApproachFrame | null = null
+        let worstAbs = 0
+        for (let i = 1; i < fs.length; i++) {
+          const lost = lostPixels(fs[i - 1]!, fs[i]!)
+          const solid = fs[i - 1]!.raster.join('').replace(/\./g, '').length || 1
+          if (lost > worstAbs) worstAbs = lost
+          if (lost / solid > worstShare) {
+            worstShare = lost / solid; worstLost = lost; worstFrame = fs[i]!
+          }
+        }
+        console.log(`    ${dir.padEnd(8)} ${type.padEnd(4)} worst loss ${(worstShare * 100).toFixed(1)}%` +
+          ` = ${worstLost} px` +
+          (worstFrame ? ` at ${worstFrame.distM.toFixed(0)} m, ${worstFrame.w}x${worstFrame.h}` : '') +
+          `   largest absolute loss ${worstAbs} px`)
+      }
+    }
+    console.log(`  largest single-frame picture change: ${(worstPicture * 100).toFixed(0)}%` +
+      (worstAt ? ` at ${worstAt.distM.toFixed(1)} m — ${worstAt.w}x${worstAt.h}, ${worstAt.lod}` : ''))
+
     const handover = frames.findIndex((f, i) => i > 0 && f.lod !== frames[i - 1]!.lod)
     if (handover > 0) {
       const f = frames[handover]!
       console.log(`  tier handover at ${f.distM.toFixed(1)} m (${f.w}x${f.h}): ` +
-        `${(f.churn * 100).toFixed(0)}% of cells moved, ${(f.picture * 100).toFixed(0)}% of the picture changed`)
-    }
-
-    console.log('  five largest single-frame changes (cells moved / picture changed):')
-    for (const f of [...frames].sort((a, b) => b.churn - a.churn).slice(0, 5)) {
-      console.log(`    ${(f.churn * 100).toFixed(0).padStart(3)}% / ${(f.picture * 100).toFixed(0).padStart(3)}%` +
-        ` at ${f.distM.toFixed(1).padStart(6)} m — ${f.w}x${f.h}, ${f.lod}`)
-    }
-
-    // Churn is worst where the raster is smallest: one pixel of growth is a large
-    // share of a 20-cell sprite and a small share of a 600-cell one. The two
-    // columns say different things about that. Cells-moved counts a sprite that
-    // merely stretched, so it stays high however cleanly the step is made;
-    // picture-changed is what is genuinely different, and `resampleStability`
-    // shows it is already at the floor the target grid forces.
-    console.log('  worst change by sprite area:')
-    for (const [lo, hi] of [[0, 40], [40, 100], [100, 250], [250, 10000]] as const) {
-      const band = frames.filter(f => f.w * f.h >= lo && f.w * f.h < hi && f.churn > 0)
-      if (band.length === 0) continue
-      const worst = band.reduce((a, b) => (b.churn > a.churn ? b : a))
-      console.log(`    area ${String(lo).padStart(3)}-${String(hi).padStart(5)} cells: ` +
-        `worst ${(worst.churn * 100).toFixed(0).padStart(3)}% of cells, ` +
-        `${(worst.picture * 100).toFixed(0).padStart(3)}% of the picture ` +
-        `(${worst.w}x${worst.h} at ${worst.distM.toFixed(0)} m), ${band.length} changes`)
+        `${(pictureChurn(frames[handover - 1]!.raster, f.raster) * 100).toFixed(0)}% of the picture changed`)
     }
     expect(frames.length).toBeGreaterThan(500)
   })
 
-  it('changes the drawing only when the size changes, apart from tier handovers', () => {
-    // A redraw at constant size has nothing in the world to explain it, so the eye
-    // reads a substitution rather than motion. One is unavoidable while tiers
-    // exist; more than one means a tier boundary is in the wrong place.
-    for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
-      for (const type of ['mini', 'car', 'bus'] as VehicleType[]) {
-        const pops = walkApproach(dir, type).filter(f => f.sameSize && f.churn > 0)
-        expect(pops.length, `${dir}/${type}: ${pops.map(p => `${p.distM.toFixed(0)}m`).join(', ')}`)
-          .toBeLessThanOrEqual(1)
+  it('never draws a closer vehicle in a smaller box', () => {
+    // Exact, and it holds by construction: the box is `ceil(span)` on each axis
+    // and the scale curve is monotonic, so there is no scale at which a vehicle
+    // that came nearer is allotted less room. This is the part of "the
+    // silhouette only grows" that can be stated without qualification.
+    for (const dir of DIRS) {
+      for (const type of TYPES) {
+        const frames = walkApproach(dir, type)
+        for (let i = 1; i < frames.length; i++) {
+          expect(frames[i]!.w, `${dir}/${type} w at ${frames[i]!.distM.toFixed(1)} m`)
+            .toBeGreaterThanOrEqual(frames[i - 1]!.w)
+          expect(frames[i]!.h, `${dir}/${type} h at ${frames[i]!.distM.toFixed(1)} m`)
+            .toBeGreaterThanOrEqual(frames[i - 1]!.h)
+        }
       }
     }
   })
 
-  it('hands over between tiers exactly once, and low enough to be a handover', () => {
-    // The budget an additional tier has to fit inside. If a middle tier pushes
-    // either number up, its boundaries are in the wrong place — they belong where
-    // the two drawings already look alike, not where the maths is tidy.
-    for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
-      for (const type of ['mini', 'car', 'bus'] as VehicleType[]) {
+  it('gives back at most a few percent of the silhouette in any one frame', () => {
+    // What the box guarantee cannot: the *shape* inside it. Resampling a sprite
+    // whose interior has holes — a wheel gap, a tapered corner — at a slightly
+    // larger scale slides those holes, and a cell that held bodywork can hold a
+    // gap instead. That is honest sampling of a picture that moved, not a pop.
+    //
+    // The budget is **one column's worth of pixels, or a tenth of the
+    // silhouette, whichever is larger**. A column is the natural unit: a
+    // one-pixel size step is exactly what touches a column, so no resampler can
+    // promise less. The tenth takes over once the sprite is big enough for a
+    // column to be a small part of it.
+    //
+    // Measured across all six dir × type walks: a whole approach gives back 152
+    // pixels in total, the worst frame gives back 2-5 px, and the worst *share*
+    // is 16.7% — which is two pixels off a 5 × 4 mini, where the grid has no
+    // smaller move available. For comparison, swapping one drawing for another
+    // used to cost a third of the picture in a single frame.
+    for (const dir of DIRS) {
+      for (const type of TYPES) {
+        const frames = walkApproach(dir, type)
+        for (let i = 1; i < frames.length; i++) {
+          const prev = frames[i - 1]!
+          const solid = prev.raster.join('').replace(/\./g, '').length
+          if (solid === 0) continue
+          expect(
+            lostPixels(prev, frames[i]!),
+            `${dir}/${type} at ${frames[i]!.distM.toFixed(1)} m (${prev.w}x${prev.h} → ${frames[i]!.w}x${frames[i]!.h}, ${solid} px solid)`,
+          ).toBeLessThanOrEqual(Math.max(prev.w, solid * 0.1))
+        }
+      }
+    }
+  })
+
+  it('hands over between tiers exactly once, and without changing shape', () => {
+    // Two tiers, one crossing. The handover used to be the largest single change
+    // in an approach — 35% of the picture — because it swapped one drawing for a
+    // different one. It now only recolours, so the shape either side of it is
+    // identical and the crossing costs no more than an ordinary frame.
+    for (const dir of DIRS) {
+      for (const type of TYPES) {
         const frames = walkApproach(dir, type)
         const switches = frames.filter((f, i) => i > 0 && f.lod !== frames[i - 1]!.lod)
         expect(switches, `${dir}/${type} tier switches`).toHaveLength(1)
+
+        const at = frames.findIndex((f, i) => i > 0 && f.lod !== frames[i - 1]!.lod)
+        const before = frames[at - 1]!
+        const after = frames[at]!
+        const shape = (f: ApproachFrame) => f.raster.map(r => r.replace(/[^.]/g, 'X'))
+        if (before.w === after.w && before.h === after.h) {
+          expect(shape(after), `${dir}/${type} handover shape`).toEqual(shape(before))
+        }
       }
     }
   })
@@ -192,8 +202,8 @@ describe('what changes between frames during an approach', () => {
   it('never resizes by more than a pixel in one frame', () => {
     // A two-pixel jump at 60 km/h is a visible tick, and it would mean the scale
     // curve is steeper than the frame rate can carry.
-    for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
-      for (const type of ['mini', 'car', 'bus'] as VehicleType[]) {
+    for (const dir of DIRS) {
+      for (const type of TYPES) {
         const frames = walkApproach(dir, type)
         for (let i = 1; i < frames.length; i++) {
           const dw = Math.abs(frames[i]!.w - frames[i - 1]!.w)

@@ -8,11 +8,30 @@
  * bodywork, so the one fact the player needs — *is it coming at me or am I
  * catching it* — is carried by two or three pixels that come and go.
  *
- * Shrinking a detailed sprite can never fix that. The far tier therefore draws
- * **less**: one silhouette, and lights big enough to survive, positioned so the
- * blob reads as a direction rather than as a vehicle. Type is deliberately not
- * distinguished — mini, car and bus already differ in projected size, and at six
- * pixels of height nothing else about them can be told apart honestly.
+ * Shrinking a detailed sprite can never fix that. The far tier therefore
+ * **guarantees** the lights instead of hoping they survive: it takes the
+ * resampled sprite and writes lamp colour into the outermost body pixels of one
+ * row, where an edge pixel survives and an interior one is swallowed.
+ *
+ * ── Why it stopped composing its own symbol ─────────────────────────────────
+ * It used to build a blob at the target size — a solid rectangle with a tapered
+ * roof, lamps at the corners and a dark base — which was right about what to
+ * draw and wrong about what it cost. Two measurements closed it out:
+ *
+ * - **The handover was the largest single change in an approach.** Swapping one
+ *   drawing for a different one replaced 35% of the picture in a frame, against
+ *   5-10% for every size step around it.
+ * - **The far tier owned the steppiness.** It covers 220 m down to 28-67 m
+ *   depending on type, and a rectangle can only grow a whole column at a time,
+ *   so the vehicle held one drawing for up to 3.07 s.
+ *
+ * Recolouring the real silhouette fixes both at once. The far tier now differs
+ * from the detail tier by *colour in one row*, so the handover has no shape to
+ * change, and it inherits the fractional growth of the raster underneath it.
+ *
+ * Type is still not really distinguished — the silhouettes exist but at six
+ * pixels of height they carry no more than size already did. That was always the
+ * honest claim; it is now a consequence rather than a rule.
  *
  * ── Tier selection ──────────────────────────────────────────────────────────
  * Chosen by *projected height*, not `worldZ`, so it survives a change to the
@@ -27,51 +46,62 @@ import type { TrafficVehicle } from '../game/traffic.ts'
 export type LodTier = 'far' | 'detail'
 
 /**
- * The far symbol, composed **directly at the target size** rather than resampled
- * down to it.
+ * Writes the lamps back onto a resampled sprite, and changes nothing else.
  *
- * The first attempt drew it from a 7 x 5 source sprite and lost: a mini at 220 m
- * projects to 5 x 4, so the symbol was *downscaled*, and the dominant-colour vote
- * that resolves each target pixel deletes a one-pixel lamp exactly when it is the
- * only thing that matters. Building the shape for the size it will occupy removes
- * the resample, and with it the failure.
+ * The silhouette is left exactly as the resampler produced it — only colour is
+ * replaced, never a transparent cell. That is what makes the handover cheap and
+ * keeps the sprite's growth monotonic: the far and detail drawings of the same
+ * frame have identical shape, so crossing the boundary cannot move a pixel.
  *
- * The lamps go in the outer columns because an edge pixel survives where an
- * interior one is swallowed, and they widen once there is room. Everything else
- * is a plain mass: at this size any further detail is a lie.
+ * The lamps go in the outermost *body* columns because an edge pixel survives
+ * where an interior one is swallowed, and they widen to two once there is room.
+ * Direction is carried by lamp colour and never by body colour — a
+ * same-direction bus is red bodywork, so "red means going away" only holds if it
+ * is the lamps that are red.
  */
-export function buildFarRaster(dir: TrafficVehicle['dir'], w: number, h: number): readonly string[] {
-  if (w <= 0 || h <= 0) return []
+export function applyFarLamps(
+  raster: readonly string[],
+  dir: TrafficVehicle['dir'],
+): readonly string[] {
+  const h = raster.length
+  const w = raster[0]?.length ?? 0
+  if (w === 0 || h === 0) return raster
+
+  // One row above the base, so the lamps sit on the body rather than in the
+  // wheels — or the last row when the sprite is too short to have a choice.
+  let lampRow = h >= 3 ? h - 2 : h - 1
+  let bounds = opaqueBounds(raster[lampRow]!)
+  // The chosen row can be entirely transparent at small sizes (a car's wheel gap
+  // survives the resample). Walk up to the first row that has body to write on.
+  while (bounds === null && lampRow > 0) {
+    lampRow--
+    bounds = opaqueBounds(raster[lampRow]!)
+  }
+  if (bounds === null) return raster
 
   const lamp = dir === 'oncoming' ? 'Y' : 'R'
   const lampW = w >= 9 ? 2 : 1
-  const rows: string[] = []
-
-  for (let y = 0; y < h; y++) rows.push('X'.repeat(w))
-
-  // Taper the top corners once the symbol is tall enough to show a roofline.
-  if (h >= 4 && w >= 5) {
-    rows[0] = '.' + 'X'.repeat(w - 2) + '.'
+  const row = raster[lampRow]!.split('')
+  for (let i = 0; i < lampW; i++) {
+    if (bounds.left + i <= bounds.right) row[bounds.left + i] = lamp
+    if (bounds.right - i >= bounds.left) row[bounds.right - i] = lamp
   }
 
-  // Lamps sit one row above the base, or on the last row when there is no room.
-  const lampRow = h >= 3 ? h - 2 : h - 1
-  const row = rows[lampRow]!.split('')
-  for (let i = 0; i < lampW && i < w; i++) {
-    row[i] = lamp
-    row[w - 1 - i] = lamp
-  }
-  rows[lampRow] = row.join('')
+  const out = raster.slice()
+  out[lampRow] = row.join('')
+  return out
+}
 
-  // A dark base reads as contact with the road and separates the mass from a
-  // pale surface — a white oncoming vehicle otherwise dissolves into snow.
-  if (h >= 5) {
-    const base = rows[h - 1]!.split('')
-    for (let x = 0; x < w; x++) base[x] = x < lampW || x >= w - lampW ? 'B' : '.'
-    rows[h - 1] = base.join('')
+/** First and last opaque column of a row, or `null` when it is all transparent. */
+function opaqueBounds(row: string): { left: number; right: number } | null {
+  let left = -1
+  let right = -1
+  for (let x = 0; x < row.length; x++) {
+    if (row[x] === '.') continue
+    if (left < 0) left = x
+    right = x
   }
-
-  return rows
+  return left < 0 ? null : { left, right }
 }
 
 /**
