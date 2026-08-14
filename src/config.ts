@@ -657,6 +657,47 @@ export const CURVE_AHEAD_LOOK_M = 180
  * stretch where a shrunken detailed sprite stops meaning anything: at 8 x 6 the
  * lights that carry direction lose their vote to bodywork and blink in and out.
  */
+/**
+ * Traffic sprite scale as a function of world depth: `A / (z + B)`, with `A` and
+ * `B` solved from the two anchors below. Hyperbolic, because that is what
+ * perspective is — apparent size falls as 1/distance — with `B` as the offset
+ * that keeps the near end finite instead of infinite.
+ *
+ * ── Why this replaced the old curve ─────────────────────────────────────────
+ * It used to be `0.28 + sqrt(tScale) * 1.15`, whose floor of 0.28 and square root
+ * flattened the far field almost to nothing. Measured widths for a car:
+ *
+ *     distance   220  100   50   25   10    5    2
+ *     old          8    9   11   13   17   21   29
+ *     new          4    8   13   18   25   28   30
+ *
+ * Over the 170 m from 220 to 50 the old curve grew a car by 3 px — 1.4x across
+ * three quarters of the approach — and then trebled it in the last 48 m. That is
+ * the reported "I see it the same for ages and then it is suddenly on me": the
+ * growth cue arrives far too late to read as closing speed. The new curve spreads
+ * that same stretch over 3.2x.
+ *
+ * The near anchor is deliberately unchanged. A vehicle beside the player is the
+ * one place the old sizing was right, and the owner asked to keep it.
+ */
+export const TRAFFIC_SCALE_NEAR = 1.43
+/** Depth, in metres, at which {@link TRAFFIC_SCALE_NEAR} applies. */
+export const TRAFFIC_SCALE_NEAR_Z_M = 1.2
+/**
+ * Scale at {@link TRAFFIC_SCALE_FAR_Z_M}. 0.20 puts a car at 4 px wide — small
+ * enough to read as far away, large enough that the far tier's two lamps still
+ * land in separate columns. Lower it and distant traffic becomes a single dot.
+ */
+export const TRAFFIC_SCALE_FAR = 0.20
+/** Depth the far anchor is measured at — the end of `TRAFFIC_VIEW_DISTANCE_M`. */
+export const TRAFFIC_SCALE_FAR_Z_M = 220
+
+/** Solved from the anchors: `scale(z) = A / (z + B)` passes through both. */
+export const TRAFFIC_SCALE_B =
+  (TRAFFIC_SCALE_FAR * TRAFFIC_SCALE_FAR_Z_M - TRAFFIC_SCALE_NEAR * TRAFFIC_SCALE_NEAR_Z_M) /
+  (TRAFFIC_SCALE_NEAR - TRAFFIC_SCALE_FAR)
+export const TRAFFIC_SCALE_A = TRAFFIC_SCALE_NEAR * (TRAFFIC_SCALE_NEAR_Z_M + TRAFFIC_SCALE_B)
+
 export const LOD_FAR_MAX_HEIGHT = 9
 
 /**

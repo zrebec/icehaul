@@ -3,6 +3,7 @@ import {
   type Surface,
   GAME_WIDTH, HORIZON_PCT,
   LATERAL_SHIFT, PERSPECTIVE_K,
+  TRAFFIC_SCALE_A, TRAFFIC_SCALE_B,
   TRAFFIC_VIEW_DISTANCE_M,
   ROAD_HALF_TOP, ROAD_HALF_BOTTOM,
   KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
@@ -350,7 +351,9 @@ export function projectTrafficVehicle(
     const centerX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
     const x = Math.round(centerX + vehicle.x * half)
     const y = Math.round(viewportBottom - 1 + pass * 14)
-    const scale = 1.45 + pass * 0.15
+    // Continue the depth curve from where it ends at worldZ = 0, so a vehicle
+    // does not change size on the frame it draws level with the player.
+    const scale = TRAFFIC_SCALE_A / TRAFFIC_SCALE_B + pass * 0.15
     const dims = trafficSpriteSize(vehicle.type)
     const w = Math.max(3, Math.round(dims.w * scale))
     const h = Math.max(3, Math.round(dims.h * scale))
@@ -381,8 +384,11 @@ export function projectTrafficVehicle(
   const x = Math.round(baseVanX + curveOffset + vehicle.x * half)
   // Scale from true world depth (1/z), not clamped scanline — stays monotonic
   // even for vehicles beyond PERSPECTIVE_K where multiple worldZ values share scanline 0.
-  const tScale = Math.min(1, (PERSPECTIVE_K / worldZ) / roadHeight)
-  const scale = 0.28 + Math.pow(tScale, 0.5) * 1.15
+  // Hyperbolic in true world depth — see TRAFFIC_SCALE_* in config.ts. The screen
+  // projection cannot carry this: PERSPECTIVE_K = 150 puts 220 m, 75 m and 50 m on
+  // scanlines 1, 2 and 3, so the whole far field lives in two pixels of height and
+  // no function of the scanline can spread it.
+  const scale = TRAFFIC_SCALE_A / (worldZ + TRAFFIC_SCALE_B)
   const dims = trafficSpriteSize(vehicle.type)
   const w = Math.max(3, Math.round(dims.w * scale))
   const h = Math.max(3, Math.round(dims.h * scale))

@@ -195,6 +195,35 @@ A full day/night cycle is a further 10–16 h and belongs with roadmap phase 9. 
 doing on either path — the strongest depth cue available, and it turns "blob in the distance" from a
 defect into an intention.
 
+### The growth curve, and why the projection could not carry it
+
+Not in the original order — it came out of a playtest report, *"I see it the same
+for ages and then it is suddenly on me"*, which measured true:
+
+| distance | 220 | 100 | 50 | 25 | 10 | 2 | 220 → 50 |
+|---|---|---|---|---|---|---|---|
+| old | 8 | 9 | 11 | 13 | 17 | 29 | **1.4×** |
+| new | 4 | 8 | 13 | 19 | 25 | 31 | **3.3×** |
+
+The old `0.28 + sqrt(tScale) * 1.15` had a floor and a square root, and between
+them they flattened the far field: three quarters of the approach was worth 3 px
+of growth, and the last 48 m trebled the sprite.
+
+**The screen projection cannot express distance here and no scale formula reading
+it can help.** `worldZ = PERSPECTIVE_K / dy` with `K = 150` puts 220 m, 75 m and
+50 m on scanlines 1, 2 and 3 — the whole far field lives in two pixels of height.
+So vehicle scale is now hyperbolic in *world depth*, `A / (z + B)`, with `A` and
+`B` solved from two anchors expressed as intent rather than as magic numbers: the
+near size is pinned to what it already was, and the far size is set where a car is
+4 px wide — small enough to read as distant, wide enough that the far tier's two
+lamps still land in separate columns.
+
+The pass-behind branch continues the same curve instead of restarting at a
+hardcoded 1.45, so a vehicle no longer changes size on the frame it draws level
+with the player.
+
+Canisters and roadside objects still use their own scaling and were left alone.
+
 ### What the far tier settled
 
 Two tiers exist today: `far` and `detail`. The far one is **composed at the target size, not
