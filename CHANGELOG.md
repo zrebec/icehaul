@@ -1,3 +1,10 @@
+# [0.5.0](https://github.com/zrebec/icehaul/compare/v0.4.1...v0.5.0) (2026-08-14)
+
+
+### Features
+
+* **render:** draw distant traffic as meaning, not as a shrunken car ([#29](https://github.com/zrebec/icehaul/issues/29)) ([9fcf8d2](https://github.com/zrebec/icehaul/commit/9fcf8d243861d6a48e973fb228dcf2153a691e6f))
+
 ## [0.4.1](https://github.com/zrebec/icehaul/compare/v0.4.0...v0.4.1) (2026-08-14)
 
 
