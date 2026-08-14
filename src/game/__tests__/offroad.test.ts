@@ -3,7 +3,7 @@ import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } fro
 import { computeRoadEdges } from '../roadgeometry.ts'
 import { TRUCK_BMP_W, TRUCK_BMP_H, TRUCK_BMP_DATA } from '../../render/truck.ts'
 import { GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
-import { getTrafficSpriteRows, projectTrafficVehicle } from '../../render/road3d.ts'
+import { getTrafficRaster, projectTrafficVehicle } from '../../render/road3d.ts'
 import type { TrafficVehicle } from '../traffic.ts'
 
 const noCurve = () => 0
@@ -214,7 +214,7 @@ describe('checkTruckTrafficCollision', () => {
     expect(checkTruckTrafficCollision(
       truck.x, truck.y,
       projected!.left, projected!.top, projected!.w, projected!.h,
-      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+      getTrafficRaster(vehicle.dir, vehicle.type, projected!.w, projected!.h),
     )).toBe(true)
   })
 
@@ -236,7 +236,7 @@ describe('checkTruckTrafficCollision', () => {
     expect(checkTruckTrafficCollision(
       truck.x, truck.y,
       projected!.left, projected!.top, projected!.w, projected!.h,
-      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+      getTrafficRaster(vehicle.dir, vehicle.type, projected!.w, projected!.h),
     )).toBe(false)
   })
 
@@ -257,7 +257,7 @@ describe('checkTruckTrafficCollision', () => {
     expect(checkTruckTrafficCollision(
       truck.x, truck.y,
       projected!.left, projected!.top, projected!.w, projected!.h,
-      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+      getTrafficRaster(vehicle.dir, vehicle.type, projected!.w, projected!.h),
     )).toBe(true)
   })
 
@@ -278,7 +278,7 @@ describe('checkTruckTrafficCollision', () => {
     expect(checkTruckTrafficCollision(
       truck.x, truck.y,
       projected!.left, projected!.top, projected!.w, projected!.h,
-      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+      getTrafficRaster(vehicle.dir, vehicle.type, projected!.w, projected!.h),
     )).toBe(false)
   })
 
@@ -299,7 +299,7 @@ describe('checkTruckTrafficCollision', () => {
     expect(checkTruckTrafficCollision(
       truck.x, truck.y,
       projected!.left, projected!.top, projected!.w, projected!.h,
-      getTrafficSpriteRows(vehicle.dir, vehicle.type),
+      getTrafficRaster(vehicle.dir, vehicle.type, projected!.w, projected!.h),
     )).toBe(true)
   })
 })

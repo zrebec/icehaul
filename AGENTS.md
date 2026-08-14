@@ -143,8 +143,11 @@ rect per *source* pixel. Scaling 22 px down to 8, several source pixels land on 
 horizon mush, and it is the fault the owner actually reported.
 
 **2 · Upscale reshuffles between frames.** Near the player `w > srcW`, and every one-pixel change in
-`w` changes *which* source columns get doubled, so the pattern boils. Less severe than 1, and a
-coverage resampler softens it, but it does not disappear.
+`w` changes *which* source columns get doubled, so the pattern boils. **Measured after the shared
+raster landed: a one-pixel size step still redraws 8.9% of the sprite, against 9.0% before.** The
+coverage resampler was expected to soften this and does not — averaged over widths 8 to 30 the two
+are indistinguishable. Quantising the scale is therefore still needed as its own step, and this
+note is corrected from the earlier claim that fault 1's fix would carry it.
 
 **3 · Render and collision do not build the same raster.** The renderer maps source → target with
 overdraw; collision maps target → source. At downscale these are **not the same algorithm**, so

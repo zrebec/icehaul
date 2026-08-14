@@ -66,24 +66,30 @@ export function checkTruckOffroad(
 
 /**
  * Pixel-perfect check: does any solid truck bitmap pixel touch a solid traffic
- * sprite pixel? Without trafficRows this falls back to the old full-rect check.
+ * pixel? Without `trafficRaster` this falls back to the full-rect check.
+ *
+ * `trafficRaster` must be the raster the vehicle was **drawn** from — already at
+ * the projected size, one raster pixel per screen pixel — not the source sprite.
+ * This used to take the source and rescale it here, in the opposite direction to
+ * the renderer, and the two never agreed: at a metre 45 pixels collided without
+ * ever being drawn and 19 drawn pixels passed straight through. Indexing the
+ * shared raster directly makes "pixel-perfect" true of what is actually on
+ * screen. See `render/vehicleRaster.ts`.
+ *
  * truckDrawX/Y — top-left of the truck bitmap in game pixels.
  * trafficLeft/Top, trafficW/H — the rendered vehicle rectangle.
- * trafficRows — sprite row strings where "." is transparent.
  */
 export function checkTruckTrafficCollision(
   truckDrawX: number, truckDrawY: number,
   trafficLeft: number, trafficTop: number,
   trafficW: number, trafficH: number,
-  trafficRows?: readonly string[],
+  trafficRaster?: readonly string[],
 ): boolean {
   if (trafficW <= 0 || trafficH <= 0) return false
 
   const trafficRight  = trafficLeft + trafficW
   const trafficBottom = trafficTop  + trafficH
-  const srcH = trafficRows?.length ?? 0
-  const srcW = srcH > 0 ? trafficRows![0]?.length ?? 0 : 0
-  const useTrafficMask = srcW > 0 && srcH > 0
+  const useTrafficMask = (trafficRaster?.length ?? 0) > 0
 
   for (let row = 0; row < TRUCK_PIXEL_MASK.height; row++) {
     const screenY = truckDrawY + row
@@ -97,14 +103,14 @@ export function checkTruckTrafficCollision(
     const rightPx = truckDrawX + maskRow[maskRow.length - 1]!
     if (rightPx < trafficLeft || leftPx >= trafficRight) continue
 
+    const rasterRow = useTrafficMask ? trafficRaster![screenY - trafficTop] : undefined
+
     for (const col of maskRow) {
       const sx = truckDrawX + col
       if (sx < trafficLeft || sx >= trafficRight) continue
       if (!useTrafficMask) return true
 
-      const trafficX = Math.floor((sx - trafficLeft) * srcW / trafficW)
-      const trafficY = Math.floor((screenY - trafficTop) * srcH / trafficH)
-      const ch = trafficRows![trafficY]?.[trafficX]
+      const ch = rasterRow?.[sx - trafficLeft]
       if (ch && ch !== '.') return true
     }
   }
