@@ -717,6 +717,26 @@ export const LOD_FAR_MAX_HEIGHT = 10
 export const LOD_HYSTERESIS_PX = 1
 
 /**
+ * Shortest projected vehicle, in pixels, that still gets a dark outline.
+ *
+ * The outline exists because a bright road — ice, snow, sand — leaves a pale
+ * vehicle with nothing marking where it ends. Below this height it starts
+ * costing more than it buys: a halo around a 3 × 2 blob is more pixels than the
+ * blob, so the vehicle would read as *larger* the further away it is, undoing
+ * the growth curve the whole approach depends on.
+ */
+export const CONTOUR_MIN_HEIGHT = 5
+
+/**
+ * Shortest projected vehicle that also gets a contact shadow.
+ *
+ * Higher than the outline's threshold on purpose: an outline needs a silhouette
+ * and a shadow needs a *ground line*, and at four or five pixels there is no
+ * room to tell "under the vehicle" from "part of the vehicle".
+ */
+export const SHADOW_MIN_HEIGHT = 7
+
+/**
  * Only surfaces at or below this grip get the bend warning. Snow 0.55, ice 0.25,
  * sand 0.35 and mud 0.45 qualify; asphalt at 1.0 does not — on a road that grips,
  * reading the bend yourself is the game.

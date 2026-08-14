@@ -31,6 +31,7 @@
  */
 
 import { resampleSpriteAtScale } from './road3d.ts'
+import { buildVehicleContour, type VehicleContour } from './vehicleContour.ts'
 
 /**
  * Rasters are keyed by sprite identity and the quantised scale it was built at.
@@ -65,11 +66,18 @@ export interface ScaledVehicle {
   top: number
   w: number
   h: number
+  /**
+   * The dark outline and contact shadow drawn *behind* this vehicle, or `null`
+   * when it is too small to carry them. Deliberately beside the raster rather
+   * than inside it — see `vehicleContour.ts` for why collision must not see it.
+   */
+  contour: VehicleContour | null
 }
 
 /** Cached geometry is relative to the anchor, which is why it caches at all. */
 interface CachedScaled {
   raster: readonly string[]
+  contour: VehicleContour | null
   dx: number
   dy: number
   w: number
@@ -133,6 +141,9 @@ export function rasteriseVehicleAtScale(
         // `refine` may only recolour — the cached `w`/`h` come from the
         // untouched silhouette, and both tiers must agree on them.
         raster: refine ? refine(built.raster) : built.raster,
+        // Derived from the silhouette, which `refine` may not change, so the
+        // far and detail flavours of one scale get identical contours.
+        contour: buildVehicleContour(built.raster),
         dx: built.left, dy: built.top, w: built.w, h: built.h,
       }
     if (scaledCache.size >= MAX_ENTRIES) scaledCache.clear()
@@ -142,6 +153,7 @@ export function rasteriseVehicleAtScale(
 
   return {
     raster: hit.raster,
+    contour: hit.contour,
     left: anchorX + hit.dx,
     top: anchorBottomY + hit.dy,
     w: hit.w,
