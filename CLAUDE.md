@@ -153,7 +153,16 @@ npm run dev                                # vite dev server on localhost:5173
 npm test                                   # vitest
 npm run build                              # production bundle (tsc + vite)
 node scripts/screenshot.mjs out.png        # headless capture of canvas bitmap (dev server must be running)
-node scripts/drive-shot.mjs out.png 5      # boots, holds ArrowUp+ArrowRight for N seconds, then captures
+node scripts/drive-shot.mjs out.png 8      # starts the engine, drives, asserts the truck actually moved
+node scripts/traffic-matrix.mjs matrix     # traffic contact sheets — the renderer comparison harness
+```
+
+**URL switches** (dev server or the deployed build):
+
+```
+?seed=1443866        a specific route; no parameter means today's daily route
+?matrix=1            the traffic contact sheet instead of the game
+?matrix=1&surface=ice&curve=2&zoom=4&types=car&dist=220,50,10,2
 ```
 
 **CI / Pages rule (2026-07-03):** the deploy workflow must use `actions/upload-pages-artifact@v5+`
@@ -177,13 +186,26 @@ deploy fails like that, check these two action versions FIRST.
 
 RPM is **proportional to road speed** (`rpm = speed / gear.to`, like a real engine) and shown raw, so a too-tall gear reads low (down to 0 bars) and the engine lugs. The model lives in `config.ts` (`GEARS`, `LUG_RPM`, `BOG_RPM`, `BOG_FLOOR`, `RPM_DISPLAY_REDLINE`, `STALL_GRACE_MS`, `REDLINE_RPM`, `REDLINE_BURN_MS`, `OVERREV_ENGINE_BRAKE`, …) and `game/vehicle.ts` (`v.stalled`, `v.stallWarning`, `v.redlineWarning`, `v.stallCause`); RPM also drives engine pitch in `audio/engine.ts`.
 
-**First-person view** — no truck visible; the road scrolls toward you. Manage speed *before* ice, where grip is brutally low (`SURFACE_GRIP.ice` in `config.ts`): steering barely responds and lateral velocity persists → drift. Watch the blinking `ICE AHEAD` strip in the top bar — your cue to slow down (and downshift).
+**First-person view** — the road scrolls toward you. Manage speed *before* ice: `SURFACE_GRIP.ice`
+is 0.25, steering is weak and lateral velocity persists, so a slide keeps going. The top bar warns
+twice — `ICE 120m >>` before a hazard, and `CURVE 90m <` for a sharp bend once you are already on
+something slippery, which the first warning deliberately goes quiet for.
+
+**Ice in a bend is survivable but only just:** 40 km/h at the sharpest curvature, and braking halves
+that. Slowing down always works, which was not true before 0.4.0 — see `AGENTS.md`.
 
 ## Phased roadmap
 
 Each phase is self-contained, ends with a runnable build, and leaves the previous scene playable. Time estimates assume part-time work with AI assistance.
 
-> **Recent (post-phase-1, through B47 2026-06-03):** manual 5-speed gearbox, RPM gauge, **A/D** shifting, stall + redline burn-out, synchro downshift limits, tachometer HUD, RPM-driven engine pitch, **hold-ENTER crank start** (1.8 s, both initial and restart), harder torque curve (quadratic bog zone, `BOG_FLOOR=0.12`), surface drag double-penalty fix (mud/sand gears now work correctly), traffic perspective fix (1/z projection matches canisters). Delivery budget 8 min; 20-seed completability sim all pass.
+> **Recent (through 0.5.0, 2026-08-14):** ice in a bend went from unholdable (13 km/h) to 40 km/h
+> by counting grip once instead of twice; grip now ramps across surface seams; hazards may begin
+> inside a bend again; `ICE 120m` and `CURVE 90m` warnings; `?seed=` plus a daily route; traffic now
+> draws and collides from one shared raster, distant traffic draws a meaning-first symbol, and the
+> size curve is hyperbolic in world depth so distance is readable across the whole approach.
+> 330 tests. Decisions and what is still open live in **`AGENTS.md`**.
+>
+> **Older (post-phase-1, through B47 2026-06-03):** manual 5-speed gearbox, RPM gauge, **A/D** shifting, stall + redline burn-out, synchro downshift limits, tachometer HUD, RPM-driven engine pitch, **hold-ENTER crank start** (1.8 s, both initial and restart), harder torque curve (quadratic bog zone, `BOG_FLOOR=0.12`), surface drag double-penalty fix (mud/sand gears now work correctly), traffic perspective fix (1/z projection matches canisters). Delivery budget 8 min; 20-seed completability sim all pass.
 
 | Phase | Goal | Est. (h) |
 |-------|------|----------|
