@@ -1,3 +1,10 @@
+# [0.8.0](https://github.com/zrebec/icehaul/compare/v0.7.0...v0.8.0) (2026-08-14)
+
+
+### Features
+
+* **render:** outline and ground traffic so a pale car stops dissolving into snow ([#35](https://github.com/zrebec/icehaul/issues/35)) ([75cec31](https://github.com/zrebec/icehaul/commit/75cec314b8fd1e8641badb1ba281796dbd1d34e9)), closes [#34](https://github.com/zrebec/icehaul/issues/34)
+
 # [0.7.0](https://github.com/zrebec/icehaul/compare/v0.6.1...v0.7.0) (2026-08-14)
 
 
