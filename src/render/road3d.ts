@@ -8,6 +8,7 @@ import {
   KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
 } from '../config.ts'
 import { computeCurveOffsets } from './projection.ts'
+import { rasteriseVehicle } from './vehicleRaster.ts'
 import {
   visibleMarkers, visibleKerbStripes, visibleCentreDashes,
   kerbDetailScanline, centreDetailScanline,
@@ -390,11 +391,11 @@ export function projectTrafficVehicle(
 }
 
 function drawSameDirVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
-  drawTrafficRows(ctx, getTrafficSpriteRows('same', p.type), getTrafficSpriteColors('same', p.type), p)
+  drawTrafficRows(ctx, getTrafficRaster('same', p.type, p.w, p.h), getTrafficSpriteColors('same', p.type), p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
-  drawTrafficRows(ctx, getTrafficSpriteRows('oncoming', p.type), getTrafficSpriteColors('oncoming', p.type), p)
+  drawTrafficRows(ctx, getTrafficRaster('oncoming', p.type, p.w, p.h), getTrafficSpriteColors('oncoming', p.type), p)
 }
 
 function trafficSpriteSize(type: VehicleType): { w: number; h: number } {
@@ -444,28 +445,43 @@ interface SpriteBox { left: number; top: number; w: number; h: number }
 
 function drawTrafficRows(
   ctx: CanvasRenderingContext2D,
-  rows: readonly string[],
+  raster: readonly string[],
   colors: RowColors,
   p: SpriteBox,
 ): void {
-  const srcH = rows.length
-  const srcW = rows[0]?.length ?? 0
-
-  for (let sy = 0; sy < srcH; sy++) {
-    const row = rows[sy]!
-    const y0 = p.top + Math.floor(sy * p.h / srcH)
-    const y1 = p.top + Math.floor((sy + 1) * p.h / srcH)
-    const ph = Math.max(1, y1 - y0)
-
-    for (let sx = 0; sx < srcW; sx++) {
-      const color = colors[row[sx]!]
-      if (!color) continue
-      const x0 = p.left + Math.floor(sx * p.w / srcW)
-      const x1 = p.left + Math.floor((sx + 1) * p.w / srcW)
+  // `raster` is already the projected size: one raster pixel is one screen pixel.
+  // There is no scaling arithmetic left here, and therefore none left to disagree
+  // with the collision check, which reads the very same raster. The measurements
+  // behind that change are in vehicleRaster.ts.
+  for (let y = 0; y < raster.length; y++) {
+    const row = raster[y]!
+    let x = 0
+    while (x < row.length) {
+      const char = row[x]!
+      const color = colors[char]
+      if (!color) { x++; continue }
+      // Equal-coloured runs go out as one fillRect rather than one per pixel.
+      let run = 1
+      while (x + run < row.length && row[x + run] === char) run++
       ctx.fillStyle = color
-      ctx.fillRect(x0, y0, Math.max(1, x1 - x0), ph)
+      ctx.fillRect(p.left + x, p.top + y, run, 1)
+      x += run
     }
   }
+}
+
+/**
+ * The raster a vehicle is actually drawn from, at its projected size. The
+ * collision check must be handed this rather than the source sprite — that
+ * difference is the entire point of `vehicleRaster.ts`.
+ */
+export function getTrafficRaster(
+  dir: TrafficVehicle['dir'],
+  type: VehicleType,
+  w: number,
+  h: number,
+): readonly string[] {
+  return rasteriseVehicle(`${dir}:${type}`, getTrafficSpriteRows(dir, type), w, h)
 }
 
 export function scaleRoadsideRows(
