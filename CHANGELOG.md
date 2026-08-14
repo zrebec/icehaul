@@ -1,3 +1,10 @@
+# [0.6.0](https://github.com/zrebec/icehaul/compare/v0.5.0...v0.6.0) (2026-08-14)
+
+
+### Features
+
+* **render:** make traffic size read as distance across the whole approach ([#30](https://github.com/zrebec/icehaul/issues/30)) ([52fabef](https://github.com/zrebec/icehaul/commit/52fabefa50d5891e69aca71c9e1b37f335f69c87))
+
 # [0.5.0](https://github.com/zrebec/icehaul/compare/v0.4.1...v0.5.0) (2026-08-14)
 
 
