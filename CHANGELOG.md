@@ -1,3 +1,10 @@
+## [0.6.1](https://github.com/zrebec/icehaul/compare/v0.6.0...v0.6.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **render:** weight the resample by area covered, not by pixels touched ([#33](https://github.com/zrebec/icehaul/issues/33)) ([7d151be](https://github.com/zrebec/icehaul/commit/7d151be41dcadd30bcf35ea703214a6cd027b60b))
+
 # [0.6.0](https://github.com/zrebec/icehaul/compare/v0.5.0...v0.6.0) (2026-08-14)
 
 
