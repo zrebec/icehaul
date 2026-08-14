@@ -33,6 +33,33 @@ order and came out of a playtest:
 3. **Distance fog**, then night per the open decision below.
 4. **Resolution** — still rejected; revisit only for HUD space.
 
+### What the approach measurement found
+
+`approachChurn.test.ts` walks a vehicle in one physics tick at a time and compares each frame's
+raster with the one before it — the thing the contact sheet cannot see, because it captures single
+frames. Both original suspects were wrong, and the real one is neither:
+
+- **The tier pop is not the cause.** Zero frames redraw at a constant size, including the handover,
+  which lands on a frame that resizes anyway. It costs 29% of the sprite, but it is explained by
+  motion and happens once.
+- **The drawing is static, then jumps.** Across 785 frames from 220 m to 2 m at 60 km/h it changes
+  only **44 times** — still for about 18 frames, then a fifth to two fifths replaced at once. That
+  is the tick.
+- **It is worst where the sprite is smallest, and well above the floor.** Integer sizing forces a
+  minimum share per one-pixel step; the measured share is two to five times that:
+
+| sprite area | worst step | unavoidable floor | changes |
+|---|---|---|---|
+| under 40 cells | **40%** | 20% | 5 |
+| 40–100 | 25% | 13% | 8 |
+| 100–250 | 29% | 7% | 12 |
+| over 250 | 23% | 4% | 19 |
+
+The gap between measured and floor is the headroom: a resample that stayed stable under growth —
+adding a column rather than redistributing every column — would approach the floor. That is the
+lead worth following before anything else, and it is the scale-quantisation idea arriving from a
+different direction.
+
 ### Owner feedback still unanswered
 
 After #29 and #30 the owner reported approach reads *"much better, but still a bit steppy"*, and
