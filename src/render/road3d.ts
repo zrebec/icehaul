@@ -8,7 +8,8 @@ import {
   KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
 } from '../config.ts'
 import { computeCurveOffsets } from './projection.ts'
-import { rasteriseVehicle } from './vehicleRaster.ts'
+import { cachedRaster, rasteriseVehicle } from './vehicleRaster.ts'
+import { buildFarRaster, chooseLodTier, type LodTier } from './vehicleLod.ts'
 import {
   visibleMarkers, visibleKerbStripes, visibleCentreDashes,
   kerbDetailScanline, centreDetailScanline,
@@ -309,6 +310,8 @@ export interface TrafficProjection {
   h: number
   scale: number
   type: VehicleType
+  /** Which drawing to use — see `vehicleLod.ts`. */
+  lod: LodTier
 }
 
 const TRAFFIC_PASS_BEHIND_M = 5
@@ -352,12 +355,15 @@ export function projectTrafficVehicle(
     const w = Math.max(3, Math.round(dims.w * scale))
     const h = Math.max(3, Math.round(dims.h * scale))
 
+    // Beside or behind the player: always the detailed drawing.
+    vehicle.lodTier = 'detail'
     return {
       x, y,
       left: x - Math.floor(w / 2),
       top: y - h,
       w, h, scale,
       type: vehicle.type,
+      lod: 'detail',
     }
   }
 
@@ -381,21 +387,28 @@ export function projectTrafficVehicle(
   const w = Math.max(3, Math.round(dims.w * scale))
   const h = Math.max(3, Math.round(dims.h * scale))
 
+  // Remembered on the vehicle so the choice can be hysteretic. Idempotent within
+  // a frame: update and render both project, and the second call sees a settled
+  // tier and keeps it.
+  const lod = chooseLodTier(h, vehicle.lodTier)
+  vehicle.lodTier = lod
+
   return {
     x, y,
     left: x - Math.floor(w / 2),
     top: y - h,
     w, h, scale,
     type: vehicle.type,
+    lod,
   }
 }
 
 function drawSameDirVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
-  drawTrafficRows(ctx, getTrafficRaster('same', p.type, p.w, p.h), getTrafficSpriteColors('same', p.type), p)
+  drawTrafficRows(ctx, getTrafficRaster('same', p.type, p.w, p.h, p.lod), getTrafficSpriteColors('same', p.type), p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
-  drawTrafficRows(ctx, getTrafficRaster('oncoming', p.type, p.w, p.h), getTrafficSpriteColors('oncoming', p.type), p)
+  drawTrafficRows(ctx, getTrafficRaster('oncoming', p.type, p.w, p.h, p.lod), getTrafficSpriteColors('oncoming', p.type), p)
 }
 
 function trafficSpriteSize(type: VehicleType): { w: number; h: number } {
@@ -480,7 +493,14 @@ export function getTrafficRaster(
   type: VehicleType,
   w: number,
   h: number,
+  lod: LodTier = 'detail',
 ): readonly string[] {
+  // The far tier shares one silhouette across types: at this size only size and
+  // lamp colour can be told apart honestly, and both already differ. It is built
+  // at the target size rather than resampled — see buildFarRaster.
+  if (lod === 'far') {
+    return cachedRaster(`${dir}:far`, w, h, () => buildFarRaster(dir, w, h))
+  }
   return rasteriseVehicle(`${dir}:${type}`, getTrafficSpriteRows(dir, type), w, h)
 }
 

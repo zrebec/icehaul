@@ -650,6 +650,23 @@ export const CURVE_WARN_CURVATURE = 1.0
 export const CURVE_AHEAD_LOOK_M = 180
 
 /**
+ * Projected height, in pixels, at or below which traffic is drawn as the far
+ * symbol rather than the detailed sprite. See `render/vehicleLod.ts`.
+ *
+ * 9 px covers roughly 220 m down to 25 m — most of the approach, and exactly the
+ * stretch where a shrunken detailed sprite stops meaning anything: at 8 x 6 the
+ * lights that carry direction lose their vote to bodywork and blink in and out.
+ */
+export const LOD_FAR_MAX_HEIGHT = 9
+
+/**
+ * Dead-band around {@link LOD_FAR_MAX_HEIGHT}, in pixels. Same-direction traffic
+ * closes and falls back as it brakes, so the projected height wobbles by a pixel;
+ * without this the vehicle would flicker between two different drawings.
+ */
+export const LOD_HYSTERESIS_PX = 1
+
+/**
  * Only surfaces at or below this grip get the bend warning. Snow 0.55, ice 0.25,
  * sand 0.35 and mud 0.45 qualify; asphalt at 1.0 does not — on a road that grips,
  * reading the bend yourself is the game.
