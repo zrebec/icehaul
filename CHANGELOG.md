@@ -1,3 +1,10 @@
+## [0.4.1](https://github.com/zrebec/icehaul/compare/v0.4.0...v0.4.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **render:** draw and collide from one shared vehicle raster ([#28](https://github.com/zrebec/icehaul/issues/28)) ([228d82b](https://github.com/zrebec/icehaul/commit/228d82b745c969e5d0789fbdc9b18639e5eafb66))
+
 # [0.4.0](https://github.com/zrebec/icehaul/compare/v0.3.3...v0.4.0) (2026-08-14)
 
 
