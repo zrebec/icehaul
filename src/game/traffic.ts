@@ -97,8 +97,17 @@ function spawnVehicle(): void {
   if (dir === 'same') {
     const [minS, maxS] = TRAFFIC_SAME_SPEED
     speed = minS + (maxS - minS) * h3
-    // Same-direction: random lane (centre to slight right)
-    x = -0.2 + h4 * 0.5
+    // Same-direction: the right lane, spread about its centre.
+    //
+    // This used to be `-0.2 + h4 * 0.5` — range [-0.20, +0.30], centred on
+    // +0.05, which is the *centre line*, not a lane. `vehicle.x = ±1` is the
+    // road edge (`road3d.ts:389`), so the right lane's centre is +0.50, and a
+    // bus at the old median put 44% of its body in the oncoming lane at 25 m.
+    // No width curve could make that read as "in its lane".
+    //
+    // The rewrite consumes the same `h4` roll, so the roll sequence is untouched
+    // and the seed catalogue in AGENTS.md still names the same routes.
+    x = 0.30 + h4 * 0.40  // range [+0.30, +0.70]
   } else {
     const [minS, maxS] = TRAFFIC_ONCOMING_SPEED
     speed = minS + (maxS - minS) * h3

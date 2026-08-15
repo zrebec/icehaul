@@ -71,6 +71,47 @@ describe('tickTraffic', () => {
 
 })
 
+describe('lane placement', () => {
+  // `vehicle.x = ±1` is the road edge (`road3d.ts:389`), so 0 is the centre line
+  // and ±0.5 the lane centres. Same-direction traffic used to spawn in
+  // [-0.20, +0.30] — centred on +0.05, straddling the centre line rather than
+  // sitting in a lane — which read as a vehicle taking more than its half of
+  // the road however wide it was drawn.
+  const SEEDS = [123, 1443866, 534501, 52662, 1802200]
+
+  const spawned = (seed: number) => {
+    resetTraffic(seed)
+    tickTraffic(900, 0, 60, 16)
+    return getVisibleTraffic(900, TRAFFIC_VIEW_DISTANCE_M * 4)
+  }
+
+  it('puts every vehicle wholly on its own side of the centre line', () => {
+    for (const seed of SEEDS) {
+      const vehicles = spawned(seed)
+      expect(vehicles.length, `seed ${seed} spawned nothing`).toBeGreaterThan(0)
+      for (const v of vehicles) {
+        if (v.dir === 'same') {
+          expect(v.x, `seed ${seed}: same-direction at ${v.distM}m`).toBeGreaterThan(0)
+        } else {
+          expect(v.x, `seed ${seed}: oncoming at ${v.distM}m`).toBeLessThan(0)
+        }
+        expect(Math.abs(v.x), `seed ${seed}: inside the road edge`).toBeLessThan(1)
+      }
+    }
+  })
+
+  it('spreads each direction about its own lane centre', () => {
+    const xs: Record<'same' | 'oncoming', number[]> = { same: [], oncoming: [] }
+    for (const seed of SEEDS) for (const v of spawned(seed)) xs[v.dir].push(v.x)
+
+    for (const dir of ['same', 'oncoming'] as const) {
+      const centre = dir === 'same' ? 0.5 : -0.5
+      const mean = xs[dir].reduce((a, b) => a + b, 0) / xs[dir].length
+      expect(Math.abs(mean - centre), `${dir} mean sits on the lane centre`).toBeLessThan(0.1)
+    }
+  })
+})
+
 describe('followPlayerSpeed', () => {
   it('keeps same-direction traffic speed when the player is not ahead', () => {
     expect(followPlayerSpeed(1005, 50, 1000, 25, 1000)).toBe(50)

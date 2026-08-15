@@ -90,6 +90,16 @@ export interface MatrixOptions extends MatrixSelection {
   zoom: number
   /** Draw the player truck for scale reference. */
   showTruck: boolean
+  /**
+   * Lateral position of the drawn vehicle, magnitude only — the sign follows the
+   * direction. `vehicle.x = ±1` is the road edge, so 0.5 is the lane centre.
+   *
+   * The sheet used to hardcode 0.35, which is tidier than the game has ever
+   * been: same-direction traffic spawned centred on +0.05 until the lane fix,
+   * so the harness was quietly understating how far into the centre line a
+   * vehicle sat. Keep this settable, and compare against the spawner.
+   */
+  vehicleX: number
 }
 
 export const MATRIX_DEFAULTS: MatrixOptions = {
@@ -99,6 +109,7 @@ export const MATRIX_DEFAULTS: MatrixOptions = {
   playerX: 0,
   zoom: 1,
   showTruck: true,
+  vehicleX: 0.5,
 }
 
 /**
@@ -112,12 +123,14 @@ export function matrixLayoutFor(options: Partial<MatrixOptions> = {}): MatrixLay
 }
 
 /** A single vehicle placed at an exact distance, everything else neutral. */
-function cellVehicle(type: VehicleType, dir: TrafficDir, distM: number): TrafficVehicle {
+function cellVehicle(
+  type: VehicleType, dir: TrafficDir, distM: number, vehicleX: number,
+): TrafficVehicle {
   return {
     spawnDist: 0,
     distM,
     // Each direction sits in its own lane, as it would on the road.
-    x: dir === 'oncoming' ? -0.35 : 0.35,
+    x: dir === 'oncoming' ? -vehicleX : vehicleX,
     speed: 0,
     dir,
     type,
@@ -145,7 +158,7 @@ function renderCell(
   drawRoad(cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX, surfaceAt, curvatureAt)
   drawTraffic(
     cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX,
-    [cellVehicle(type, dir, distM)], curvatureAt,
+    [cellVehicle(type, dir, distM, opts.vehicleX)], curvatureAt,
   )
   if (opts.showTruck) {
     drawTruck(cellCtx, GAME_WIDTH / 2 + opts.playerX * 50, VIEWPORT_BOTTOM - 2, 0, 0)
@@ -231,6 +244,9 @@ export function matrixOptionsFromSearch(search: string): Partial<MatrixOptions> 
 
   const playerX = num('lane')
   if (playerX !== null) out.playerX = Math.max(-1, Math.min(1, playerX))
+
+  const vehicleX = num('vx')
+  if (vehicleX !== null) out.vehicleX = Math.max(0, Math.min(1, vehicleX))
 
   const zoom = num('zoom')
   if (zoom !== null && Number.isInteger(zoom) && zoom >= 1 && zoom <= 8) out.zoom = zoom

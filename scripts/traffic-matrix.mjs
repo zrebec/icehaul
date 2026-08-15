@@ -37,6 +37,18 @@ const SHEETS = [
   // Zoomed sheets are filtered on purpose: an unfiltered 4x sheet is over 7000 px
   // wide, which is not something anyone can actually look at.
   { name: 'car-4x', params: { surface: 'ice', curve: 0, zoom: 4, types: 'car', dist: '220,50,10,2' } },
+  // The band where a bus used to overflow its lane. The standard ladder samples
+  // 40-10 m at only one point, which is where the fault lived.
+  {
+    name: 'lane-fit',
+    params: { surface: 'snow', curve: 0, zoom: 2, types: 'bus', dist: '100,60,40,25,15,10' },
+  },
+  // The old spawn position against the lane centre — same width, different
+  // place, so it separates "drawn too wide" from "not in its lane".
+  {
+    name: 'lane-old-vs-new',
+    params: { surface: 'snow', curve: 0, zoom: 2, types: 'bus', dirs: 'same', vx: 0.05, dist: '100,40,25,10' },
+  },
 ]
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
