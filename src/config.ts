@@ -29,6 +29,103 @@ export const VIEWPORT_HEIGHT = VIEWPORT_BOTTOM - VIEWPORT_TOP
 /** Horizon as fraction of viewport height from top. */
 export const HORIZON_PCT = 0.15
 
+// ── Road shape — the dials worth playing with ───────────────────────────────
+//
+// Deliberately at the top of the file rather than filed under "Road rendering"
+// further down: these five decide what the road *looks* like, they interact,
+// and they are the ones that get re-tuned by eye. Everything else about the
+// road is downstream of them.
+//
+// Together with HORIZON_PCT above they define the whole ribbon. Substituting
+// `i = round(PERSPECTIVE_K / z) - 1` and `t = (i+1)/roadHeight` collapses the
+// renderer's per-scanline arithmetic into one law:
+//
+//     half(z) = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * (PERSPECTIVE_K/z) / roadHeight
+//             = ROAD_HALF_TOP + 178.652 / z            (at today's values)
+//
+// Six places compute that expression — road3d.ts (road, canisters, traffic,
+// roadside) and roadgeometry.ts (the off-road boundary) — so a change here
+// moves the painted road and the boundary the player is judged against
+// together, which is the only way they may ever move.
+
+/**
+ * Road half-width at the horizon, in game pixels. The ribbon is `2 x` this wide
+ * where it meets the sky.
+ *
+ * Not a perspective quantity — true perspective would converge to zero and the
+ * road would vanish into a point three scanlines up. This additive floor is what
+ * keeps a readable ribbon at the horizon, and it is the `ROAD_HALF_TOP` term in
+ * the law above.
+ *
+ * ── Why it moved from 14 to 24 ──────────────────────────────────────────────
+ * A vehicle's size is a different fake: `scale(z) = A / (z + B)`, which never
+ * grows past `A/B`. Divide the two and the share of a lane a vehicle covers has
+ * an interior maximum with a closed form,
+ *
+ *     z* = sqrt(TRAFFIC_SCALE_B * 178.652 / ROAD_HALF_TOP)
+ *
+ * so the hump is structural rather than a tuning slip — the ratio goes to zero
+ * at both ends and has to peak somewhere in between. At 14 it peaked at 20.9 m
+ * holding **1.21 lanes for a bus**, which is what the owner saw: a vehicle drawn
+ * wider than the lane it sits in, between roughly 40 m and 10 m.
+ *
+ * Raising this floor is the one lever that fixes the ratio without touching
+ * vehicle scale, so the growth curve (#30), the approach cadence (#34), the LOD
+ * thresholds and every collision raster stay byte-identical. At 24 the bus peaks
+ * at 0.84 of a lane and z* moves to 16.0 m.
+ *
+ * ── The open question, kept here on purpose ─────────────────────────────────
+ * 24 costs a 48 px ribbon at the horizon instead of 28 — a less funnel-like
+ * perspective. Owner accepted that for now and wants to revisit narrowing it.
+ * The dial is continuous, and the bus's peak lane share moves with it:
+ *
+ *     20 -> 0.94    22 -> 0.89    24 -> 0.84    26 -> 0.80
+ *
+ * Anything at or below about 26 keeps every vehicle inside its lane.
+ * `laneFit.test.ts` holds the property, not the number, so it will follow a
+ * re-tune rather than fight it — but it fails below roughly 18, which is the
+ * point of it.
+ */
+export const ROAD_HALF_TOP = 24
+/**
+ * Road half-width at the bottom of the viewport, in game pixels.
+ *
+ * 120 makes the road 240 px across a 256 px screen — a very wide ribbon, and
+ * the reason a vehicle beside the player covers only a third of its lane while
+ * the player's own truck (a fixed 32 x 40 px box) covers a quarter. Narrowing
+ * it would improve that end and make the middle worse, and it moves the
+ * off-road boundary, so it is a difficulty change and invalidates the seed
+ * catalogue in AGENTS.md. Not a dial to turn casually.
+ */
+export const ROAD_HALF_BOTTOM = 120
+/**
+ * Projection depth constant, in metres. Sets how fast the world rushes at you:
+ * a scanline `dy` below the horizon is `PERSPECTIVE_K / dy` metres away.
+ *
+ * At 150 the first three scanlines carry 220 m, 75 m and 50 m, so the entire
+ * far field lives in two pixels of height. That is why traffic size cannot be
+ * a function of the scanline and is hyperbolic in true world depth instead
+ * (see TRAFFIC_SCALE_* below). Raising it stretches the far field down the
+ * screen and compresses the near one.
+ */
+export const PERSPECTIVE_K = 150
+/**
+ * How hard a bend pushes the road sideways per unit of curvature. The bend the
+ * player steers against and the bend they see are the same number, so this is
+ * a difficulty dial as much as a visual one.
+ */
+export const CURVE_STRENGTH = 1.0
+/**
+ * How far the vanishing point slides per unit of player lateral position.
+ *
+ * Note it is not the axis the truck itself moves on: the truck is drawn at
+ * `GAME_WIDTH/2 + v.x * 50` (drive.ts), so the player moves 50 + 22 = 72 px per
+ * unit relative to the road, while a traffic vehicle's `x` moves it `half` px
+ * per unit with +/-1 being the road edge exactly. The player's `x` and traffic's
+ * `x` therefore mean two different things — see AGENTS.md.
+ */
+export const LATERAL_SHIFT = 22
+
 // ── Surface types & per-surface physics ─────────────────────────────────────
 
 export type Surface = 'asphalt' | 'snow' | 'ice' | 'sand' | 'mud'
@@ -776,50 +873,12 @@ export const CRASH_ANIM_MS = 1200
 
 // ── Road rendering ──────────────────────────────────────────────────────────
 
-export const LATERAL_SHIFT = 22
-export const CURVE_STRENGTH = 1.0
-/** Road texture/canister/roadside projection depth in metres. */
-export const PERSPECTIVE_K = 150
 /**
  * Traffic look-ahead distance in metres.
  * Kept separate from road scanline projection so vehicles can be introduced
  * earlier than the short visible road texture depth.
  */
 export const TRAFFIC_VIEW_DISTANCE_M = 220
-/**
- * Road half-width at the horizon, in game pixels.
- *
- * Not a perspective quantity — true perspective would converge to zero and the
- * road would vanish into a point three scanlines up. The additive floor is what
- * keeps a readable ribbon at the horizon, and it is why the road's law, once
- * `i = round(PERSPECTIVE_K / z) - 1` is substituted, reads
- *
- *     half(z) = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * (150/z) / 89
- *             = ROAD_HALF_TOP + 178.652 / z
- *
- * ── Why it moved from 14 to 24 ──────────────────────────────────────────────
- * A vehicle's size is a different fake: `scale(z) = A / (z + B)`, which never
- * grows past `A/B`. Divide the two and the lane share has an interior maximum
- * with a closed form,
- *
- *     z* = sqrt(B * 178.652 / ROAD_HALF_TOP)
- *
- * so the hump is structural rather than a tuning slip — the ratio goes to zero
- * at both ends and has to peak somewhere in between. At 14 it peaked at 20.9 m
- * holding **1.21 lanes for a bus**, which is what the owner saw: a vehicle drawn
- * wider than the lane it sits in, between roughly 40 m and 10 m.
- *
- * Raising this floor is the one lever that fixes the ratio without touching
- * vehicle scale, so the growth curve (#30), the approach cadence (#34), the LOD
- * thresholds and every collision raster stay byte-identical. At 24 the bus peaks
- * at 0.84 of a lane and z* moves to 16.0 m. The cost is a 48 px ribbon at the
- * horizon instead of 28 — a less funnel-like perspective.
- *
- * The dial is continuous: 20 gives a 0.94 bus peak, 22 gives 0.89, 26 gives 0.80.
- * `laneFit.test.ts` holds the property, not the number.
- */
-export const ROAD_HALF_TOP = 24
-export const ROAD_HALF_BOTTOM = 120
 export const KERB_STRIPE_M = 2.0
 /**
  * Driveable kerb/shoulder width in projected game pixels.
