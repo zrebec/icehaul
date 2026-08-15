@@ -837,19 +837,6 @@ export const ENGINE_GAIN = 0.06
 export const SCREECH_COOLDOWN_S = 0.35
 export const OFFROAD_BEEP_COOLDOWN_S = 0.25
 
-/**
- * Per-surface engine sound: [oscillator type, idle Hz, top Hz].
- * Asphalt: clean square. Snow: muffled triangle. Ice: sharp sawtooth.
- * Sand: deep square. Mud: modulated triangle.
- */
-export const SURFACE_ENGINE_SOUND: Record<Surface, readonly [OscillatorType, number, number]> = {
-  asphalt: ['square', 40, 235],
-  snow: ['triangle', 35, 180],
-  ice: ['sawtooth', 50, 280],
-  sand: ['square', 25, 140],
-  mud: ['triangle', 30, 160],
-}
-
 // ── Fuel canisters ──────────────────────────────────────────────────────────
 
 /** Average spacing between fuel canisters on the road (metres). */

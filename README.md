@@ -129,9 +129,9 @@ The road alternates between five surface types. Each behaves differently — the
 
 **Snow** — the truck slows down, wheels slip on acceleration. Steering works but with reduced grip (55%). Mild passive drag pulls speed down at 4 km/h/s. The skid mechanic is active — holding the steering key too long causes drift. Drive at moderate speed, tap the steering. Engine sounds muffled (LFSR noise, period 24).
 
-**Ice** — the most dangerous surface. Paradoxically, the truck accelerates FASTER than on asphalt (180%) because wheels spin freely on the slick surface. But grip is only 25% — you can barely steer. Brakes are 50% effective. **On ice, the skid mechanic is brutal**: lateral velocity above 0.4 units self-amplifies at rate 3.0 × (1 − grip) = 2.25 per second. You MUST tap the steering in short bursts, never hold. The AY chip produces a sharp high-pitched whine. Curves on ice at speed are unrecoverable — **brake before the ice**.
+**Ice** — the most dangerous surface. Paradoxically, the truck accelerates FASTER than on asphalt (180%) because wheels spin freely on the slick surface. But grip is only 25% — you can barely steer. Brakes are 50% effective. **On ice, the skid mechanic is brutal**: lateral velocity above 0.4 units self-amplifies at rate 3.0 × (1 − grip) = 2.25 per second. You MUST tap the steering in short bursts, never hold. Stable rolling ice has no continuous AY tone; braking remains audible without an exhausting permanent whine. Curves on ice at speed are unrecoverable — **brake before the ice**.
 
-**Sand** — the opposite of ice. The truck barely moves (20% acceleration). Wheels dig into the surface — passive drag is 12 km/h/s but it's proportional to speed, so you can always start from standstill. No skid (the problem is resistance, not slipperiness). Steering feels heavy (damping ×2.5 normal). The engine sounds deep and strained. Sand burns 1.5× fuel — going slow is cheaper per kilometre (see Fuel section). Maximum practical speed on sand is about 50 km/h.
+**Sand** — the opposite of ice. The truck barely moves (20% acceleration). Wheels dig into the surface — passive drag is 12 km/h/s but it's proportional to speed, so you can always start from standstill. No skid (the problem is resistance, not slipperiness). Steering feels heavy (damping ×2.5 normal). Its rolling layer is coarse and gritty while the diesel pitch remains tied to RPM. Sand burns 1.5× fuel — going slow is cheaper per kilometre (see Fuel section). Maximum practical speed on sand is about 50 km/h.
 
 **Mud** — between snow and sand. Moderate drag (8 km/h/s), moderate grip (0.45), moderate acceleration (35%). Steering is slightly heavy (damping ×1.5). Skid mechanic is active but more forgiving than ice. Visual: ZX colour-clash "brown" from alternating red+yellow scanlines.
 
@@ -322,17 +322,23 @@ Engine sound uses the AY-3-8912 chip (3 channels), the same chip as in ZX Spectr
 
 | Channel | Role |
 |---------|------|
-| A | Main engine tone (pitch = speed) |
-| B | Detuned harmonic (+4–10 Hz for chorus thickness) |
+| A | Diesel fundamental, 45–140 Hz (pitch = engine RPM) |
+| B | Exact second harmonic, 90–280 Hz |
 | C | Surface texture (changes per surface) |
+
+The A/B pitch is independent of the road surface. Their gain distinguishes a
+loaded drivetrain, free-revving with the clutch in, and coasting off-throttle;
+RPM changes are eased over roughly 40 ms so a gear change drops rather than pops.
+Both engine voices are deliberately mixed behind rolling Channel C, letting the
+road texture sit slightly ahead without changing the diesel's octave balance.
 
 Surface sound signatures:
 
 | Surface | Channel C | Character |
 |---------|----------|-----------|
-| Asphalt | Silent | Clean engine only |
+| Asphalt | LFSR noise, period 31 | Very restrained road hiss |
 | Snow | LFSR noise, period 24 | Muffled crunch |
-| Ice | Tone at 2.5× base freq | Sharp high-pitched whine |
+| Ice | No steady source | Stable rolling is silent |
 | Sand | LFSR noise, period 12 | Gritty, strained |
 | Mud | LFSR noise, period 18 | Dark, bubbling |
 

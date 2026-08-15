@@ -302,7 +302,20 @@ export function createDriveScene(
         lastOffroad.severity, offroadReturnDir, weightT)
       tickParticles(surfaceParticles, dt, 0.00022)
 
-      if (engineStarted) updateEngine(v.speed, v.rpm, surface, input.brake, !v.stalled)
+      const skidIntensity = Math.min(1, Math.max(0, (Math.abs(v.vx) - 0.08) / 0.65))
+      if (engineStarted) {
+        updateEngine({
+          dtMs: dt,
+          speedKmh: v.speed,
+          rpm: v.rpm,
+          surface,
+          throttle: input.throttle,
+          clutch: v.clutchIn,
+          brake: input.brake,
+          slipIntensity: skidIntensity,
+          running: !v.stalled,
+        })
+      }
 
       const ctxAudio = getAudioContext()
 
@@ -377,7 +390,6 @@ export function createDriveScene(
         }
       }
 
-      const skidIntensity = Math.min(1, Math.max(0, (Math.abs(v.vx) - 0.08) / 0.65))
       if (surface === 'snow' && v.speed > 8) {
         snowSprayAccum += dt * (0.085 + v.speed * 0.0016 + skidIntensity * 0.12)
         const count = Math.floor(snowSprayAccum)

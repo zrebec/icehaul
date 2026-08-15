@@ -104,7 +104,7 @@ src/
     hud.ts           ✓ bottom instrument cluster (SPEED wired, rest cosmetic)
     topbar.ts        ✓ score/title/dist/time/ice-ahead-blink
   audio/
-    engine.ts        ✓ continuous square-wave drone pitch-modulated by speed
+    engine.ts        ✓ two-voice diesel fundamental/harmonic driven by engine RPM
   game/              game-specific systems (do NOT push to zx-kit)
     vehicle.ts       traction, inertia, steering lag, brake distance
     road.ts          segment generator: curvature, slope, surface type
@@ -163,6 +163,7 @@ node scripts/traffic-matrix.mjs matrix     # traffic contact sheets — the rend
 ?seed=1443866        a specific route; no parameter means today's daily route
 ?matrix=1            the traffic contact sheet instead of the game
 ?outline=0           traffic without its dark outline and contact shadow (A/B)
+?audioLab=1          hidden listening lab; FREE/LINK gear audition + per-stem dB mixer
 ?matrix=1&surface=ice&curve=2&zoom=4&types=car&dist=220,50,10,2
 ```
 
