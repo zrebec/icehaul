@@ -21,6 +21,13 @@ back to the daily seed. Read once at boot — the route never changes under the 
 
 Which seeds are worth playing, and what each one exercises, is catalogued in `AGENTS.md`.
 
+One consequence measured and worth knowing before it gets reported as a bug: **a route is a small
+sample.** `START_ASPHALT_M` eats the first kilometre and `RECOVERY_ASPHALT_PCT` puts asphalt after
+almost every hazard, so 5 km contains only about **five** non-asphalt segments — few enough that one
+surface usually looks dominant. The hash is unbiased (measured against `SURFACE_PROBABILITY` to
+within 0.3 pp); ice merely looks rarer because `SURFACE_LENGTH_RANGE.ice` is half as long as the
+others. Full numbers in `AGENTS.md` → "Playtest findings, 0.8.1" §4.
+
 ## What this is
 
 **Ice Haul** is a ZX-Spectrum-flavoured micro-simulator of ice-road trucking. Not ETS2 — its ZX hallucination. The fantasy is *risk management*, not speed: tyre pressure, cargo balance, ice patches, wind, fuel, driver fatigue. Every metre is a small decision.
@@ -199,7 +206,24 @@ that. Slowing down always works, which was not true before 0.4.0 — see `AGENTS
 
 Each phase is self-contained, ends with a runnable build, and leaves the previous scene playable. Time estimates assume part-time work with AI assistance.
 
-> **Recent (through 0.5.0, 2026-08-14):** ice in a bend went from unholdable (13 km/h) to 40 km/h
+> **⚠️ Known and unfixed as of 0.8.1 — the mission cannot be completed past the first delivery.**
+> The timer *resets* to 8 minutes on delivery rather than adding, and `NEXT_TARGET_RANGE` then asks
+> for 15–25 km. `MAX_SPEED = 120` caps 8 minutes at **16 km**, so most of that range is
+> arithmetically impossible and the rest needs 113 km/h average on a route with ice and bends.
+> `completability.test.ts` never caught it because its bot stops at 5 km. Full arithmetic, both fix
+> options and the recommendation: **`AGENTS.md` → "Playtest findings, 0.8.1"**, which also covers
+> continuous scoring, snow grip, and why one surface dominates a route.
+>
+> **Recent (through 0.8.1, 2026-08-15):** traffic now fits its lane and sits in it. The road's width
+> law and the vehicle's size law are separate fakes with their own additive terms, so their ratio
+> peaks in the middle of the approach at `z* = sqrt(B · 178.652 / ROAD_HALF_TOP)` — a bus was drawn
+> **1.21 lanes wide** between 40 m and 10 m. `ROAD_HALF_TOP` 14 → 24 drops the peak to 0.84 without
+> touching vehicle scale, so the growth curve, cadence, LOD tiers and collision rasters are
+> byte-identical. Separately, same-direction traffic had been spawning centred on **+0.05** — the
+> centre line, not a lane — and now spawns about +0.50. The road-shape dials moved to the top of
+> `config.ts`. 374 tests.
+>
+> **Earlier (through 0.5.0, 2026-08-14):** ice in a bend went from unholdable (13 km/h) to 40 km/h
 > by counting grip once instead of twice; grip now ramps across surface seams; hazards may begin
 > inside a bend again; `ICE 120m` and `CURVE 90m` warnings; `?seed=` plus a daily route; traffic now
 > draws and collides from one shared raster, distant traffic draws a meaning-first symbol, and the
@@ -225,7 +249,7 @@ Each phase is self-contained, ends with a runnable build, and leaves the previou
 | **2 — Game over conditions + tune feel** | Off-road detection (lose-control state). Crash/respawn or game-over scene. Tune ACCEL/BRAKE/STEER constants based on real-browser playtest. Bigger truck sprite? Stronger surface visual contrast? | 6–10 |
 | **3 — Vehicle physics depth** | Brake distance proportional to speed²; understeer/oversteer split; engine braking; gear-shift feel (audio cue). | 10–14 |
 | **4 — More surfaces + visual polish** | Add `snow`, `gravel` to the surface enum. Per-surface dither textures. Wire GRIP gauge to real grip. Surface-transition seam animation. | 8–12 |
-| **5 — Fuel + distance + game over** | Fuel decreases scaled by speed. Distance counter tracks real km. Out-of-fuel triggers `GameOverScene`. | 4–6 |
+| **5 — Fuel + distance + game over** | Fuel decreases scaled by speed. Distance counter tracks real km. Out-of-fuel triggers `GameOverScene`. **Mostly built, and its mission layer is where the 0.8.1 impossibility lives** — leg length, time budget and scoring need finishing together. | 4–6 |
 | **6 — Pit-stop scene** | `PitstopScene` pushed between route segments. Menu UI for tyres / fuel / cargo / rest. Decisions tweak next-segment parameters. | 10–14 |
 | **7 — Weather + first particles** | `game/weatherFx.ts` game-local: snow particle emitter, wind vector affects steering, visibility curtain limits star draw distance. Decision point: if it works cleanly and is general, propose upstream to zx-kit. | 10–16 |
 | **8 — Cargo system** | `game/cargo.ts`: weight affects accel/brake. Random load-shifting event (truck pulls left/right briefly). | 6–10 |
