@@ -27,6 +27,8 @@ order and came out of a playtest:
 | — | Fractional scale: the drawing grows a pixel at a time, and the far tier only recolours | #34 |
 | 3a | Contrast outline + contact shadow, drawn behind the vehicle | #35 |
 
+| 3b | Traffic fits its lane, and sits in it | #37 |
+
 **The pipeline is done. The drawings are not** — see "The sprites themselves are the bottleneck now"
 below, which is the finding that should drive everything next.
 
@@ -42,6 +44,8 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 **Next, in order:**
 
+0. ~~**Lane fit**~~ — done in #37, and it jumped the queue because the owner reported it while
+   playing 0.8.0. See "Two ways a vehicle was not in its lane" below.
 1. **Redraw the six traffic sprites by hand.** They were auto-imported and are asymmetric, have
    their rear lamps in the middle of the car, and have no wheel gap. No renderer can fix that, and
    after #35 it is unambiguously the largest thing left.
@@ -58,6 +62,81 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
 costs anything, and a third tier would only put back a boundary where there is currently none.
+
+### Two ways a vehicle was not in its lane (#37)
+
+Owner, playing 0.8.0: *"cars are still wider than they should be at some close points — it feels
+wider than half the road — but we usually don't meet if I keep to my side."* Both halves of that
+sentence turned out to be a separate defect, and neither had a test.
+
+**1 · The lane share had a structural hump.** Road width and vehicle size are two different fakes.
+Substituting `i = round(150/z) - 1` into the road's law gives
+
+```
+half(z)  = ROAD_HALF_TOP + 178.652 / z        additive floor: the ribbon stays readable at the horizon
+scale(z) = TRAFFIC_SCALE_A / (z + TRAFFIC_SCALE_B)   additive offset: a vehicle never grows past A/B
+```
+
+so the ratio is zero at both limits and must peak in between, at a closed form:
+
+```
+z* = sqrt(TRAFFIC_SCALE_B * 178.652 / ROAD_HALF_TOP)
+```
+
+At `ROAD_HALF_TOP = 14` that is 20.9 m, and the measured peak of painted silhouette over one lane
+was **mini 0.63 · car 0.95 · bus 1.21** — a bus drawn wider than the lane it occupied, from about
+40 m to 10 m. Real-world values would be roughly constant at 0.51 and 0.73.
+
+**A constant ratio is not available, and the reason matters.** `half` grows only **1.19×** from
+220 m to 50 m while the car grows 2.80×. Pinning size to `half` would put three quarters of the
+approach back at 1.2× of growth — exactly the flat far field #30 was built to remove. Re-solving the
+two `TRAFFIC_SCALE_*` anchors cannot help either: `z*` depends on `B`, `B` is fully determined by the
+anchors, and every combination that lowers the peak below 1.0 collapses the near size below the 29 px
+the owner pinned or the far size below the 4 px the far-tier lamps need.
+
+**The lever chosen was `ROAD_HALF_TOP` 14 → 24**, which raises `c0` in the formula above: peak falls
+to 0.84, `z*` moves to 16.0 m. It was chosen over reshaping the scale curve because it **does not
+touch vehicle scale at all** — the growth curve, the approach cadence (mini sits at 1.97 s of a 2.00 s
+budget), the LOD thresholds and every collision raster stay byte-identical, and no existing test
+needed its expectations moved. On the truck's own scanline `half` changes by **0.13 px**, so off-road
+detection is untouched. The cost is a 48 px ribbon at the horizon instead of 28.
+
+The dial is continuous and may be re-tuned by eye: 20 → 0.94, 22 → 0.89, 26 → 0.80. `laneFit.test.ts`
+holds the *property* — never wider than the lane, peak ≤ 0.90, peak interior — not the number.
+
+**2 · Same-direction traffic was never in a lane at all.** `traffic.ts` spawned it at
+`x = -0.2 + h4 * 0.5`, range [−0.20, +0.30], centred on **+0.05** — the centre line. The right lane's
+centre is +0.50. A bus at the old median put **44 % of its body in the oncoming lane** at 25 m, and no
+width curve could make that read as "in its lane". Oncoming was always correct (centre −0.45).
+
+Rewritten to `x = 0.30 + h4 * 0.40`. It consumes the **same `h4` roll**, so the roll sequence is
+untouched and the seed catalogue still names the same routes. It **is** a difficulty change —
+overtaking now means crossing the centre line — hence its own commit.
+
+**The contact sheet was hiding this.** It hardcoded `x = ±0.35`, tidier than the game has ever been.
+`vehicleX` is now an option (`?vx=`), defaulting to the lane centre, and there are `lane-fit` and
+`lane-old-vs-new` sheets.
+
+**Correction to what counts as the regression net.** `completability.test.ts` **does not simulate
+traffic** — it imports `road`, `vehicle`, `roadgeometry`, `offroad`, `truck` and nothing else. The
+seed catalogue is therefore *not* cover for traffic-renderer changes, whatever the wording elsewhere
+in this file implies. The real net is `approachCadence` + `approachChurn` + `resampleStability` +
+`vehicleLod` + `laneFit` + the contact sheets. It *is* cover for `ROAD_HALF_TOP`, which reaches
+`roadgeometry.ts`.
+
+**What is still not right, and is deliberately left.** Even after #37 a bus is 0.84 of a lane at 15 m
+and 0.38 at 2 m — a 2.2× swing where reality says 1.0×. The residue is `ROAD_HALF_BOTTOM` (240 px of
+road across a 256 px screen) and the player's truck, which is a fixed 32 × 40 px box and occupies
+**0.25 of a lane**. Traffic beside the player is consequently still drawn wider than the player's own
+truck (bus 41 px against ~29 px). Fixing the truck means a redraw plus a full re-sweep of the seed
+catalogue, because `completability.test.ts` and `drive.ts` both derive the off-road box from
+`TRUCK_BMP_W/H`. Separate, larger, owner's call.
+
+One more thing worth not rediscovering: **the player's lateral axis is not the road's.** The truck
+moves `GAME_WIDTH/2 + v.x * 50` and the vanishing point shifts `LATERAL_SHIFT = 22`, so 72 px per
+unit, while traffic's `vehicle.x` moves it `half` px per unit with ±1 the road edge exactly. `x = 0.3`
+means two different things for the player and for a traffic vehicle. The `50` is written out four
+times (`drive.ts:270`, `drive.ts:551`, `trafficMatrix.ts`, `completability.test.ts`).
 
 ### The sprites themselves are the bottleneck now
 
@@ -452,7 +531,8 @@ not. The fix is largely reuse, not invention. *(It was correct in shape but not 
 | — | *(not in the original order)* Area-weighted resample | **DONE** #33 | — |
 | — | *(not in the original order)* Fractional scale — growth a pixel at a time | **DONE** #34 | — |
 | 3a | Contact shadow + contrast outline | **DONE** #35. Derived from the raster, no art. Kept *outside* the raster so the hitbox is unchanged; `?outline=0` for A/B | 0.5 day |
-| 3b | **Redraw the six traffic sprites by hand** | **TODO** — new, and now the top of the list. See "The sprites themselves are the bottleneck now" | 1–2 days |
+| 3b | Traffic fits its lane, and sits in it | **DONE** #37. `ROAD_HALF_TOP` 14 → 24 plus the spawn lane fix. Jumped the queue — it came out of a playtest. See "Two ways a vehicle was not in its lane" | 0.5 day |
+| 3b′ | **Redraw the six traffic sprites by hand** | **TODO** — the top of the list. See "The sprites themselves are the bottleneck now" | 1–2 days |
 | 3c | Lights through restrained `glow` | **TODO** — `glow` and `lighting` still have zero consumers | 0.5 day |
 | 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | **TODO**, and easier than when it was written: #34 already made size an output. Not the same as 3D vector — see the table above | 1–2 days |
 | 5 | Distance fog; night per the decision below | **TODO** | 4–6 h + night |
@@ -558,6 +638,10 @@ deferred: it existed to soften a handover that no longer costs anything.
   half of an oncoming car used to dissolve into the road, leaving a windscreen and two lamps
   floating. Black on black asphalt is invisible, so the outline costs nothing on the one surface
   where the body already separated — it is self-limiting rather than something to switch per surface.
+- **A vehicle's drawn width is only meaningful against its lane.** The road's width law and the
+  vehicle's size law are separate fakes, each with its own additive term, so their ratio has an
+  interior peak whatever the constants are. Measure the share, not the pixels, and measure it against
+  `computeRoadEdges` rather than re-deriving the road.
 - **Decoration drawn around a vehicle must stay out of its raster.** Outline, shadow and anything
   else that is *not* the vehicle goes in a parallel mask. Put it in the raster and every hitbox
   quietly grows a pixel on all four sides, which turns a graphics change into a difficulty change.

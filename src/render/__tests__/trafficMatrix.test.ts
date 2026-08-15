@@ -94,6 +94,15 @@ describe('matrixOptionsFromSearch', () => {
     expect(matrixOptionsFromSearch('?lane=9').playerX).toBe(1)
   })
 
+  it('reads the vehicle lateral position, clamped inside the road', () => {
+    // The sheet's own position, not the player's — how far into its lane the
+    // drawn vehicle sits. 0.5 is the lane centre, 1 the road edge.
+    expect(matrixOptionsFromSearch('?vx=0.05').vehicleX).toBe(0.05)
+    expect(matrixOptionsFromSearch('?vx=9').vehicleX).toBe(1)
+    expect(matrixOptionsFromSearch('?vx=-3').vehicleX).toBe(0)
+    expect(matrixOptionsFromSearch('?matrix=1').vehicleX).toBeUndefined()
+  })
+
   it('rejects a zoom that is not a usable integer', () => {
     expect(matrixOptionsFromSearch('?zoom=0').zoom).toBeUndefined()
     expect(matrixOptionsFromSearch('?zoom=1.5').zoom).toBeUndefined()
