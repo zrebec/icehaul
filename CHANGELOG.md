@@ -1,3 +1,10 @@
+## [0.8.1](https://github.com/zrebec/icehaul/compare/v0.8.0...v0.8.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **render:** make traffic fit its lane, and sit in it ([#37](https://github.com/zrebec/icehaul/issues/37)) ([1c8364d](https://github.com/zrebec/icehaul/commit/1c8364db9064a27cc760e7b3eace424b0f80a412)), closes [#30](https://github.com/zrebec/icehaul/issues/30) [#34](https://github.com/zrebec/icehaul/issues/34)
+
 # [0.8.0](https://github.com/zrebec/icehaul/compare/v0.7.0...v0.8.0) (2026-08-14)
 
 
