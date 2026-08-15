@@ -9,19 +9,49 @@
  *
  * Beeper: simultaneous brake judder pops (short clicks).
  */
-import { createAY, beep, getAudioContext, type AYChip } from 'zx-kit'
+import { AY_VOL, createAY, beep, getAudioContext, type AYChip } from 'zx-kit'
 import { type Surface, SURFACE_ENGINE_SOUND, SURFACE_BRAKE } from '../config.ts'
 
 let ay: AYChip | null = null
-let currentSurface: Surface | null = null
-let isBraking = false
+
+const CHANNEL_C_FADE_OUT_MS = 20
+const CHANNEL_C_FADE_IN_MS = 40
+
+type ChannelCKey = `surface:${Surface}` | `brake:${Surface}`
+
+interface ChannelCSpec {
+  key: ChannelCKey
+  noisePeriod: number | null
+}
+
+interface ChannelCFrame {
+  spec: ChannelCSpec
+  toneHz: number
+  level: number
+}
+
+let channelCActiveKey: ChannelCKey | null = null
+let channelCTransitionKey: ChannelCKey | null = null
+let channelCLatestFrame: ChannelCFrame | null = null
+let channelCAppliedToneHz: number | null = null
+let channelCAppliedLevel: number | null = null
+let channelCTransitionGeneration = 0
+let channelCSwapTimer: ReturnType<typeof setTimeout> | null = null
+let channelCSettleTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Convert an AY register level to zx-kit's linear per-channel fader range. */
+export function ayLevelToChannelGain(level: number): number {
+  const registerLevel = Math.max(0, Math.min(15, Math.round(level)))
+  return 15 * AY_VOL[registerLevel]!
+}
 
 export function startEngine(): void {
   if (ay) return
   ay = createAY()
   ay.tone('A', 40, 8)
   ay.tone('B', 45, 5)
-  currentSurface = 'asphalt'
+  resetChannelCState('surface:asphalt')
+  ay.volume('C', 0)
 }
 
 export function updateEngine(
@@ -48,62 +78,172 @@ export function updateEngine(
     ay.tone('B', baseFreq, 0)
   }
 
-  // Channel C — brake sound OR surface texture
+  // Channel C — brake sound OR surface texture. Source changes cross-fade via
+  // the channel fader; steady frames update the full-level source underneath it.
   const brakeSound = SURFACE_BRAKE[surface].sound
   const shouldBrake = braking && speed > 15 && brakeSound !== 'none'
-
-  if (shouldBrake !== isBraking || surface !== currentSurface) {
-    if (shouldBrake) {
-      applyBrakeSound(surface, t)
-    } else {
-      applySurfaceTexture(surface, t)
-    }
-    isBraking = shouldBrake
-    currentSurface = surface
-  }
-
-  if (shouldBrake) {
-    updateBrakeSound(surface, t, speed)
-  } else {
-    if (surface !== currentSurface) {
-      applySurfaceTexture(surface, t)
-      currentSurface = surface
-    }
-    updateSurfaceTexture(surface, t, baseFreq)
-  }
-
-  currentSurface = surface
+  updateChannelC(channelCFrame(surface, shouldBrake, t, baseFreq, speed))
+  if (shouldBrake) updateBrakePops(surface, speed)
 }
 
-// ── Brake sounds on AY Channel C ────────────────────────────────────────────
+// ── AY Channel C ────────────────────────────────────────────────────────────
 
-function applyBrakeSound(surface: Surface, _t: number): void {
+function channelCFrame(
+  surface: Surface,
+  braking: boolean,
+  t: number,
+  baseFreq: number,
+  speed: number,
+): ChannelCFrame {
+  if (braking) {
+    const level = Math.round(6 + t * 8)
+    if (SURFACE_BRAKE[surface].sound === 'screech') {
+      return {
+        spec: { key: `brake:${surface}`, noisePeriod: 6 },
+        // Descending tone: high pitch at high speed → low as truck slows.
+        toneHz: 300 + speed * 12,
+        level,
+      }
+    }
+    return {
+      spec: { key: `brake:${surface}`, noisePeriod: 3 },
+      toneHz: 0,
+      level,
+    }
+  }
+
+  switch (surface) {
+    case 'asphalt':
+      return { spec: { key: 'surface:asphalt', noisePeriod: null }, toneHz: 0, level: 0 }
+    case 'snow':
+      return {
+        spec: { key: 'surface:snow', noisePeriod: 24 },
+        toneHz: 0,
+        level: Math.round(2 + t * 4),
+      }
+    case 'ice':
+      return {
+        spec: { key: 'surface:ice', noisePeriod: null },
+        toneHz: baseFreq * 2.5,
+        level: Math.round(3 + t * 5),
+      }
+    case 'sand':
+      return {
+        spec: { key: 'surface:sand', noisePeriod: 12 },
+        toneHz: 0,
+        level: Math.round(3 + t * 6),
+      }
+    case 'mud':
+      return {
+        spec: { key: 'surface:mud', noisePeriod: 18 },
+        toneHz: 0,
+        level: Math.round(2 + t * 5),
+      }
+  }
+}
+
+function updateChannelC(frame: ChannelCFrame): void {
   if (!ay) return
-  const sound = SURFACE_BRAKE[surface].sound
-  if (sound === 'screech') {
-    // Asphalt: tone + noise mixed (rubber screech)
-    ay.enableNoise('C', 6)
-  } else if (sound === 'grind') {
-    // Ice: pure noise (metal scraping, very harsh)
-    ay.enableNoise('C', 3)
+  channelCLatestFrame = frame
+
+  // During either fade, retain only the newest dynamic frequency/level. Calling
+  // tone() or volume() here would disturb the scheduled channel automation.
+  if (channelCTransitionKey === frame.spec.key) return
+
+  if (channelCTransitionKey !== null || channelCActiveKey !== frame.spec.key) {
+    beginChannelCTransition(frame.spec.key)
+    return
+  }
+
+  applyChannelCSteadyFrame(ay, frame)
+}
+
+function beginChannelCTransition(key: ChannelCKey): void {
+  const chip = ay
+  if (!chip) return
+
+  cancelChannelCTransition()
+  channelCTransitionKey = key
+  channelCAppliedToneHz = null
+  channelCAppliedLevel = null
+  const generation = channelCTransitionGeneration
+
+  chip.fade('C', 0, CHANNEL_C_FADE_OUT_MS)
+  channelCSwapTimer = setTimeout(() => {
+    if (!isCurrentChannelCTransition(chip, generation, key)) return
+    channelCSwapTimer = null
+
+    const frame = channelCLatestFrame
+    if (!frame || frame.spec.key !== key) return
+
+    applyChannelCSource(chip, frame)
+    channelCActiveKey = key
+    chip.fade('C', ayLevelToChannelGain(frame.level), CHANNEL_C_FADE_IN_MS)
+    channelCAppliedLevel = frame.level
+
+    channelCSettleTimer = setTimeout(() => {
+      if (!isCurrentChannelCTransition(chip, generation, key)) return
+      channelCSettleTimer = null
+      channelCTransitionKey = null
+
+      const latest = channelCLatestFrame
+      if (latest && latest.spec.key === key) applyChannelCSteadyFrame(chip, latest)
+    }, CHANNEL_C_FADE_IN_MS)
+  }, CHANNEL_C_FADE_OUT_MS)
+}
+
+function isCurrentChannelCTransition(
+  chip: AYChip,
+  generation: number,
+  key: ChannelCKey,
+): boolean {
+  return ay === chip && channelCTransitionGeneration === generation && channelCTransitionKey === key
+}
+
+function applyChannelCSource(chip: AYChip, frame: ChannelCFrame): void {
+  if (frame.spec.noisePeriod === null) chip.disableNoise('C')
+  else chip.enableNoise('C', frame.spec.noisePeriod)
+
+  // The channel fader owns amplitude for both generators. Keeping the internal
+  // source at 15 avoids applying AY's logarithmic curve twice to tone sources.
+  chip.tone('C', frame.toneHz, 15)
+  channelCAppliedToneHz = frame.toneHz
+}
+
+function applyChannelCSteadyFrame(chip: AYChip, frame: ChannelCFrame): void {
+  if (frame.toneHz !== channelCAppliedToneHz) {
+    chip.tone('C', frame.toneHz, 15)
+    channelCAppliedToneHz = frame.toneHz
+  }
+  if (frame.level !== channelCAppliedLevel) {
+    chip.volume('C', ayLevelToChannelGain(frame.level))
+    channelCAppliedLevel = frame.level
   }
 }
+
+function cancelChannelCTransition(): void {
+  channelCTransitionGeneration++
+  if (channelCSwapTimer !== null) clearTimeout(channelCSwapTimer)
+  if (channelCSettleTimer !== null) clearTimeout(channelCSettleTimer)
+  channelCSwapTimer = null
+  channelCSettleTimer = null
+  channelCTransitionKey = null
+}
+
+function resetChannelCState(activeKey: ChannelCKey | null = null): void {
+  cancelChannelCTransition()
+  channelCActiveKey = activeKey
+  channelCLatestFrame = null
+  channelCAppliedToneHz = null
+  channelCAppliedLevel = null
+}
+
+// ── Brake beeper ────────────────────────────────────────────────────────────
 
 let lastBrakePopS = 0
 
-function updateBrakeSound(surface: Surface, t: number, speed: number): void {
-  if (!ay) return
+function updateBrakePops(surface: Surface, speed: number): void {
   const sound = SURFACE_BRAKE[surface].sound
-  const vol = Math.round(6 + t * 8)  // louder at higher speed
-
-  if (sound === 'screech') {
-    // Descending tone: high pitch at high speed → low as truck slows
-    const screechFreq = 300 + speed * 12
-    ay.tone('C', screechFreq, vol)
-  } else if (sound === 'grind') {
-    // No tone, just noise — volume tracks speed
-    ay.tone('C', 0, vol)
-  }
 
   // Beeper: simultaneous brake judder pops
   const ctx = getAudioContext()
@@ -118,59 +258,22 @@ function updateBrakeSound(surface: Surface, t: number, speed: number): void {
   }
 }
 
-// ── Surface texture on AY Channel C (when NOT braking) ──────────────────────
-
-function applySurfaceTexture(surface: Surface, _t: number): void {
-  if (!ay) return
-  switch (surface) {
-    case 'asphalt':
-      ay.disableNoise('C')
-      ay.tone('C', 0, 0)
-      break
-    case 'snow':
-      ay.enableNoise('C', 24)
-      ay.tone('C', 0, 0)
-      break
-    case 'ice':
-      ay.disableNoise('C')
-      break
-    case 'sand':
-      ay.enableNoise('C', 12)
-      ay.tone('C', 0, 0)
-      break
-    case 'mud':
-      ay.enableNoise('C', 18)
-      ay.tone('C', 0, 0)
-      break
-  }
-}
-
-function updateSurfaceTexture(surface: Surface, t: number, baseFreq: number): void {
-  if (!ay) return
-  switch (surface) {
-    case 'asphalt': break
-    case 'snow': ay.tone('C', 0, Math.round(2 + t * 4)); break
-    case 'ice':  ay.tone('C', baseFreq * 2.5, Math.round(3 + t * 5)); break
-    case 'sand': ay.tone('C', 0, Math.round(3 + t * 6)); break
-    case 'mud':  ay.tone('C', 0, Math.round(2 + t * 5)); break
-  }
-}
-
 // ── Control ─────────────────────────────────────────────────────────────────
 
 export function muteEngine(): void {
+  resetChannelCState()
   if (ay) ay.muteAll()
 }
 
 export function unmuteEngine(): void {
-  if (ay) { currentSurface = null; isBraking = false }
+  resetChannelCState()
 }
 
 export function stopEngine(): void {
-  if (!ay) return
-  ay.muteAll()
-  ay.stop()
+  const chip = ay
+  resetChannelCState()
+  if (!chip) return
+  chip.muteAll()
+  chip.stop()
   ay = null
-  currentSurface = null
-  isBraking = false
 }
