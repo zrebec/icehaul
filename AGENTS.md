@@ -7,7 +7,12 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.8.0 (2026-08-15), 355 tests. Everything below is done and merged unless marked.
+State at 0.8.1 (2026-08-15), 374 tests. Everything below is done and merged unless marked.
+
+> **The graphics thread is parked, not finished.** 0.8.1 shipped and was played end to end, and the
+> playtest turned up four things — one of them a mission that is arithmetically impossible to
+> complete. **Read "Playtest findings, 0.8.1" below before picking up the sprite work**; the ordered
+> graphics list further down is still correct but is no longer the top of the queue.
 
 **Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
 speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
@@ -26,7 +31,6 @@ order and came out of a playtest:
 | — | Area-weighted resample: growth costs only what the grid forces | #33 |
 | — | Fractional scale: the drawing grows a pixel at a time, and the far tier only recolours | #34 |
 | 3a | Contrast outline + contact shadow, drawn behind the vehicle | #35 |
-
 | 3b | Traffic fits its lane, and sits in it | #37 |
 
 **The pipeline is done. The drawings are not** — see "The sprites themselves are the bottleneck now"
@@ -44,11 +48,16 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 **Next, in order:**
 
-0. ~~**Lane fit**~~ — done in #37, and it jumped the queue because the owner reported it while
-   playing 0.8.0. See "Two ways a vehicle was not in its lane" below.
+0. **Make the mission completable, and make the score continuous.** New, and it goes first because
+   the game currently asks for a distance no player can cover — see "Playtest findings, 0.8.1"
+   below. The two belong in one piece of work: continuous score changes what a leg is *worth*,
+   which is an input to how long a leg should be. Also extend `completability.test.ts` past the
+   first delivery, which is the gap that let this ship.
 1. **Redraw the six traffic sprites by hand.** They were auto-imported and are asymmetric, have
    their rear lamps in the middle of the car, and have no wheel gap. No renderer can fix that, and
-   after #35 it is unambiguously the largest thing left.
+   after #35 it is unambiguously the largest thing left. **Still the top of the graphics list** —
+   it is only behind item 0 because item 0 is a game that cannot be finished.
+1½. **Snow grip**, if it is being played anyway — one constant plus a controllability re-pin.
 2. **Lamps through the `glow` layer.** `glow` and `lighting` ship in zx-kit 0.42 with zero consumers
    here.
 3. **Distance fog**, then night per the open decision below.
@@ -62,6 +71,136 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
 costs anything, and a third tier would only put back a boundary where there is currently none.
+
+### Playtest findings, 0.8.1
+
+Owner played the released 0.8.1 end to end and reported four things. All four are recorded here
+with the arithmetic behind them; none is fixed yet. The first is the one that matters.
+
+#### 1 · The mission is impossible after the first delivery
+
+Reported as: *"5 km is doable in 8 minutes, but when you get there you only gain 2 minutes and you
+are asked for 22 km, which is impossible."*
+
+It is worse than that, and the "2 minutes" is a misreading of a timer that does not add at all.
+
+- `FIRST_TARGET_DIST_M = 5000`, `DELIVERY_TIME_LIMIT_MS = 8 min` — 5 km at an average of **38 km/h**.
+  The bot in `completability.test.ts` runs the catalogue at ~46 km/h and finishes with ~60 s spare,
+  so the first leg is correctly tuned.
+- On delivery, `drive.ts` does `missionTimerMs = DELIVERY_TIME_LIMIT_MS` — a **reset to 8 minutes,
+  not an addition**. What the owner read as "+2 minutes" was the clock jumping from whatever was
+  left back up to a full budget.
+- `NEXT_TARGET_RANGE = [15000, 25000]`. The same 8 minutes now has to cover **15 to 25 km**.
+
+`MAX_SPEED = 120 km/h`, so the absolute ceiling in 8 minutes — flat out, from the first frame, never
+lifting for ice or a bend — is **16.0 km**:
+
+| target | average speed required | |
+|---|---|---|
+| 5 km | 38 km/h | the tuned first leg |
+| 15 km | 113 km/h | theoretically inside the cap, practically not |
+| 20 km | 150 km/h | **impossible** |
+| 22 km | 165 km/h | **impossible** |
+| 25 km | 188 km/h | **impossible** |
+
+So **9 of the 10 km of the target range cannot be reached at any skill level**, and the remaining
+1 km requires a speed no route with ice and bends allows. At the bot's demonstrated 46 km/h the
+realistic reach in 8 minutes is **6.1 km**.
+
+Two ways to fix it, and they are not equivalent:
+
+- **Scale the budget with the distance** — a km/minute allowance rather than a flat 8 minutes. Keeps
+  long legs, makes the clock mean the same thing on every leg.
+- **Shrink the targets** to roughly `[5000, 8000]` and keep the flat budget. Simpler, and closer to
+  what the first leg already proves works.
+
+Recommend the first: a flat budget is what created the discontinuity, and it will create it again
+the next time leg length changes. Either way `completability.test.ts` has to grow a case that walks
+**past** the first delivery — today it stops at 5 km, which is exactly why nobody caught this.
+
+Related, and worth fixing in the same pass: the next target is drawn with `hash(deliveryCount * 71)`
+— **no `_seed`** — so every route in the game asks for the same sequence of distances. Everything
+else about a route is seeded; this is not.
+
+#### 2 · Score is a single lump, and should be continuous
+
+`score += DELIVERY_SCORE` (500) on delivery is the only thing that ever moves the score. 5 km of
+driving, every hazard survived, and the number reads 500 whatever happened along the way.
+
+Owner's proposal, recorded as specified: **10 points per 100 m, multiplied by the surface** —
+asphalt ×1.0, ice ×1.4, sand ×1.3, snow ×1.2, mud ×1.1. (Owner wrote "dust"; the surface enum calls
+it `sand`.)
+
+It scales sensibly against what exists. Using the measured mean surface mix of a 5 km route
+(§4 below), the weighted mean multiplier is **1.085**:
+
+| | continuous | + delivery 500 |
+|---|---|---|
+| 5 km | 543 | 1043 |
+| 10 km | 1085 | 1585 |
+| 22 km | 2387 | 2887 |
+
+A 5 km leg entirely on asphalt scores 500, entirely on ice 700 — so the surface bonus is a real but
+not dominant signal, which is the right shape. The delivery lump can stay as a completion bonus.
+
+Note the interaction with §1: continuous score makes distance intrinsically worth something, which
+weakens the argument for long legs and strengthens "shrink the targets".
+
+#### 3 · Snow is too easy
+
+Owner: *"snow is honestly quite easy to steer on."*
+
+`SURFACE_GRIP.snow = 0.55` sits halfway between asphalt (1.0) and ice (0.25), and the real penalty
+on snow is `SURFACE_DRAG.snow = 4` — it slows you rather than loosening you. That is a defensible
+model of packed snow, but it means snow never asks the player to change what they are *doing*, only
+to wait. Ice is the only surface that demands a decision.
+
+Not tuned yet, and it should not be tuned blind — `controllability.test.ts` pins what each surface
+holds at each curvature, so the change is "pick the target numbers, then move the constant", not the
+other way round. Cheapest experiment: drop grip toward 0.45 and drop drag, so snow becomes mildly
+slippery rather than merely slow.
+
+#### 4 · Why one surface dominates a route — measured, and not a bug
+
+Owner: *"if the first surface is mud, most of the route ends up mud. I do not think it is a bug but
+I want the explanation."*
+
+The observation is real, the generator is fine, and the cause is sample size. Swept 3000 seeds over
+the first 5 km, sampling every 5 m:
+
+```
+mean surface segments per route            10.5   (about half of them recovery asphalt)
+mean share of the whole route: asphalt 62.0%  snow 14.4%  mud 10.5%  ice 6.6%  sand 6.5%
+largest single special surface holds       55.2% of all non-asphalt metres
+```
+
+**The hash is not biased.** Measured pick frequency against what `SURFACE_PROBABILITY` asks for:
+
+| | measured | config |
+|---|---|---|
+| snow | 31.7 % | 31.4 % |
+| ice | 31.3 % | 31.4 % |
+| mud | 22.9 % | 22.9 % |
+| sand | 14.1 % | 14.3 % |
+
+So three things stack, and none of them is a defect:
+
+- **A 5 km route contains only ~5 special segments.** `START_ASPHALT_M = 1000` eats the first
+  fifth, and `RECOVERY_ASPHALT_PCT = 0.85` puts asphalt after almost every hazard. Five draws from
+  four surfaces will look lopsided most of the time — that is what five draws do.
+- **The first special is one of those five**, so conditioning on it moves the average mechanically.
+  Measured: first = snow → snow holds 52.0 % of special metres (against 31.4 % unconditionally);
+  first = mud → 43.9 % (against 22.9 %); first = sand → 37.2 % (against 14.3 %).
+- **Ice is the exception, and it is deliberate.** first = ice → ice holds only **29.0 %**, *below*
+  its unconditional share. `SURFACE_LENGTH_RANGE.ice = [100, 300]` against `[100, 800]` for
+  everything else, so ice segments average 200 m where others average 450 m. Ice is picked as often
+  as snow and covers half the ground.
+
+**So a route is a small sample by design, and ice is short by design.** If routes should feel more
+mixed the lever is route length or `START_ASPHALT_M`, not the hash — and note that changing either
+reshuffles every seed in the catalogue below.
+
+The sweep was a throwaway test in `src/game/__tests__/`, deleted after reading, per "Adding more".
 
 ### Two ways a vehicle was not in its lane (#37)
 
@@ -419,6 +558,12 @@ never overshoots a target speed and never has to recover from a slide. Every see
 5 km inside the 480 s budget with zero off-road excursions. A human will be slower and will use
 more fuel — the reference seed's human margin was 12 s against the bot's 61 s. Treat these as
 "the route is not impossible", not as a par score.
+
+**And note what it does not cover: the bot stops at 5 km.** It walks the first delivery and no
+further, so it has never once seen the second leg — which is why a target range that is
+arithmetically unreachable (§1 of the playtest findings) survived every green run. "Completable"
+currently means "the first leg is completable". Extending the walk past the first delivery is part
+of item 0 in the queue.
 
 ### Adding more
 
