@@ -10,7 +10,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { getTrafficSpriteRows } from '../road3d.ts'
+import { C } from 'zx-kit'
+import { getTrafficSpriteColors, getTrafficSpriteRows } from '../road3d.ts'
 import {
   SAME_MINI_ROWS, ONCOMING_MINI_ROWS, SAME_CAR_ROWS, ONCOMING_CAR_ROWS,
   SAME_BUS_ROWS, ONCOMING_BUS_ROWS,
@@ -159,6 +160,51 @@ describe('the box the rest of the renderer was tuned against', () => {
     for (const dir of DIRS) {
       const rows = getTrafficSpriteRows(dir, type)
       expect(rows.at(-1), `${dir} ${type}`).toMatch(/^\.+$/)
+    }
+  })
+})
+
+describe('brake lights are a colour, not only a glow', () => {
+  // A same-direction vehicle's tail lamps are RED rolling and B_RED braking —
+  // the ZX BRIGHT bit. Deliberately a change in the framebuffer: `?glow=0` is a
+  // setting a player may choose, and "the car ahead is stopping" is safety
+  // information rather than decoration, so it has to survive the lights off.
+  it.each(['mini', 'car'] as const)('%s brightens its lamps under the brake', (type) => {
+    const rolling = getTrafficSpriteColors('same', type, false)
+    const braking = getTrafficSpriteColors('same', type, true)
+    expect(rolling.R).toBe(C.RED)
+    expect(braking.R).toBe(C.B_RED)
+  })
+
+  it.each(['mini', 'car'] as const)('%s changes nothing but the lamps', (type) => {
+    const rolling = getTrafficSpriteColors('same', type, false)
+    const braking = getTrafficSpriteColors('same', type, true)
+    for (const char of Object.keys(rolling)) {
+      if (char === 'R') continue
+      expect(braking[char], `char "${char}"`).toBe(rolling[char])
+    }
+  })
+
+  it('leaves the bus alone, because red on red would be a brake light that lies', () => {
+    // Its bodywork IS B_RED. Owner's call: the bus waits for the repaint that
+    // #42 recorded as the real fix, rather than getting a lamp nobody can see.
+    expect(getTrafficSpriteColors('same', 'bus', true))
+      .toBe(getTrafficSpriteColors('same', 'bus', false))
+  })
+
+  it.each(['mini', 'car', 'bus'] as const)('oncoming %s has no brake state at all', (type) => {
+    // Its lamps face the player; whatever it is doing with its own brakes is
+    // behind it and none of the player's business.
+    expect(getTrafficSpriteColors('oncoming', type, true))
+      .toBe(getTrafficSpriteColors('oncoming', type, false))
+  })
+
+  it('still defines the lamp char the far tier writes, in both states', () => {
+    // `applyFarLamps` writes R into the resampled raster whether or not the art
+    // uses it, so a brake map missing the key would drop a distant vehicle's
+    // only readable feature at exactly the wrong moment.
+    for (const type of ['mini', 'car', 'bus'] as const) {
+      expect(getTrafficSpriteColors('same', type, true).R).toBeDefined()
     }
   })
 })

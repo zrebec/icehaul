@@ -30,6 +30,12 @@ export interface TrafficVehicle {
   /** Marked when passed or off-screen. */
   gone: boolean
   /**
+   * Slowing down this tick — same-direction vehicles only, set by the car-following
+   * guard in {@link tickTraffic}. Drives the brake lights, which are a raster
+   * change and not just a glow: with `?glow=0` the colour swap is all there is.
+   */
+  braking?: boolean
+  /**
    * Level of detail drawn last frame. Lives on the vehicle because the choice is
    * hysteretic — see `render/vehicleLod.ts`. Absent until first projected.
    */
@@ -145,7 +151,13 @@ export function tickTraffic(
     if (v.gone) continue
 
     if (v.dir === 'same') {
+      const before = v.speed
       v.speed = followPlayerSpeed(v.distM, v.speed, playerDist, playerSpeed, dtMs)
+      // Braking is read off the speed rather than declared by the follower: the
+      // guard is the only thing that ever slows a same-direction vehicle, so
+      // "it went slower this tick" *is* the brake pedal. The renderer lights the
+      // lamps from this, so a player who is holding someone up can see it.
+      v.braking = v.speed < before
       v.distM += (v.speed / 3.6) * dt
     } else {
       v.distM -= (v.speed / 3.6) * dt

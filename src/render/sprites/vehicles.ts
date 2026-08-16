@@ -193,19 +193,31 @@ export const ONCOMING_BUS_ROWS = [
 ] as const
 
 // ── Colours ─────────────────────────────────────────────────────────────────
-// Unchanged from the imported sprites. `R` and `Y` must stay defined on every
-// same / oncoming map respectively: `applyFarLamps` writes those two chars into
-// the resampled raster, so a map missing one would drop the far tier's lamps.
+// Unchanged from the imported sprites, except for the brake state below. `R` and
+// `Y` must stay defined on every same / oncoming map respectively:
+// `applyFarLamps` writes those two chars into the resampled raster, so a map
+// missing one would drop the far tier's lamps.
+//
+// ── Tail lamp and brake lamp are two colours, not one brightness of glow ────
+// A same-direction vehicle's lamps are `RED` while it rolls and `B_RED` while it
+// brakes — the ZX BRIGHT bit, and the only period-correct way to say "brake".
+//
+// This is deliberately a change **in the framebuffer** rather than only in the
+// bloom. `?glow=0` is a real setting a player may prefer, and the difference
+// between a car ahead cruising and a car ahead stopping is safety information,
+// not decoration. It has to survive the lights being switched off.
 
 export const SAME_MINI_COLORS: RowColors = {
-  X: C.B_GREEN, W: C.CYAN, R: C.B_RED, B: C.BLACK, Y: C.B_YELLOW,
+  X: C.B_GREEN, W: C.CYAN, R: C.RED, B: C.BLACK, Y: C.B_YELLOW,
 }
+export const SAME_MINI_BRAKE_COLORS: RowColors = { ...SAME_MINI_COLORS, R: C.B_RED }
 export const ONCOMING_MINI_COLORS: RowColors = {
   X: C.B_WHITE, W: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
 }
 export const SAME_CAR_COLORS: RowColors = {
-  X: C.B_GREEN, W: C.CYAN, R: C.B_RED, B: C.BLACK, Y: C.B_YELLOW,
+  X: C.B_GREEN, W: C.CYAN, R: C.RED, B: C.BLACK, Y: C.B_YELLOW,
 }
+export const SAME_CAR_BRAKE_COLORS: RowColors = { ...SAME_CAR_COLORS, R: C.B_RED }
 export const ONCOMING_CAR_COLORS: RowColors = {
   X: C.B_WHITE, W: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
 }
@@ -224,6 +236,11 @@ export const ONCOMING_CAR_COLORS: RowColors = {
  * The actual fix is a body colour that is not red — `B_YELLOW` would free red
  * for the lamps entirely and no other vehicle is yellow — but that is a repaint
  * and a visible one, so it is the owner's call and not smuggled in here.
+ *
+ * **The bus therefore gets no brake state**, and that is the owner's decision
+ * rather than an oversight: `B_RED` lamps on a `B_RED` body would be invisible
+ * exactly when the information matters most, so it would be a brake light that
+ * lies. Mini and car brake; the bus waits for the repaint.
  */
 export const SAME_BUS_COLORS: RowColors = {
   X: C.B_RED, W: C.CYAN, Y: C.B_YELLOW, R: C.RED, B: C.BLACK,

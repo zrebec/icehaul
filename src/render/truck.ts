@@ -329,7 +329,26 @@ const RIGHT_RENDER = createRenderLayers(RIGHT_LAYERS)
 const BLACK_ATTRS = solidAttrs(C.BLACK)
 const WHITE_ATTRS = solidAttrs(C.B_WHITE)
 const CYAN_ATTRS = solidAttrs(C.B_CYAN)
-const RED_ATTRS = solidAttrs(C.B_RED)
+/**
+ * Tail lamps rolling, and the same lamps under the brake.
+ *
+ * `RED` -> `B_RED` is the ZX BRIGHT bit and the only period-correct way to say
+ * "brake" — and it is a change **in the framebuffer**, not in the bloom. That is
+ * the point of it: `?glow=0` is a setting a player may prefer, and whether the
+ * truck is stopping has to be readable with the lights switched off.
+ *
+ * The red layer of this sprite is exactly its two lamps and nothing else, so
+ * swapping one attribute map swaps the lamps and touches nothing around them.
+ */
+export const TRUCK_LAMP_COLORS = {
+  /** Tail lamps while rolling. */
+  rolling: C.RED,
+  /** The same lamps under the brake — the BRIGHT bit, nothing else moves. */
+  braking: C.B_RED,
+} as const
+
+const RED_ATTRS = solidAttrs(TRUCK_LAMP_COLORS.rolling)
+const BRAKE_ATTRS = solidAttrs(TRUCK_LAMP_COLORS.braking)
 const YELLOW_ATTRS = solidAttrs(C.B_YELLOW)
 
 /** Top-left corner the sprite is drawn from. Shared with the lamp positions
@@ -354,15 +373,13 @@ const RENDER_LAYERS: Record<TruckVariant, RenderLayers> = {
  * away — hence the low base intensity in `config.ts`.
  *
  * ── Why braking changes three things at once ────────────────────────────────
- * The raster does not change on the brake: the lamps are `B_RED` whether the
- * player is stopping or not (owner's call — the light does the talking). That
- * puts the entire signal on the glow, and a signal carried by one number is what
- * the first attempt was: intensity 0.65 -> 1.0, a peak of 61 -> 93 out of 765,
- * before the scanlines took a further third. Nobody saw it.
+ * A signal carried by one number is what the first attempt was: intensity
+ * 0.65 -> 1.0, a peak of 61 -> 93 out of 765, before the scanlines took a
+ * further third. Nobody saw it.
  *
- * So it brightens, it **grows**, and it gains a **white core** — three changes
- * in the same frame, which is the difference between "slightly warmer" and
- * "the brakes are on".
+ * So the halo brightens, it **grows**, and it gains a **white core** — three
+ * changes in the same frame. The lamps underneath swap `RED` for `B_RED` as
+ * well, which is what carries the brake when the player runs with `?glow=0`.
  */
 export function pushTruckLampSpots(
   out: GlowSource[],
@@ -403,6 +420,7 @@ export function drawTruck(
   baseY: number,
   lean = 0,
   steerDir: -1 | 0 | 1 = 0,
+  braking = false,
 ): void {
   const { x, y } = truckOrigin(cx, baseY, lean)
   const layers = RENDER_LAYERS[variantOf(steerDir)]
@@ -410,6 +428,6 @@ export function drawTruck(
   drawBitmapAttrs(ctx, layers.black, BLACK_ATTRS, x, y)
   drawBitmapAttrs(ctx, layers.white, WHITE_ATTRS, x, y)
   drawBitmapAttrs(ctx, layers.cyan, CYAN_ATTRS, x, y)
-  drawBitmapAttrs(ctx, layers.red, RED_ATTRS, x, y)
+  drawBitmapAttrs(ctx, layers.red, braking ? BRAKE_ATTRS : RED_ATTRS, x, y)
   drawBitmapAttrs(ctx, layers.yellow, YELLOW_ATTRS, x, y)
 }

@@ -7,7 +7,7 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.10.0 (2026-08-16), 531 tests. Everything below is done and merged unless marked.
+State at 0.11.1 (2026-08-16), 562 tests. Everything below is done and merged unless marked.
 
 > **The graphics thread is parked, not finished.** 0.8.1 shipped and was played end to end, and the
 > playtest turned up four things — one of them a mission that was arithmetically impossible to
@@ -44,23 +44,25 @@ order and came out of a playtest:
 **The pipeline was done before the drawings were** — the story of why, and the one measurement the
 redraw turned up, are under "The sprites themselves are the bottleneck now" below.
 
-Owner after #35: *"the game really has a look now and it comes across a lot better."* The outline
+Fox after #35: *"the game really has a look now and it comes across a lot better."* The outline
 was the cheapest item on the whole list and the first change since #29 that read as an improvement
 without needing a measurement to argue for it. Worth remembering when the next item looks expensive.
 
 > **The fleet is frozen until the sprite-or-polygon decision.** More vehicle types are wanted —
-> owner asked for them explicitly — but **not yet**. Every new type is an asset that would have to
+> Fox asked for them explicitly — but **not yet**. Every new type is an asset that would have to
 > be made twice if the answer turns out to be polygons, and the decision is deliberately weeks away
 > rather than days. So: redraw the six that exist, do not add a seventh. This is a scope gate, not a
 > lack of interest.
 
 **Next, in order:**
 
-1. **Traffic density scaling with distance** — owner's, from the 0.8.2 playtest (§2½), and now the
+1. **Traffic density scaling with distance** — Fox's, from the 0.8.2 playtest (§2½), and now the
    top of the queue: the redraw that was blocking it is done, so seeing the same six drawings more
    often is no longer a cost. `TRAFFIC_SPACING_M` is the lever; a distance term goes in
    `game/traffic.ts` where spacing is drawn.
-1½. **Snow grip**, if it is being played anyway — one constant plus a controllability re-pin.
+1½. ~~**Snow grip**~~ — **done** in #44: `SURFACE_GRIP.snow` 0.55 → 0.45, exactly the experiment §3
+   below asked for, plus the controllability re-pin it warned about (the ordering test now derives
+   its expectation from `SURFACE_GRIP` instead of carrying a copy of it).
 2. **Distance fog**, then night per the open decision below. Glow is in (#43), so the cheap half of
    the "daylight only" path in the night table below is already paid for.
 3. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
@@ -69,16 +71,88 @@ without needing a measurement to argue for it. Worth remembering when the next i
    (a mini at ~192 m) by widening its interior features, so this is smaller than it was but not
    gone: a four-pixel-wide vehicle whose true size grows by a tenth of a pixel has nothing left to
    draw differently. The remaining levers are still `TRAFFIC_SCALE_FAR` and
-   `TRAFFIC_VIEW_DISTANCE_M`, and both change how distance reads. **Owner's call, deliberately not
+   `TRAFFIC_VIEW_DISTANCE_M`, and both change how distance reads. **Fox's call, deliberately not
    pulled.**
 5. **Resolution** — still rejected; revisit only for HUD space.
 
 A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
 costs anything, and a third tier would only put back a boundary where there is currently none.
 
+### Playtest findings, 0.11.1 — the longest run so far
+
+Fox drove the longest route yet and read the numbers off the new results screen:
+
+| | |
+|---|---|
+| distance | **9.3 km** |
+| total time | 13:21 |
+| average speed | 42 km/h |
+| canisters | 11 |
+| score | 1609 |
+
+Seed **1443866** — the ice-heavy one from the catalogue below, which is why the average is 42 rather
+than the bot's 46. Two resources stopped being resources, and both are worth the arithmetic because
+they say *where the difficulty is not*.
+
+#### A · The clock stops biting after the first delivery
+
+`MISSION_PACE_KMH = 37.5` is not a guess: it is exactly what the original first leg asked (5 km in
+8 minutes). Every later leg gets `length / 37.5` and `DELIVERY_TIME_CARRY_PCT = 1.0` carries all the
+slack forward. So the surplus a driver banks per kilometre is
+
+    3600 x (1/37.5 - 1/S)  seconds per km
+
+which at Fox's 42 km/h is **+10.3 s per km, forever** — and at the bot's 46 km/h, +17.7 s. The pace
+is set 12-20% below what a competent run actually holds, so the margin does not merely survive, it
+compounds. Over this run: about 17.6 minutes granted against 13.4 used.
+
+Three levers, and they are *not* equivalent:
+
+- **`MISSION_PACE_KMH` up** (42-45) — the clock bites again on every leg equally. Simplest, and it
+  is the number that is actually wrong.
+- **`DELIVERY_TIME_CARRY_PCT` down** — punishes the good driver specifically, and **§2½ is an
+  explicit decision by Fox that this stays at 1.0**. Do not touch it without asking again.
+- **Cap the bank** (say two legs' worth) — keeps carry-over generous and stops it compounding.
+
+**This reopens §2½ rather than overturning it.** There, Fox decided banked time was not a fault
+because the clock was never meant to be the difficulty. Here, Fox calls the same slack "too
+benevolent". Both were said after playing; the difference is that the runs are now long enough for
+compounding to show. It is Fox's call which way it goes, and it should be made once rather than
+drifted into.
+
+#### B · Fuel cannot bite below about 87 km/h
+
+The burn is quadratic in speed but the *time* to cover a kilometre is inversely proportional to it,
+so the two collapse into something much simpler than the model looks:
+
+    burn per km = S x (S / MAX_SPEED) x FUEL_BURN_RATE x 3600 / S
+                = S x 0.0033          (fraction of tank, asphalt, at today's constants)
+
+Meanwhile the road *pays* a fixed amount per kilometre, because canisters are spaced by distance and
+not by time: `1000 / CANISTER_SPACING_M x CANISTER_FUEL` = **28.6% of a tank per km**, if you take
+them all. Setting the two equal:
+
+    0.0033 x S = 0.286   ->   S = 87 km/h
+
+**Below 87 km/h the road hands out more fuel than the truck burns**, and it does so by a wider
+margin the slower you go — 2.1x at Fox's 42 km/h. Per surface the break-even moves with
+`SURFACE_FUEL_MULT`: 72 km/h on sand, 96 km/h on ice. And 87 km/h is above what the controllability
+envelope allows on anything but asphalt, so on a careful route fuel is not a constraint at any point.
+
+That matches the run exactly: 11 canisters (220% of a tank) plus a delivery refill (50%) against
+about 129% burnt.
+
+Levers, cheapest first: **`CANISTER_SPACING_M` up** (the road pays less often), **`CANISTER_FUEL`
+down** (each one is worth less), or **`FUEL_BURN_RATE` up** (which also shortens the range of a
+flat-out run, so it is the one that changes the game's shape most). A fourth option is to stop
+scattering canisters uniformly and put them where a detour costs something — which is a mechanic
+rather than a constant, and probably the interesting answer.
+
+Neither of these is tuned yet. Both are recorded so the next tuning pass starts from numbers.
+
 ### Playtest findings, 0.8.1
 
-Owner played the released 0.8.1 end to end and reported four things. All four are recorded here
+Fox played the released 0.8.1 end to end and reported four things. All four are recorded here
 with the arithmetic behind them; none is fixed yet. The first is the one that matters.
 
 #### 1 · The mission is impossible after the first delivery — **fixed, see the end of this section**
@@ -92,7 +166,7 @@ It is worse than that, and the "2 minutes" is a misreading of a timer that does 
   The bot in `completability.test.ts` runs the catalogue at ~46 km/h and finishes with ~60 s spare,
   so the first leg is correctly tuned.
 - On delivery, `drive.ts` does `missionTimerMs = DELIVERY_TIME_LIMIT_MS` — a **reset to 8 minutes,
-  not an addition**. What the owner read as "+2 minutes" was the clock jumping from whatever was
+  not an addition**. What Fox read as "+2 minutes" was the clock jumping from whatever was
   left back up to a full budget.
 - `NEXT_TARGET_RANGE = [15000, 25000]`. The same 8 minutes now has to cover **15 to 25 km**.
 
@@ -133,7 +207,7 @@ a new number — it is exactly what the tuned first leg already asks (5 km in 8 
 `DELIVERY_TIME_LIMIT_MS` is now *derived* from it and comes out at the same 480 000 ms it always was.
 Every later leg gets `length / pace`, so the clock makes one promise everywhere. `NEXT_TARGET_RANGE`
 went to `[5000, 8000]`, the draw now mixes in the route seed, and unused time carries over in full
-(`DELIVERY_TIME_CARRY_PCT = 1.0`, owner's call) instead of the clock jumping back to a fixed budget.
+(`DELIVERY_TIME_CARRY_PCT = 1.0`, Fox's call) instead of the clock jumping back to a fixed budget.
 
 The rules left `drive.ts` and became **`src/game/mission.ts`** — a plain state machine with no
 canvas, audio or vehicle in it. That is the structural half of the fix: while the mission lived as
@@ -152,7 +226,7 @@ Measured across five seeds after the fix (aggressive strategy, 3 legs each):
 
 **One number to watch, and it is a design consequence rather than a defect.** Full carry-over banks
 a lot: the ideal driver arrives at drop-off 3 with **15.8 to 21.8 minutes** on the clock, against a
-leg budget of 8 to 12. By the third delivery the timer has stopped being a pressure. The owner chose
+leg budget of 8 to 12. By the third delivery the timer has stopped being a pressure. Fox chose
 full carry deliberately and it is one constant to turn down — `DELIVERY_TIME_CARRY_PCT` — but it
 wants a playtest verdict rather than a quiet tune. `completability.test.ts` prints the banked figure
 per leg on every run so the trend stays visible.
@@ -167,8 +241,8 @@ single-leg sweep still proves the FUEL OUT path because a one-leg run never coll
 `score += DELIVERY_SCORE` (500) on delivery is the only thing that ever moves the score. 5 km of
 driving, every hazard survived, and the number reads 500 whatever happened along the way.
 
-Owner's proposal, recorded as specified: **10 points per 100 m, multiplied by the surface** —
-asphalt ×1.0, ice ×1.4, sand ×1.3, snow ×1.2, mud ×1.1. (Owner wrote "dust"; the surface enum calls
+Fox's proposal, recorded as specified: **10 points per 100 m, multiplied by the surface** —
+asphalt ×1.0, ice ×1.4, sand ×1.3, snow ×1.2, mud ×1.1. (Fox wrote "dust"; the surface enum calls
 it `sand`.)
 
 It scales sensibly against what exists. Using the measured mean surface mix of a 5 km route
@@ -213,7 +287,7 @@ and nowhere near enough to make farming ice a strategy. Which is the shape that 
 
 #### 2½ · What the clock is actually for — 0.8.2 playtest
 
-Owner, after playing the proportional budget: *"time was not the brake. The brake was that I nearly
+Fox, after playing the proportional budget: *"time was not the brake. The brake was that I nearly
 crashed several times because of the traffic — and that is fine, that is how it should be."*
 
 Two things follow, and both are decisions rather than observations:
@@ -222,18 +296,18 @@ Two things follow, and both are decisions rather than observations:
   reaches drop-off 3 with 15.8 to 21.8 minutes on the clock — but a slack clock is only a fault if
   the clock was meant to be the difficulty. It is not. `DELIVERY_TIME_CARRY_PCT` stays at 1.0 and
   nothing here gets tightened to compensate. **Do not "fix" this without being asked.**
-- **Traffic is the difficulty, and it is under-supplied.** Owner wants more of it, scaling with
+- **Traffic is the difficulty, and it is under-supplied.** Fox wants more of it, scaling with
   distance travelled: the longer a run, the busier the road. That is a real mechanic and not a
   tuning tweak — it interacts with the frozen fleet (six sprites, no seventh until the
   sprite-or-polygon decision) because more traffic means seeing the same six drawings more often,
   which raises the cost of them being wrong. So: **redraw first, then raise the density.**
 
-Recorded as an owner decision, not yet implemented. `TRAFFIC_SPACING_M` is the lever; a distance
+Recorded as a decision by Fox, not yet implemented. `TRAFFIC_SPACING_M` is the lever; a distance
 term would go in `game/traffic.ts` where spacing is drawn.
 
 #### 3 · Snow is too easy
 
-Owner: *"snow is honestly quite easy to steer on."*
+Fox: *"snow is honestly quite easy to steer on."*
 
 `SURFACE_GRIP.snow = 0.55` sits halfway between asphalt (1.0) and ice (0.25), and the real penalty
 on snow is `SURFACE_DRAG.snow = 4` — it slows you rather than loosening you. That is a defensible
@@ -245,9 +319,16 @@ holds at each curvature, so the change is "pick the target numbers, then move th
 other way round. Cheapest experiment: drop grip toward 0.45 and drop drag, so snow becomes mildly
 slippery rather than merely slow.
 
+**Done in #44**, and the cheap half of it: `SURFACE_GRIP.snow` 0.55 → 0.45, drag left alone. Snow
+now holds 55 km/h through the sharpest curve against mud's 60 — *below* mud, which is new and is
+what the ordering test caught. At equal grip `SURFACE_STEER_DAMP_MULT` (1.0 vs mud's 1.5) and
+`SURFACE_CURVE_DRIFT_MULT` (0.36 vs 0.35) decide, and they both favour mud. That is a defensible
+model — mud is sticky, snow is slippery — but it means **snow is now the third-hardest surface
+rather than the second**, which nobody has played enough to have an opinion about yet.
+
 #### 4 · Why one surface dominates a route — measured, and not a bug
 
-Owner: *"if the first surface is mud, most of the route ends up mud. I do not think it is a bug but
+Fox: *"if the first surface is mud, most of the route ends up mud. I do not think it is a bug but
 I want the explanation."*
 
 The observation is real, the generator is fine, and the cause is sample size. Swept 3000 seeds over
@@ -289,7 +370,7 @@ The sweep was a throwaway test in `src/game/__tests__/`, deleted after reading, 
 
 ### Two ways a vehicle was not in its lane (#37)
 
-Owner, playing 0.8.0: *"cars are still wider than they should be at some close points — it feels
+Fox, playing 0.8.0: *"cars are still wider than they should be at some close points — it feels
 wider than half the road — but we usually don't meet if I keep to my side."* Both halves of that
 sentence turned out to be a separate defect, and neither had a test.
 
@@ -316,7 +397,7 @@ was **mini 0.63 · car 0.95 · bus 1.21** — a bus drawn wider than the lane it
 approach back at 1.2× of growth — exactly the flat far field #30 was built to remove. Re-solving the
 two `TRAFFIC_SCALE_*` anchors cannot help either: `z*` depends on `B`, `B` is fully determined by the
 anchors, and every combination that lowers the peak below 1.0 collapses the near size below the 29 px
-the owner pinned or the far size below the 4 px the far-tier lamps need.
+Fox pinned or the far size below the 4 px the far-tier lamps need.
 
 **The lever chosen was `ROAD_HALF_TOP` 14 → 24**, which raises `c0` in the formula above: peak falls
 to 0.84, `z*` moves to 16.0 m. It was chosen over reshaping the scale curve because it **does not
@@ -354,7 +435,7 @@ road across a 256 px screen) and the player's truck, which is a fixed 32 × 40 p
 **0.25 of a lane**. Traffic beside the player is consequently still drawn wider than the player's own
 truck (bus 41 px against ~29 px). Fixing the truck means a redraw plus a full re-sweep of the seed
 catalogue, because `completability.test.ts` and `drive.ts` both derive the off-road box from
-`TRUCK_BMP_W/H`. Separate, larger, owner's call.
+`TRUCK_BMP_W/H`. Separate, larger, Fox's call.
 
 One more thing worth not rediscovering: **the player's lateral axis is not the road's.** The truck
 moves `GAME_WIDTH/2 + v.x * 50` and the vanishing point shifts `LATERAL_SHIFT = 22`, so 72 px per
@@ -364,7 +445,7 @@ times (`drive.ts:270`, `drive.ts:551`, `trafficMatrix.ts`, `completability.test.
 
 ### The sprites themselves are the bottleneck now — **redrawn, see the end of this section**
 
-Owner, after #34: *"we are at a better level but honestly the sprites are terrible — not even a
+Fox, after #34: *"we are at a better level but honestly the sprites are terrible — not even a
 person with imagination could tell it is a car if they did not already know."*
 
 That is a fair reading and it is **not** a rendering fault. Six PRs fixed how a sprite reaches the
@@ -450,12 +531,12 @@ of body.
 lamps, the weakest lamp contrast in the fleet, and `applyFarLamps` writes exactly that near-invisible
 colour. The redraw works around it with a black inboard edge on each lamp cluster. The real fix is a
 body colour that is not red — `B_YELLOW` frees red entirely and no other vehicle is yellow — but
-that is a repaint and a visible one, so it is the owner's call rather than something smuggled in
+that is a repaint and a visible one, so it is Fox's call rather than something smuggled in
 with a redraw.
 
 ### Parametric, vector, and what each would actually buy
 
-Owner has raised 3D vector graphics — *"it would be smoother"*. Three different things get conflated
+Fox has raised 3D vector graphics — *"it would be smoother"*. Three different things get conflated
 here and they differ by an order of magnitude in cost, so keep them apart:
 
 | | What it is | Buys | Costs |
@@ -469,7 +550,7 @@ Three things worth being clear about before that decision:
 - **It would not violate the ZX identity.** The Spectrum had filled-vector driving games — Stunt Car
   Racer, Hard Drivin', the Freescape titles. But it is a *different* Spectrum: Freescape solid-3D
   rather than Pole Position sprite-scaling. That is an aesthetic choice, not a technical one, and it
-  is the owner's.
+  is Fox's.
 - **It would not remove the LOD tier.** A polygon car at six pixels of height is two or three
   visible faces. Vector helps up close and is worse than a symbol far away, so the far tier stays
   whatever happens.
@@ -481,7 +562,7 @@ Three things worth being clear about before that decision:
 in the middle, no ground contact — would read exactly as badly, and would have cost a week to find
 that out.
 
-**Timing (owner, 2026-08-15):** the decision is *weeks* away, not days, and it gates the fleet — see
+**Timing (Fox, 2026-08-15):** the decision is *weeks* away, not days, and it gates the fleet — see
 the note under "Where to pick up". Nothing about this needs deciding to keep working: redrawing the
 six existing sprites is worth doing under either answer, because it is the only way to learn what a
 properly drawn one at this size actually looks like, which is the evidence the decision needs.
@@ -544,7 +625,7 @@ column-stable resample: the property those were reaching for is what area weight
 ### The last suspect was the rate, not the cleanliness (#34)
 
 Every measurement up to here asked how *cleanly* each change was made, and by 0.6.1 the answer was
-"at the floor the grid forces". The owner still read the approach as steppy. The question nobody had
+"at the floor the grid forces". Fox still read the approach as steppy. The question nobody had
 asked was how *often* a change arrives, and asked in those terms the fault was obvious:
 
 | | changes / 785 frames | median run | **longest freeze** |
@@ -667,7 +748,7 @@ inside a bend of |curvature| ≥ 1.5**. Thirteen survived. Ice never starts befo
 ### Which one to pick
 
 - **`1443866` — the reference.** Most ice overall (48.5 %) and the only entry with a human behind
-  it: owner drove it end to end on the pre-fix physics and finished with about 12 s to spare,
+  it: Fox drove it end to end on the pre-fix physics and finished with about 12 s to spare,
   needing to exceed the safe ice speed in places. Use it whenever a change needs comparing against
   a known feel, and when comparing against the parallel codex working copy, which uses the same
   seed.
@@ -716,7 +797,7 @@ If a future change must insert segments, key the rolls off a decision counter ra
 
 ## Graphics direction
 
-Decided 2026-08-09, after the owner reported that traffic reads as a blob at the horizon and still
+Decided 2026-08-09, after Fox reported that traffic reads as a blob at the horizon and still
 does not read as a car up close, and proposed three routes: raise the resolution, draw vehicles
 mathematically like the road, or reach for glow + dither + LOD.
 
@@ -773,7 +854,7 @@ If the resolution is ever raised it will be for HUD space, and to 320 × 240 rat
 **1 · Downscale throws information away, arbitrarily.** `drawTrafficRows` draws a minimum 1 × 1
 rect per *source* pixel. Scaling 22 px down to 8, several source pixels land on the same target and
 **the last colour wins** — lights, windows and outline have no priority over body. This is the
-horizon mush, and it is the fault the owner actually reported.
+horizon mush, and it is the fault Fox actually reported.
 
 **2 · Upscale reshuffles between frames.** Near the player `w > srcW`, and every one-pixel change in
 `w` changes *which* source columns get doubled, so the pattern boils. ~~Measured after the shared
@@ -881,7 +962,7 @@ intensity 0.45` measured a peak of **32 / 765** — not a dim halo, *no* halo.
 
 #### And even 0.60 was invisible in the game, because the harness was lying
 
-Owner played the branch: *"glow brzdových svetiel prakticky nevidno, a keď brzdím, žiadna zmena."*
+Fox played the branch: *"glow brzdových svetiel prakticky nevidno, a keď brzdím, žiadna zmena."*
 The table above was right about the sheet and wrong about the game, and the gap is a property of the
 harness rather than of the renderer:
 
@@ -907,7 +988,7 @@ without driving. `?brake=1` fixes that.
 
 #### Where it ended up
 
-Owner's call, explicitly: *"trochu modernejšie, aj za cenu malej straty ZX identity"*. So the bloom
+Fox's call, explicitly: *"trochu modernejšie, aj za cenu malej straty ZX identity"*. So the bloom
 is now arcade-sized — `alpha 0.8`, **two passes**, radius `1.4 × drawn height` capped at 18 px — and
 each lamp gains a **white-hot core**: a second, small `B_WHITE` source on the same spot. White raises
 the green and blue channels of a red lamp, so the lamp itself blows out toward white instead of
@@ -927,9 +1008,25 @@ Two constraints on the core, both deliberate:
 - **Only above `GLOW_CORE_MIN_HEIGHT` (10 px, the far/detail LOD boundary, ~50 m for a car).** White
   desaturates the halo it sits in, and far away that halo's *colour* is the only thing carrying
   which way the vehicle is going. Close up the shape already says it, so the light may blow out.
-- **The brake carries three changes at once** — brighter, bigger, and cored — because the owner chose
-  to leave the raster alone (the lamps stay `B_RED` whether braking or not). A signal carried by one
+- **The brake carries three changes at once** — brighter, bigger, and cored. A signal carried by one
   number is exactly what round 1 was.
+
+Since then the brake is carried in the **framebuffer** as well, and that is the more important half:
+a same-direction vehicle's tail lamps are `RED` rolling and `B_RED` braking, and so are the player's
+(`TRUCK_LAMP_COLORS`). `?glow=0` is a setting a player may choose, and "the vehicle ahead is
+stopping" is safety information rather than decoration, so it has to survive the lights being off.
+Two vehicles are deliberately left out: **oncoming traffic** (its lamps face the player, whatever it
+is doing with its brakes is behind it) and the **same-direction bus**, whose bodywork *is* `B_RED` —
+a bright red lamp on it would be a brake light nobody can see, so it waits for the repaint #42 asked
+for.
+
+**Measured limit worth knowing before this gets reported as broken:** traffic braking is plumbed but
+has almost nowhere to show. The car-following guard only slows vehicles *behind* the player, it
+starts doing so at roughly `TRAFFIC_MIN_FOLLOW_GAP_M + speed x TRAFFIC_FOLLOW_TIME_S` ≈ 28 m back,
+and `getVisibleTraffic` only returns vehicles from 10 m behind — so by the time one is on screen it
+has settled at the player's speed and stopped braking. **A vehicle ahead never brakes at all**;
+nothing in the model slows it. The colour swap is correct and free, and it becomes visible the day
+traffic ahead gets a reason to slow down (a curve, a hazard, the density work).
 
 One side effect worth knowing before it gets reported as a fix: the same-direction bus is `B_RED`
 bodywork with `RED` lamps, which #42 recorded as the weakest lamp contrast in the fleet and left
@@ -1082,7 +1179,7 @@ work — most drivers lift for an upshift and manage the throttle deliberately f
 downshift. Whether the game should teach that or offer input assistance is open, and deliberately
 deferred until it has been played more.
 
-Do not retune clutch or throttle behaviour without an explicit decision from the owner.
+Do not retune clutch or throttle behaviour without an explicit decision from Fox.
 
 ---
 

@@ -18,7 +18,7 @@ Or run locally:
 
 ```bash
 npm install
-npm run dev       # http://localhost:5173
+npm run dev       # http://localhost:5174
 ```
 
 ## Controls
@@ -31,6 +31,19 @@ npm run dev       # http://localhost:5173
 | **SHIFT** | **Clutch** — hold it to change gear; the skill is *when you let it out* |
 | D / A | Shift up / down (only while the clutch is held) |
 | Enter | Start engine · restart after a stall · start the game |
+| P | Pause / unpause |
+| W | Debug: cycle gross weight 10 → 20 → 30 t |
+
+### URL switches
+
+Work on the dev server and on the deployed build alike:
+
+| Switch | Effect |
+|--------|--------|
+| `?seed=1443866` | drive a specific route. No parameter means today's daily route |
+| `?glow=0` | turn the lamp bloom off. `?glow=0.5` sets its strength, `?glow=0.5,1.5` its radius too |
+| `?outline=0` | traffic without its dark outline and contact shadow |
+| `?matrix=1` | the traffic contact sheet instead of the game (a developer view) |
 
 **The clutch is the whole game.** Gears do not move without **SHIFT** held — and
 what matters is not how long you hold it, but the revs you let it out at. The clean
@@ -94,15 +107,22 @@ On ice above 30 km/h: wheels lock → you also lose lateral control. Pump the br
 
 ## Fuel management
 
-- At 50 km/h on asphalt: ~3% tank per km. 5 km delivery = ~15% tank.
-- Canisters (+20% each) appear every ~700m. Collect 3-4 and you're safe.
-- Going slower saves fuel (quadratic burn: 80 km/h costs 4× as much as 40 km/h per km).
-- Delivery completion refills 50% — that's your main fuel source.
+- At 50 km/h on asphalt you burn about **17% of the tank per kilometre** — a full tank is roughly
+  6 km at that speed, and 10 km if you crawl at 30.
+- Canisters (+20% each) appear every ~700 m, so the road *pays* about **29% per km** if you take
+  them all. Below ~87 km/h that is more than you burn, which is why a careful run never runs dry.
+- Going slower saves fuel, and it saves it faster than you might think: cost per kilometre is
+  **linear in speed** (the burn is quadratic, but you spend proportionally less time in the km).
+- Delivery completion refills 50%.
 
 ## Traffic
 
-- Same-direction vehicles (green/yellow) are slower than you — overtake by shifting left or right.
-- Oncoming vehicles (white with yellow headlights) travel fast on the left side — stay right.
+- Same-direction vehicles are slower than you — overtake by shifting left or right. Their tail
+  lamps are dark red, and go **bright red when they brake**.
+- Oncoming vehicles travel fast on the left side, with **yellow headlights** — stay right. Red means
+  going away from you, yellow means coming at you, at every distance and in every size.
+- Both sets of lamps **bloom** (`?glow=0` turns that off, and the colours still tell you which is
+  which — the brightness change is in the pixels, not only in the glow).
 - **Collision = instant game over.** Plan overtakes well ahead — acceleration takes 15+ seconds.
 
 ---
@@ -117,11 +137,17 @@ The road alternates between five surface types. Each behaves differently — the
 
 | Surface | Colour | Acceleration | Grip | Speed drag | Brakes | Fuel burn | Skid? |
 |---------|--------|-------------|------|-----------|--------|-----------|-------|
-| **Asphalt** | Dark blue | 100% (25 km/h/s) | 1.00 | None | 100% | 1.0× | No |
-| **Snow** | White | 55% (13.75 km/h/s) | 0.55 | 4 km/h/s | 80% | 1.2× | Yes |
-| **Ice** | Cyan stripes | **180%** (45 km/h/s) | **0.25** | None | **50%** | 0.9× | **Yes** |
-| **Sand** | Yellow | **20%** (5 km/h/s) | 0.35 | **12 km/h/s** | 70% | 1.5× | No |
-| **Mud** | Red+yellow dither | 35% (8.75 km/h/s) | 0.45 | 8 km/h/s | 75% | 1.3× | Yes |
+| **Asphalt** | Dark blue | 100% | 1.00 | None | 18 km/h/s | 1.0× | No |
+| **Snow** | White | 55% | 0.45 | 4 | 12 km/h/s | 1.2× | Yes |
+| **Ice** | Cyan stripes | **180%** | **0.25** | None | **8 km/h/s** | 0.9× | **Yes** |
+| **Sand** | Yellow | **35%** | 0.35 | 3 | 10 km/h/s | 1.2× | No |
+| **Mud** | Red+yellow dither | 35% | 0.45 | 4 | 11 km/h/s | 1.3× | Yes |
+
+> These are `SURFACE_*` in `src/config.ts`, which is the source of truth — the table above is a
+> convenience copy and has drifted before. Snow's grip dropped from 0.55 to 0.45 in 0.11.1, which
+> makes it *harder to hold than mud* at the sharpest curve (55 km/h against 60): at equal grip the
+> steering damping and curve drift multipliers decide, and both favour mud. `AGENTS.md` has the
+> measured envelope for every surface at every curvature.
 
 ### Surface details
 
@@ -160,21 +186,42 @@ Fuel consumption is **quadratic** — the faster you go, the more fuel you burn 
 fuel_per_second = speed × (speed / MAX_SPEED) × BURN_RATE × SURFACE_FUEL_MULT
 ```
 
-Where `BURN_RATE = 0.00012`, `MAX_SPEED = 120 km/h`.
+Where `BURN_RATE = 0.000110`, `MAX_SPEED = 120 km/h`, fractions of a full tank.
 
-This means: **going slower saves fuel**, especially on expensive surfaces.
+Per **kilometre** it collapses to something much simpler, because the faster you go the less time
+you spend in that kilometre:
+
+```
+fuel_per_km = speed × 0.0033 × SURFACE_FUEL_MULT
+```
+
+So cost per kilometre is **linear in speed**: 30 km/h costs 9.9% of the tank, 60 km/h costs 19.8%,
+120 km/h costs 39.6%. Going slower saves fuel, especially on expensive surfaces.
 
 ### Fuel cost per 1 km at different speeds
 
-| Speed | Asphalt (×1.0) | Snow (×1.2) | Sand (×1.5) | Ice (×0.9) | Mud (×1.3) |
+| Speed | Asphalt (×1.0) | Snow (×1.2) | Sand (×1.2) | Ice (×0.9) | Mud (×1.3) |
 |-------|---------------|-------------|-------------|------------|------------|
-| 30 km/h | 1.1% tank | 1.3% | 1.6% | 1.0% | 1.4% |
-| 60 km/h | 4.3% | 5.2% | 6.5% | 3.9% | 5.6% |
-| 80 km/h | 7.7% | 9.2% | **11.5%** | 6.9% | 10.0% |
-| 100 km/h | 12.0% | 14.4% | **18.0%** | 10.8% | 15.6% |
-| 120 km/h | 17.3% | 20.7% | **25.9%** | 15.6% | 22.5% |
+| 30 km/h | 9.9% tank | 11.9% | 11.9% | 8.9% | 12.9% |
+| 60 km/h | 19.8% | 23.8% | 23.8% | 17.8% | 25.7% |
+| 80 km/h | 26.4% | 31.7% | 31.7% | 23.8% | 34.3% |
+| 100 km/h | 33.0% | 39.6% | 39.6% | 29.7% | 42.9% |
+| 120 km/h | 39.6% | 47.5% | 47.5% | 35.6% | 51.5% |
 
-**Key insight:** 800 m of sand at 30 km/h costs ~13% of your tank. At 80 km/h the same distance costs ~46%. Slow down on sand.
+**Key insight:** the road hands out **28.6% of a tank per kilometre** in canisters (one every 700 m,
+20% each). Set that equal to the burn and you get the speed at which fuel starts to be a real
+constraint:
+
+| Surface | Break-even speed |
+|---------|------------------|
+| Ice (×0.9) | 96 km/h |
+| Asphalt (×1.0) | **87 km/h** |
+| Snow / sand (×1.2) | 72 km/h |
+| Mud (×1.3) | 67 km/h |
+
+Below those speeds the road pays for itself, if you collect what it puts in front of you. Above
+them the tank is a clock. On most routes the controllability envelope forbids those speeds anyway,
+which is why fuel rarely decides a careful run — see `AGENTS.md`, "Playtest findings, 0.11.1".
 
 ### Running on empty
 
@@ -205,7 +252,15 @@ The first delivery target is at **5 km**. Reaching it awards:
 - **50% fuel refill** (half tank!)
 - Celebration jingle (C-E-G chord) + green border flash
 
-The next target is 15–25 km further. Each delivery restocks enough fuel to make the next run possible — if you drive efficiently.
+The next target is **5–8 km** further, drawn from the route seed. Every leg gets the same *average
+speed* to beat rather than the same number of minutes — the budget is `length / 37.5 km/h`, so the
+first leg is still exactly 8 minutes for 5 km — and **unused time carries over in full**. A leg used
+to reset the clock to a flat 8 minutes regardless of length, which made anything past the first
+delivery arithmetically impossible; that was fixed in 0.9.0.
+
+Both halves of that are being re-examined: a competent run holds 42–46 km/h against a 37.5 km/h
+pace, so the surplus compounds and the clock stops biting after the first delivery. Numbers in
+`AGENTS.md`.
 
 ---
 
@@ -349,8 +404,20 @@ Additional sound effects (beeper):
 
 | Event | Points |
 |-------|--------|
+| Every 100 m of road covered | +10, multiplied by the surface |
 | Delivery completed | +500 |
-| *(future: surface bonus, distance bonus)* | — |
+
+Surface multipliers: asphalt ×1.0, mud ×1.1, snow ×1.2, sand ×1.3, **ice ×1.4**. The road pays for
+itself now rather than only paying on arrival — 5 km of ice, every bend held, used to be worth the
+same nothing as 5 km of asphalt. Points land in whole 100 m blocks, never in `dt`-scaled fractions,
+so a slow machine and a fast one finish the same route with the same score.
+
+### Results screen
+
+A run ends on a summary rather than a headline: distance, total driving time (across every
+delivery, never reset), **average speed**, **canisters collected** and score. Average speed is the
+one number that turns a run into feedback — 5 km in 8 minutes is 38 km/h, and a run that reads 24
+lost the delivery to the ice long before the clock said so.
 
 ---
 
@@ -359,62 +426,91 @@ Additional sound effects (beeper):
 ```
 ┌────────────────────────────────┐
 │ SCORE 000000      DIST  1.2km │  status bar (2 rows)
-│ TIME  01:23      ICE AHEAD    │
+│ TIME  01:23      ICE 120m >>  │
 ├────────────────────────────────┤
 │                                │
-│    driving viewport (13 rows)  │
+│    driving viewport (11 rows)  │
 │                                │
 ├──────────┬─────────┬──────────┤
-│ E▮▮▮▮F   │    60   │ DELIVER  │  instrument panel (9 rows)
-│ NW N NE  │ ◯ km/h  │  3.8km   │  3 panels: gauges | speed | mission
-│ ▮▮  ▮▮   │ 0  120  │          │
+│ E▮▮▮▮F   │   ◯     │ DELIVER  │  instrument panel (9 rows)
+│ RPM ▮▮▮  │ RPM 0850│  3.8km   │  3 panels: drivetrain | tacho | mission
+│ GEAR 3/5 │ SPD  47 │  07:52   │
+│ GRIP ▮▮▮ │         │   20t    │
 └──────────┴─────────┴──────────┘
 ```
 
-Left panel: FUEL gauge (E–F), compass heading (3-direction), GRIP bars (no text labels).
-Centre: speedometer dial 0–120 km/h. Right: current mission + distance remaining.
+Left panel: FUEL bar, **RPM bar**, **GEAR** (current/total, flashing red on a refused downshift),
+GRIP bar. Centre: a **tachometer** — the needle is real engine revs and reddens at the redline —
+with numeric RPM and speed under it. The compass and the speedometer dial are gone; the centre
+panel became a tacho when the gearbox arrived, because what you need to read mid-corner is whether
+you are about to lug the engine. Right: mission, distance remaining, time left, gross weight.
 
 ---
 
 ## Tech
 
 - **256 × 192** game pixels (ZX Spectrum native), integer-scaled ×4
-- **15-colour ZX palette** only. 8×8 attribute colour clash is intentional
+- **15-colour ZX palette** in the framebuffer. 8×8 attribute colour clash is intentional
 - **TypeScript + Vite** — no runtime dependencies besides zx-kit
 - **AY-3-8912** chip emulation for 3-channel engine sound
 - All tunable constants in `src/config.ts`
 - CRT scanlines (alpha 0.7) + barrel distortion (intensity 0.6)
-- Headless capture: `node scripts/screenshot.mjs out.png`
+- **Lamp bloom** composited over the finished frame — the one place off-palette colour appears, and
+  it happens on the glass, in front of the scanlines, never in the framebuffer. `?glow=0` restores
+  a byte-identical picture
+- Headless capture: `node scripts/screenshot.mjs out.png`, contact sheets via
+  `node scripts/traffic-matrix.mjs`
 
 ## Project structure
 
 ```
 src/
-  main.ts              entry: canvas, scene loop, CRT, audio
+  main.ts              entry: canvas, scene loop, CRT, audio, URL switches
   config.ts            ALL tunable constants with JSDoc
   scenes/
     drive.ts           main driving scene
-    gameover.ts        game over screen (fuel/offroad)
+    gameover.ts        results screen
   game/
-    vehicle.ts         throttle/brake/steer + per-surface physics
+    vehicle.ts         throttle/brake/steer/clutch + per-surface physics
     road.ts            surface + curvature generator
+    roadgeometry.ts    where the road edge is, for off-road and for tests
+    offroad.ts         off-road detection + pixel-perfect traffic collision
+    traffic.ts         traffic spawner, car-following, brake state
     canisters.ts       fuel canister spawner + pickup
     roadside.ts        decorative objects (trees, lamps, signs)
+    mission.ts         delivery targets, the clock and its carry-over
+    score.ts           continuous scoring, paid by the block
+    runStats.ts        what a finished run was worth
+    seed.ts            one route per day, overridable with ?seed=
   render/
-    road3d.ts          pseudo-3D road + kerbs + canisters + roadside
-    truck.ts           16×32 rear-view truck bitmap (AttrMap)
+    road3d.ts          pseudo-3D road + kerbs + canisters + roadside + traffic
+    projection.ts      the shared curve-offset maths
+    vehicleRaster.ts   one raster per drawn vehicle: draw, collide, glow
+    vehicleLod.ts      far/detail tiers — meaning in the distance
+    vehicleContour.ts  the dark outline and contact shadow
+    vehicleGlow.ts     lamp bloom through zx-kit's glow layer
+    truck.ts           32×40 rear-view truck bitmap (AttrMap)
     hud.ts             3-panel instrument cluster
     topbar.ts          score/dist/time/warnings
+    sprites/           the hand-drawn vehicles and roadside objects
+    debug/             the traffic contact sheet (?matrix=1)
   audio/
     engine.ts          AY chip engine drone (3 channels)
 scripts/
   screenshot.mjs       headless Puppeteer capture
   drive-shot.mjs       automated drive + capture
+  traffic-matrix.mjs   contact sheets — the renderer comparison harness
 ```
 
 ## Roadmap
 
-See `CLAUDE.md` for the full phased roadmap. Current status: **Phase 2 complete** — 5 surfaces, skid mechanic, fuel system, delivery targets, game over, AY sound, roadside decorations.
+See `CLAUDE.md` for the full phased roadmap and `AGENTS.md` for what is actually being worked on
+next. Current status: **phases 1–5 essentially complete** — five surfaces with a measured
+controllability envelope, the skid mechanic, a manual clutched gearbox with stall and burn-out,
+fuel, traffic with pixel-perfect collision, proportional delivery targets, continuous scoring, a
+results screen, AY sound and roadside decoration. The graphics thread has been through one shared
+raster, an LOD tier, a hyperbolic growth curve, a hand redraw of all six vehicles and the lamp
+bloom. Next up: traffic density that scales with distance, then distance fog and night.
 
 ## License
 

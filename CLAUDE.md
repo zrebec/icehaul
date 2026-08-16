@@ -42,7 +42,7 @@ GitHub repo: `zrebec/icehaul`. Built on **[zx-kit](https://github.com/zrebec/zx-
 - **Colour clash is a feature, not a bug.** Use `drawBitmapAttrs` with `AttrMap` (per 8×8 cell ink/paper) so two adjacent palette colours visibly bleed across a sprite — that's the look.
 - Palette is the 15 hex values in `C` from `zx-kit/src/palette.ts`. No other colours **in the
   framebuffer**, ever. The one thing composited over it — the lamp bloom — is covered under
-  "What NOT to do" and is the owner's explicit exception, not a precedent.
+  "What NOT to do" and is Fox's explicit exception, not a precedent.
 
 ## HUD layout target (matches `first_impression.png`)
 
@@ -67,7 +67,7 @@ GitHub repo: `zrebec/icehaul`. Built on **[zx-kit](https://github.com/zrebec/zx-
 
 HUD has **3 equal-width panels** (256/3). Left ("drivetrain") panel, top→bottom: **FUEL** bar, **RPM** bar, **GEAR** (current/total), **GRIP** bar — with short labels. Centre ("tachometer") panel: an **rpm dial** (needle = real engine revs, reddens at redline) plus a numeric **RPM** (real revs) and numeric **SPD** (km/h). Right: mission info placeholder. Status bar is **4 rows** — no "ICE TRUCKER" title.
 
-> The centre panel was the **speed dial** until the lugging rework — it became a **tachometer** (owner idea 2.5, the "tach dial + prominent speed number" middle ground) so you can read real revs and see when you're lugging a too-tall gear. The left **RPM bar** now shows the raw ratio and CAN drop to 0 bars when lugging.
+> The centre panel was the **speed dial** until the lugging rework — it became a **tachometer** (Fox idea 2.5, the "tach dial + prominent speed number" middle ground) so you can read real revs and see when you're lugging a too-tall gear. The left **RPM bar** now shows the raw ratio and CAN drop to 0 bars when lugging.
 
 | Widget | zx-kit function |
 |--------|-----------------|
@@ -107,9 +107,10 @@ src/
   game/
     vehicle.ts       ✓ throttle/brake/steer + grip-scaled lateral physics
     road.ts          ✓ deterministic surface lookup (asphalt/ice)
+    runStats.ts      ✓ average speed + clock for the results screen (pure, tested)
   render/
     road3d.ts        ✓ scrolling pseudo-3D road with per-scanline surface
-    truck.ts         ✓ rear-view player truck sprite
+    truck.ts         ✓ rear-view player truck sprite (tail lamps RED / B_RED on the brake)
     vehicleGlow.ts   ✓ lamp bloom through zx-kit's glow layer (?glow=)
     hud.ts           ✓ bottom instrument cluster (SPEED wired, rest cosmetic)
     topbar.ts        ✓ score/title/dist/time/ice-ahead-blink
@@ -288,7 +289,7 @@ Re-score after every other phase. Drift triggers a scope cut.
 ## What NOT to do
 
 - Don't introduce non-Spectrum colours, anti-aliasing, or non-integer scaling. **One deliberate
-  exception, owner's decision (#43):** the lamp bloom is composited over the finished frame with
+  exception, Fox's decision (#43):** the lamp bloom is composited over the finished frame with
   `'lighter'`, and its white core puts off-palette colours *on the glass* — the same place the
   scanlines and the screen curve live. The framebuffer itself is untouched, and `?glow=0` restores
   a byte-identical frame. Do not extend this to anything the game actually draws.
