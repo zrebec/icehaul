@@ -70,12 +70,15 @@ export function applyFarLamps(
   // One row above the base, so the lamps sit on the body rather than in the
   // wheels — or the last row when the sprite is too short to have a choice.
   let lampRow = h >= 3 ? h - 2 : h - 1
-  let bounds = opaqueBounds(raster[lampRow]!)
-  // The chosen row can be entirely transparent at small sizes (a car's wheel gap
-  // survives the resample). Walk up to the first row that has body to write on.
+  let bounds = solidBodyBounds(raster[lampRow]!)
+  // The chosen row often is not body. It can be entirely transparent (a car's
+  // wheel gap survives the resample), and since the sprites were redrawn with
+  // separated wheels it can also be *split* — opaque at both ends with road
+  // showing between. Writing lamps into either loses them or paints them onto
+  // the tyres, so walk up to the first unbroken run of body.
   while (bounds === null && lampRow > 0) {
     lampRow--
-    bounds = opaqueBounds(raster[lampRow]!)
+    bounds = solidBodyBounds(raster[lampRow]!)
   }
   if (bounds === null) return raster
 
@@ -92,8 +95,15 @@ export function applyFarLamps(
   return out
 }
 
-/** First and last opaque column of a row, or `null` when it is all transparent. */
-function opaqueBounds(row: string): { left: number; right: number } | null {
+/**
+ * First and last column of an *unbroken* opaque run, or `null` when the row has
+ * no opaque cells or its opaque cells are split by a gap.
+ *
+ * The gap is what distinguishes a wheel row from a body row, and it is the only
+ * thing that can: at six pixels of height there is no other signal. A row that
+ * fails this test is not a row the lamps belong on.
+ */
+function solidBodyBounds(row: string): { left: number; right: number } | null {
   let left = -1
   let right = -1
   for (let x = 0; x < row.length; x++) {
@@ -101,7 +111,11 @@ function opaqueBounds(row: string): { left: number; right: number } | null {
     if (left < 0) left = x
     right = x
   }
-  return left < 0 ? null : { left, right }
+  if (left < 0) return null
+  for (let x = left; x <= right; x++) {
+    if (row[x] === '.') return null
+  }
+  return { left, right }
 }
 
 /**

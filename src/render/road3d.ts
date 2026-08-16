@@ -225,6 +225,13 @@ import { DECIDUOUS_ROWS, DECIDUOUS_COLORS, DECIDUOUS_W, DECIDUOUS_H } from './sp
 import { CONIFER_ROWS, CONIFER_COLORS, CONIFER_W, CONIFER_H } from './sprites/conifer.ts'
 import { ROCKS_ROWS, ROCKS_COLORS, ROCKS_W, ROCKS_H } from './sprites/rocks.ts'
 import { SIGNPOST_ROWS, SIGNPOST_COLORS, SIGNPOST_W, SIGNPOST_H } from './sprites/signpost.ts'
+import {
+  SAME_MINI_ROWS, ONCOMING_MINI_ROWS, SAME_CAR_ROWS, ONCOMING_CAR_ROWS,
+  SAME_BUS_ROWS, ONCOMING_BUS_ROWS,
+  SAME_MINI_COLORS, ONCOMING_MINI_COLORS, SAME_CAR_COLORS, ONCOMING_CAR_COLORS,
+  SAME_BUS_COLORS, ONCOMING_BUS_COLORS,
+  type RowColors,
+} from './sprites/vehicles.ts'
 
 /**
  * Draws fuel canisters on the road in perspective. Call AFTER drawRoad.
@@ -490,7 +497,10 @@ export function isContourEnabled(): boolean {
 // the drawn size is `ceil(sourceDimension * scale)`, read straight off the rows.
 // A table that had to be kept in step with the pixel data could only ever drift.
 
-type RowColors = Record<string, SpectrumColor>
+// The art itself lives in `sprites/vehicles.ts`, next to the roadside sprites
+// and away from the renderer that draws it. Read the header there before
+// changing a pixel: the drawings follow rules the resampler and the far LOD
+// tier depend on.
 
 export function getTrafficSpriteRows(dir: TrafficVehicle['dir'], type: VehicleType): readonly string[] {
   if (dir === 'oncoming') {
@@ -758,131 +768,6 @@ function drawRoadsideRows(
       ctx.fillRect(p.left + x, p.top + y, 1, 1)
     }
   }
-}
-
-const SAME_MINI_ROWS = [
-  '...XXXXXXXX...',
-  '..XXXXXXXXXX..',
-  '.XXXWWWWXXXX..',
-  '.XXXXXXXXXXXX.',
-  'XXXXXXXXXXXXXX',
-  'XXXXRRRRXXXXXX',
-  'XXXRRRRRRXXXXX',
-  'XXXXYYYYXXXXXX',
-  '.XXBBXXXXBBXX.',
-  '..BBB....BBB..',
-  '..............',
-] as const
-
-const ONCOMING_MINI_ROWS = [
-  '....XXXXXX....',
-  '...XXXXXXXX...',
-  '..XXWWWWWWXX..',
-  '.XXWWWWWWWWXX.',
-  'XXXXXXXXXXXXXX',
-  'XXBBBXXBBBXXXX',
-  'XYYBBXXBBYYXXX',
-  '.XXXBBBBXXXX..',
-  '.XXYYYYYYYYXX.',
-  '..BB......BB..',
-  '..............',
-] as const
-
-const SAME_CAR_ROWS = [
-  '....XXXXXXXXXXXXXX....',
-  '...XXXXXXXXXXXXXXXX...',
-  '..XXXXWWWWWWXXXXXX....',
-  '.XXXXXWWWWWWXXXXXXX...',
-  '.XXXXXXXXXXXXXXXXXXX..',
-  'XXXXXXXXXXXXXXXXXXXXX.',
-  'XXXXXXXXXXXXXXXXXXXXXX',
-  'XXXXXXRRRRRRRRXXXXXXX.',
-  'XXXXXRRRRRRRRRRXXXXXX.',
-  'XXXXXXXYYYYYYXXXXXXXX.',
-  '.XXXXBBBBXXXXBBBBXXX..',
-  '..XXXBBBBXXXXBBBBXX...',
-  '..XXXXXX......XXXX....',
-  '...BBBB......BBBB.....',
-  '......................',
-] as const
-
-const ONCOMING_CAR_ROWS = [
-  '.......XXXXXXXX.......',
-  '.....XXXXXXXXXXXX.....',
-  '....XXWWWWWWWWWWXX....',
-  '...XXWWWWWWWWWWWWXX...',
-  '..XXXXXXXXXXXXXXXXXX..',
-  '.XXXXXXXXXXXXXXXXXXXX.',
-  'XXXBBBXXXXXXXXBBBXXXXX',
-  'XXYYYYXXXXXXXXYYYYXXXX',
-  'XXXYYYBBBBBBBBYYYXXXXX',
-  '.XXXXBBBBBBBBBBXXXXXX.',
-  '.XXXXXXYYYYYYXXXXXXXX.',
-  '..XXXXYYYYYYYYXXXXXX..',
-  '..BBBXXXXXXXXXXXXBBB..',
-  '...BBB..........BBB...',
-  '......................',
-] as const
-
-const SAME_BUS_ROWS = [
-  '..XXXXXXXXXXXXXXXXXXXXXXXX..',
-  '.XXXXXXXXXXXXXXXXXXXXXXXXXX.',
-  'XXXWWWWWWWWWWWWWWWWWWWWXXX..',
-  'XXXWWWWWWWWWWWWWWWWWWWWXXX..',
-  'XXXXXXXXXXXXXXXXXXXXXXXXXXXX',
-  'XXYYXXYYXXYYXXYYXXYYXXYYXXXX',
-  'XXXXXXXXXXXXXXXXXXXXXXXXXXXX',
-  'XXXXXXXXXXXXXXXXXXXXXXXXXXXX',
-  'XXXXRRRRRRRRRRRRRRRRRRXXXXXX',
-  'XXXRRRRRRRRRRRRRRRRRRRRXXXXX',
-  'XXXRRRRRRRRRRRRRRRRRRRRXXXXX',
-  'XXXXXYYYYYYYYYYYYYYYYXXXXXXX',
-  'XXXXBBBBXXXXXXXXBBBBXXXXXXX.',
-  'XXXBBBBBBXXXXXXBBBBBBXXXX...',
-  'XXXXBBBBXXXXXXXXBBBBXXXX....',
-  '..XXXXXX........XXXXXX......',
-  '...BBBB........BBBB.........',
-  '............................',
-] as const
-
-const ONCOMING_BUS_ROWS = [
-  '....XXXXXXXXXXXXXXXXXXXX....',
-  '..XXXXXXXXXXXXXXXXXXXXXXXX..',
-  '.XXWWWWWWWWWWWWWWWWWWWWWWXX.',
-  'XXWWWWWWWWWWWWWWWWWWWWWWWWXX',
-  'XXWWWWWWWWWWWWWWWWWWWWWWWWXX',
-  'XXWWWWWWWWWWWWWWWWWWWWWWWWXX',
-  'XXXXXXXXXXXXXXXXXXXXXXXXXXXX',
-  'XXXBBBBBBBBBBBBBBBBBBBBBBXXX',
-  'XXBBBBBBBBBBBBBBBBBBBBBBBBXX',
-  'XXYYYBBBBBBBBBBBBBBBBBBYYYXX',
-  'XYYYYYBBBBBBBBBBBBBBBBYYYYYX',
-  'XXXXXXYYYYYYYYYYYYYYYYXXXXXX',
-  'XXXXYYYYYYYYYYYYYYYYYYYYXXXX',
-  'XXXBBBBXXXXXXXXXXXXBBBBXXXXX',
-  'XXBBBBBBXXXXXXXXXXBBBBBBXXXX',
-  '.XXXXXX............XXXXXX...',
-  '..BBBB..............BBBB....',
-  '............................',
-] as const
-
-const SAME_MINI_COLORS: RowColors = {
-  X: C.B_GREEN, W: C.CYAN, R: C.B_RED, B: C.BLACK, Y: C.B_YELLOW,
-}
-const ONCOMING_MINI_COLORS: RowColors = {
-  X: C.B_WHITE, W: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
-}
-const SAME_CAR_COLORS: RowColors = {
-  X: C.B_GREEN, W: C.CYAN, R: C.B_RED, B: C.BLACK, Y: C.B_YELLOW,
-}
-const ONCOMING_CAR_COLORS: RowColors = {
-  X: C.B_WHITE, W: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
-}
-const SAME_BUS_COLORS: RowColors = {
-  X: C.B_RED, W: C.CYAN, Y: C.B_YELLOW, R: C.RED, B: C.BLACK,
-}
-const ONCOMING_BUS_COLORS: RowColors = {
-  X: C.B_RED, W: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
 }
 
 // ── Roadside objects rendering ───────────────────────────────────────────────
