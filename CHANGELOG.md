@@ -1,3 +1,10 @@
+# [0.9.0](https://github.com/zrebec/icehaul/compare/v0.8.2...v0.9.0) (2026-08-16)
+
+
+### Features
+
+* **score:** pay for the road covered, not only for arriving ([#41](https://github.com/zrebec/icehaul/issues/41)) ([d228df5](https://github.com/zrebec/icehaul/commit/d228df5ba35a0c468ef4dee5156d4a19d104f0f5)), closes [#40](https://github.com/zrebec/icehaul/issues/40)
+
 ## [0.8.2](https://github.com/zrebec/icehaul/compare/v0.8.1...v0.8.2) (2026-08-16)
 
 
