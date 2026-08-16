@@ -142,7 +142,7 @@ export const SURFACE_ACCEL: Record<Surface, number> = {
 /** Per-surface grip (0–1). Steering + damping + centrifugal drift. */
 export const SURFACE_GRIP: Record<Surface, number> = {
   asphalt: 1.0,
-  snow: 0.55,
+  snow: 0.45,
   ice: 0.25,
   sand: 0.35,
   mud: 0.45,
@@ -1119,7 +1119,7 @@ export const CRT_CURVE_INTENSITY = 0.6
  * scanline note above). 0.8 with two passes is the owner's "must be visible to
  * the naked eye". Overridable per-run with `?glow=0.5`.
  */
-export const GLOW_ALPHA = 0.8
+export const GLOW_ALPHA = 0.4
 /** Emissive layer is scaled down by this before the bilinear upscale spreads it —
  *  that scaling IS the blur. 2 gives a 128 x 96 buffer: soft, still local. */
 export const GLOW_DOWNSCALE = 2
@@ -1154,7 +1154,7 @@ export const GLOW_RADIUS_PER_HEIGHT = 1.4
  * still reads, because it is carried by the halo's colour and never by having
  * two of them.
  */
-export const GLOW_RADIUS_MIN = 4
+export const GLOW_RADIUS_MIN = 3
 /**
  * Hard cap, in pixels. Still a cap — without one a bus in the last metres would
  * light half the viewport — but set where the bloom is allowed to be obvious.
@@ -1173,7 +1173,7 @@ export const GLOW_INTENSITY_TRAFFIC = 1
  * white instead of staying a flat red rectangle with a glow beside it. Nothing
  * in the framebuffer changes; it happens on the glass, like the scanlines.
  */
-export const GLOW_CORE_INTENSITY = 0.9
+export const GLOW_CORE_INTENSITY = 0.5
 /** Core radius as a fraction of the vehicle's drawn height, floored and capped
  *  much tighter than the halo — a core that spreads is just a second halo. */
 export const GLOW_CORE_RADIUS_PER_HEIGHT = 0.3
@@ -1187,7 +1187,7 @@ export const GLOW_CORE_RADIUS_MAX = 4
  * far away the halo's **colour is the only thing that says which way the vehicle
  * is going**. Close up the shape already says it, so the light may blow out.
  */
-export const GLOW_CORE_MIN_HEIGHT = 10
+export const GLOW_CORE_MIN_HEIGHT = 8
 
 /**
  * The player's own tail lamps, which are on screen every single frame.
@@ -1212,7 +1212,7 @@ export const TRUCK_GLOW_BRAKE_INTENSITY = 1
  * reaches its neighbours is spent before it finds anything dark. These radii
  * reach the road either side, which is where the light becomes visible at all.
  */
-export const TRUCK_GLOW_RADIUS = 12
-export const TRUCK_GLOW_BRAKE_RADIUS = 18
+export const TRUCK_GLOW_RADIUS = 10
+export const TRUCK_GLOW_BRAKE_RADIUS = 10
 /** Brake-light core radius. Fixed for the same reason as the radii above. */
-export const TRUCK_GLOW_CORE_RADIUS = 3
+export const TRUCK_GLOW_CORE_RADIUS = 2

@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Ice Haul — ZX Spectrum ice-road trucking micro-sim. Risk management, not speed. Built on zx-kit.",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 5174",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run"
