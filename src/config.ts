@@ -969,18 +969,50 @@ export const LOW_FUEL_CRIT_BEEP_COOLDOWN_S = 0.4
 
 /** Distance of the first delivery target from start (metres). */
 export const FIRST_TARGET_DIST_M = 5000
-/** Range for subsequent targets [min, max] metres beyond current position. */
-export const NEXT_TARGET_RANGE: readonly [number, number] = [15000, 25000]
+/**
+ * Range for subsequent leg lengths [min, max] metres beyond the delivery point.
+ *
+ * Was [15000, 25000] against a flat 8-minute budget, which asked for an average
+ * of 113 to 188 km/h — `MAX_SPEED` is 120, so nine of those ten kilometres were
+ * unreachable at any skill level and the tenth needed the truck flat out from
+ * the first frame. Now the budget scales with the leg (`MISSION_PACE_KMH`), so
+ * the range only has to be a length worth driving rather than a length that
+ * happens to fit a fixed clock.
+ */
+export const NEXT_TARGET_RANGE: readonly [number, number] = [5000, 8000]
 /** Fuel refill fraction awarded on successful delivery (0–1). */
 export const DELIVERY_FUEL_REFILL = 0.50
 /** Score points awarded per delivery. */
 export const DELIVERY_SCORE = 500
 /**
- * Time limit per delivery in milliseconds (8 minutes).
- * Raised from 7 → 8 min when the manual gearbox made acceleration much slower:
- * a careful (conservative) driver must still be able to finish 5 km on time.
+ * The average speed a leg's time budget assumes, in km/h.
+ *
+ * 37.5 km/h is not a new number: it is exactly what the tuned first leg already
+ * asks for (5 km in 8 minutes), so deriving every budget from it leaves the
+ * first leg untouched and gives every later leg the same promise. For scale,
+ * the ideal driver in `completability.test.ts` averages ~46 km/h across the seed
+ * catalogue and the owner's human run of the reference seed averaged ~38.5.
  */
-export const DELIVERY_TIME_LIMIT_MS = 8 * 60 * 1000
+export const MISSION_PACE_KMH = 37.5
+/**
+ * Time limit for the first delivery in milliseconds.
+ *
+ * Derived rather than written down, so "the first leg's budget does not change"
+ * is an equation a test can check instead of a promise in a comment. Works out
+ * at exactly 8 minutes, which is what it was before the pace existed — raised
+ * from 7 when the manual gearbox made acceleration much slower.
+ */
+export const DELIVERY_TIME_LIMIT_MS =
+  Math.round(FIRST_TARGET_DIST_M / 1000 / MISSION_PACE_KMH * 3_600_000)
+/**
+ * How much of a leg's unused time carries into the next one (0–1).
+ *
+ * 1.0 — drive well and you bank every second of it, which is what the owner
+ * chose and what the delivery jingle implies. Watch it across a long run: time
+ * saved compounds, so by the fifth delivery the clock may have stopped being a
+ * pressure at all. If it does, this is the dial — no code changes with it.
+ */
+export const DELIVERY_TIME_CARRY_PCT = 1.0
 
 // ── Traffic ─────────────────────────────────────────────────────────────────
 

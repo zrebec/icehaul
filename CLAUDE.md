@@ -206,13 +206,13 @@ that. Slowing down always works, which was not true before 0.4.0 — see `AGENTS
 
 Each phase is self-contained, ends with a runnable build, and leaves the previous scene playable. Time estimates assume part-time work with AI assistance.
 
-> **⚠️ Known and unfixed as of 0.8.1 — the mission cannot be completed past the first delivery.**
-> The timer *resets* to 8 minutes on delivery rather than adding, and `NEXT_TARGET_RANGE` then asks
-> for 15–25 km. `MAX_SPEED = 120` caps 8 minutes at **16 km**, so most of that range is
-> arithmetically impossible and the rest needs 113 km/h average on a route with ice and bends.
-> `completability.test.ts` never caught it because its bot stops at 5 km. Full arithmetic, both fix
-> options and the recommendation: **`AGENTS.md` → "Playtest findings, 0.8.1"**, which also covers
-> continuous scoring, snow grip, and why one surface dominates a route.
+> **Mission timing lives in `src/game/mission.ts`, not in the drive scene.** A leg's time budget is
+> `length / MISSION_PACE_KMH`, so every leg asks the same average speed and the first leg still gets
+> exactly 8 minutes; unused time carries over rather than resetting the clock. It was three locals
+> inside `drive.ts` until 0.8.1 shipped a second leg no player could reach — the extraction is what
+> lets `completability.test.ts` simulate three legs. Background, measurements and what is still open
+> (continuous scoring, snow grip, why one surface dominates a route): **`AGENTS.md` → "Playtest
+> findings, 0.8.1"**.
 >
 > **Recent (through 0.8.1, 2026-08-15):** traffic now fits its lane and sits in it. The road's width
 > law and the vehicle's size law are separate fakes with their own additive terms, so their ratio

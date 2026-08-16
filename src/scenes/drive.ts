@@ -11,8 +11,7 @@ import {
   EDGE_MARGIN_WARN_PX,
   LOW_FUEL_WARN, LOW_FUEL_CRITICAL,
   LOW_FUEL_BEEP_COOLDOWN_S, LOW_FUEL_CRIT_BEEP_COOLDOWN_S,
-  FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE,
-  DELIVERY_FUEL_REFILL, DELIVERY_SCORE, DELIVERY_TIME_LIMIT_MS,
+  DELIVERY_FUEL_REFILL, DELIVERY_SCORE,
   OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S, CRASH_ANIM_MS,
   TRAFFIC_COLLISION_DEPTH_M,
   CRANK_NEEDED_MS,
@@ -35,6 +34,9 @@ import { checkCanisterPickup, getVisibleCanisters, resetCanisters } from '../gam
 import { getRoadsideObjects } from '../game/roadside.ts'
 import { tickTraffic, getVisibleTraffic, resetTraffic } from '../game/traffic.ts'
 import { computeRoadEdges } from '../game/roadgeometry.ts'
+import {
+  createMission, tickMission, deliverIfArrived, isMissionExpired, remainingM,
+} from '../game/mission.ts'
 import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../game/offroad.ts'
 
 function hash(n: number): number {
@@ -176,9 +178,7 @@ export function createDriveScene(
   // player notices is a nasty way to lose a delivery.
   window.addEventListener('blur', () => { clutchHeld = false })
 
-  let targetDist = FIRST_TARGET_DIST_M
-  let deliveryCount = 0
-  let missionTimerMs = DELIVERY_TIME_LIMIT_MS
+  const mission = createMission(gameSeed)
 
   return {
     name: 'drive',
@@ -469,14 +469,13 @@ export function createDriveScene(
       }
 
       // Mission timer
-      missionTimerMs = Math.max(0, missionTimerMs - dt)
+      tickMission(mission, dt)
 
-      // Delivery
-      if (v.distance >= targetDist) {
-        deliveryCount++
+      // Delivery — the clock, the next target and the carry-over all live in
+      // game/mission.ts, so the completability bot walks the same rules.
+      if (deliverIfArrived(mission, v.distance)) {
         score += DELIVERY_SCORE
         v.fuel = Math.min(1, v.fuel + DELIVERY_FUEL_REFILL)
-        missionTimerMs = DELIVERY_TIME_LIMIT_MS
         if (ctxAudio) {
           playPattern([
             { freq: 523, dur: 80 }, { freq: 0, dur: 20 },
@@ -485,14 +484,12 @@ export function createDriveScene(
           ])
         }
         flashBorder(C.B_GREEN, 3, 150)
-        const [minD, maxD] = NEXT_TARGET_RANGE
-        targetDist = v.distance + minD + (maxD - minD) * hash(deliveryCount * 71)
       }
 
       // Game over
       if (v.fuel <= 0 && v.speed < 1) triggerGameOver('fuel')
       else if (offroadAccumS > OFFROAD_TIMEOUT_S) startCrash('offroad')
-      else if (missionTimerMs <= 0) triggerGameOver('timeout')
+      else if (isMissionExpired(mission)) triggerGameOver('timeout')
 
       function startCrash(reason: 'offroad' | 'crash') {
         crashReason = reason
@@ -559,7 +556,7 @@ export function createDriveScene(
       const steerDir: -1 | 0 | 1 = v.vx < -0.1 ? -1 : v.vx > 0.1 ? 1 : 0
       drawTruck(ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5, steerDir)
 
-      const timeLeftSec = Math.ceil(missionTimerMs / 1000)
+      const timeLeftSec = Math.ceil(mission.timerMs / 1000)
       const tlMin = Math.floor(timeLeftSec / 60).toString().padStart(2, '0')
       const tlSec = (timeLeftSec % 60).toString().padStart(2, '0')
 
@@ -572,7 +569,7 @@ export function createDriveScene(
         fuelPct: v.fuel,
         gripPct: currentGrip,
         missionText: 'DELIVER',
-        missionDist: Math.max(0, (targetDist - v.distance) / 1000),
+        missionDist: remainingM(mission, v.distance) / 1000,
         missionTimeLeft: `${tlMin}:${tlSec}`,
         buildNumber: __BUILD_NUMBER__,
         weightT,
