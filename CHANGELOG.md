@@ -1,3 +1,10 @@
+# [0.12.0](https://github.com/zrebec/icehaul/compare/v0.11.1...v0.12.0) (2026-08-16)
+
+
+### Features
+
+* **game:** a brake you can see and a run you can read ([#45](https://github.com/zrebec/icehaul/issues/45)) ([0cbb5d9](https://github.com/zrebec/icehaul/commit/0cbb5d9860c0d0d7112911c62c60ddf21f338586)), closes [#42](https://github.com/zrebec/icehaul/issues/42)
+
 ## [0.11.1](https://github.com/zrebec/icehaul/compare/v0.11.0...v0.11.1) (2026-08-16)
 
 
