@@ -1,3 +1,10 @@
+## [0.8.2](https://github.com/zrebec/icehaul/compare/v0.8.1...v0.8.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **mission:** give every leg a clock it can be driven against ([#40](https://github.com/zrebec/icehaul/issues/40)) ([7538c85](https://github.com/zrebec/icehaul/commit/7538c850a7ad0d89ea65d471c6f41aea8dd7fd14))
+
 ## [0.8.1](https://github.com/zrebec/icehaul/compare/v0.8.0...v0.8.1) (2026-08-15)
 
 
