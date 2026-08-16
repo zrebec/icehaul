@@ -37,6 +37,7 @@ import { computeRoadEdges } from '../game/roadgeometry.ts'
 import {
   createMission, tickMission, deliverIfArrived, isMissionExpired, remainingM,
 } from '../game/mission.ts'
+import { createScore, accrueScore, addScoreBonus } from '../game/score.ts'
 import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../game/offroad.ts'
 
 function hash(n: number): number {
@@ -92,7 +93,7 @@ export function createDriveScene(
 ): Scene {
   const v: Vehicle = createVehicle()
   let elapsedMs = 0
-  let score = 0
+  const score = createScore()
   let blinkPhase = true
   let blinkAccum = 0
   let engineStarted = false
@@ -468,13 +469,16 @@ export function createDriveScene(
         flashBorder(C.B_YELLOW, 1, 100)
       }
 
+      // The road pays by the block covered, weighted by what it asked of you.
+      accrueScore(score, v.distance, getSurfaceAt)
+
       // Mission timer
       tickMission(mission, dt)
 
       // Delivery — the clock, the next target and the carry-over all live in
       // game/mission.ts, so the completability bot walks the same rules.
       if (deliverIfArrived(mission, v.distance)) {
-        score += DELIVERY_SCORE
+        addScoreBonus(score, DELIVERY_SCORE)
         v.fuel = Math.min(1, v.fuel + DELIVERY_FUEL_REFILL)
         if (ctxAudio) {
           playPattern([
@@ -508,7 +512,7 @@ export function createDriveScene(
       function triggerGameOver(reason: 'fuel' | 'offroad' | 'timeout' | 'crash') {
         gameOverFired = true
         stopEngine()
-        onGameOver({ distance: v.distance, elapsedMs, reason, score })
+        onGameOver({ distance: v.distance, elapsedMs, reason, score: score.points })
       }
     },
 
@@ -520,7 +524,7 @@ export function createDriveScene(
       const fuelCrit = v.fuel < LOW_FUEL_CRITICAL
 
       drawTopBar(ctx, {
-        distance: v.distance, score, elapsedMs,
+        distance: v.distance, score: score.points, elapsedMs,
         dangerAhead: isDangerAhead(v.distance),
         curveAhead: sharpCurveAhead(v.distance),
         iceAheadBlink: blinkPhase,

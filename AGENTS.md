@@ -7,16 +7,17 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.8.1 (2026-08-15), 395 tests. Everything below is done and merged unless marked.
+State at 0.8.2 (2026-08-16), 406 tests. Everything below is done and merged unless marked.
 
 > **The graphics thread is parked, not finished.** 0.8.1 shipped and was played end to end, and the
 > playtest turned up four things — one of them a mission that was arithmetically impossible to
 > complete. **Read "Playtest findings, 0.8.1" below before picking up the sprite work**; the ordered
 > graphics list further down is still correct but is no longer the top of the queue.
 >
-> **§1 (impossible mission) is fixed** — proportional budget, shorter targets, seeded draw, and the
-> rules extracted to `game/mission.ts` so three legs can be simulated. §2 (continuous score) is next
-> and is the other half of the same work. §3 (snow) and §4 (surface dominance, not a bug) stand.
+> **§1 (impossible mission) and §2 (continuous score) are both fixed** — the mission rules and the
+> scoring rules are now pure modules with their own tests, and the bot simulates three legs. §2½
+> records what the 0.8.2 playtest said about where the difficulty actually lives. §3 (snow) and §4
+> (surface dominance, not a bug) stand. **The sprite work is now the top of the queue.**
 
 **Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
 speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
@@ -52,14 +53,14 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 **Next, in order:**
 
-0. **Make the score continuous.** The other half of item 0; the mission half is done. 10 points per
-   100 m × the surface, per §2 of the playtest findings. It changes what a leg is *worth*, which is
-   why it was scoped alongside leg length — now that legs are 5–8 km, the numbers in §2 hold.
 1. **Redraw the six traffic sprites by hand.** They were auto-imported and are asymmetric, have
    their rear lamps in the middle of the car, and have no wheel gap. No renderer can fix that, and
-   after #35 it is unambiguously the largest thing left. **Still the top of the graphics list** —
-   it is only behind item 0 because item 0 is a game that cannot be finished.
-1½. **Snow grip**, if it is being played anyway — one constant plus a controllability re-pin.
+   after #35 it is unambiguously the largest thing left. **Now the top of the whole queue**, and
+   §2½ raised its stakes: traffic is where the difficulty actually lives, and there is going to be
+   more of it.
+1½. **Traffic density scaling with distance** — owner's, from the 0.8.2 playtest (§2½). Deliberately
+   *after* the redraw: more traffic means seeing the same six drawings more often.
+1¾. **Snow grip**, if it is being played anyway — one constant plus a controllability re-pin.
 2. **Lamps through the `glow` layer.** `glow` and `lighting` ship in zx-kit 0.42 with zero consumers
    here.
 3. **Distance fog**, then night per the open decision below.
@@ -160,7 +161,7 @@ Two things the multi-leg sweep found that are **not** new and were not touched: 
 identical with the canister detour disabled, so it is the strategies, not the detour), and the
 single-leg sweep still proves the FUEL OUT path because a one-leg run never collects canisters.
 
-#### 2 · Score is a single lump, and should be continuous
+#### 2 · Score is a single lump, and should be continuous — **fixed, see the end of this section**
 
 `score += DELIVERY_SCORE` (500) on delivery is the only thing that ever moves the score. 5 km of
 driving, every hazard survived, and the number reads 500 whatever happened along the way.
@@ -183,6 +184,51 @@ not dominant signal, which is the right shape. The delivery lump can stay as a c
 
 Note the interaction with §1: continuous score makes distance intrinsically worth something, which
 weakens the argument for long legs and strengthens "shrink the targets".
+
+##### What was done
+
+Built as specified, in `src/game/score.ts`. Two implementation choices are worth knowing because
+neither is visible from the config:
+
+- **Points land in whole 100 m blocks, not per frame.** A `dt`-scaled payout would make the final
+  score depend on the frame rate, so the same route would score differently on a slow machine — the
+  kind of bug that surfaces months later on someone else's hardware with no way to reproduce.
+- **A block is valued at its midpoint**, so one block is worth one surface, chosen deterministically,
+  rather than whichever surface was under the wheels on the frame the block ticked over.
+
+Each block's payout is rounded to a whole point. Not cosmetic: `10 * 1.1` is `11.000000000000002` in
+binary floating point, and the top bar prints the score with `toString()`.
+
+Measured on real routes, 5 km of driving before the delivery bonus:
+
+| | |
+|---|---|
+| all asphalt / all ice | 500 / 700 — the control numbers from the spec |
+| seed 42 (ordinary mix) | 565 |
+| seed 1443866 (48.5 % ice) | 608 |
+
+So the ice premium is worth about 8 % on a heavy route against an ordinary one — present, readable,
+and nowhere near enough to make farming ice a strategy. Which is the shape that was wanted.
+
+#### 2½ · What the clock is actually for — 0.8.2 playtest
+
+Owner, after playing the proportional budget: *"time was not the brake. The brake was that I nearly
+crashed several times because of the traffic — and that is fine, that is how it should be."*
+
+Two things follow, and both are decisions rather than observations:
+
+- **The banked-time figure is not a problem to fix.** The measurement stands — the ideal driver
+  reaches drop-off 3 with 15.8 to 21.8 minutes on the clock — but a slack clock is only a fault if
+  the clock was meant to be the difficulty. It is not. `DELIVERY_TIME_CARRY_PCT` stays at 1.0 and
+  nothing here gets tightened to compensate. **Do not "fix" this without being asked.**
+- **Traffic is the difficulty, and it is under-supplied.** Owner wants more of it, scaling with
+  distance travelled: the longer a run, the busier the road. That is a real mechanic and not a
+  tuning tweak — it interacts with the frozen fleet (six sprites, no seventh until the
+  sprite-or-polygon decision) because more traffic means seeing the same six drawings more often,
+  which raises the cost of them being wrong. So: **redraw first, then raise the density.**
+
+Recorded as an owner decision, not yet implemented. `TRAFFIC_SPACING_M` is the lever; a distance
+term would go in `game/traffic.ts` where spacing is drawn.
 
 #### 3 · Snow is too easy
 
