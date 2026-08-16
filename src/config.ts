@@ -1076,3 +1076,143 @@ export const ICE_AHEAD_LOOK_M = 220
 
 export const SCANLINE_ALPHA = 0.7
 export const CRT_CURVE_INTENSITY = 0.6
+
+// ── Emissive glow (lamps) ───────────────────────────────────────────────────
+//
+// Filed with the CRT effect rather than with traffic on purpose: like scanlines
+// and the screen curve, glow happens **on the glass**. The framebuffer keeps the
+// flat 15-colour palette — nothing here recolours a single game pixel — and the
+// bloom is composited over the finished frame with `'lighter'`. `?glow=0` blits
+// nothing, and the frame is then byte-for-byte what it was before this existed.
+//
+// Sizes these are tuned against: a car is about 3 px tall at 220 m and 21 px at
+// the last metre, a bus 26 px. The whole road viewport is 88 px.
+//
+// ── Why the second set of numbers is so much larger than the first ──────────
+// Everything here was first tuned on the contact sheet and then failed in the
+// game, for a reason worth stating once: **`?matrix=1` never draws scanlines**,
+// and the game draws them over every frame at `SCANLINE_ALPHA = 0.7`. That is
+// two of the four device rows of every game pixel taken to 30% brightness, so
+// the whole picture — bloom included — plays at **0.65** of what the sheet
+// showed. Judging a brightness on the sheet therefore over-read by 1.54x. The
+// sheet can now draw them too (`?scanlines=1`), and the glow is now blitted
+// *after* them, which is where the biggest single gain came from.
+
+/**
+ * Bloom strength — the `globalAlpha` of the additive blit.
+ *
+ * `AGENTS.md` costed this at 0.2-0.35 before anything emitted glow. Measured on
+ * an oncoming car at zoom 6 against `?glow=0`:
+ *
+ *     alpha   pixels changed   mean delta   peak delta
+ *     0.28        0.61 %           14           66 / 765
+ *     0.35        0.64 %           17           82
+ *     0.60        0.72 %           26          142
+ *     0.90        0.77 %           37          214
+ *
+ * The reason the low end vanishes is worth keeping: the blob's peak lands on the
+ * **lamp**, and a lamp is already `#FFFF00`. Additive light cannot brighten a
+ * saturated channel, so everything the player actually sees is the blob's tail
+ * falling on the dark road around it — a small fraction of the energy.
+ *
+ * 0.60 measured well on the sheet and was still invisible in the game (see the
+ * scanline note above). 0.8 with two passes is the owner's "must be visible to
+ * the naked eye". Overridable per-run with `?glow=0.5`.
+ */
+export const GLOW_ALPHA = 0.8
+/** Emissive layer is scaled down by this before the bilinear upscale spreads it —
+ *  that scaling IS the blur. 2 gives a 128 x 96 buffer: soft, still local. */
+export const GLOW_DOWNSCALE = 2
+/**
+ * Additive blits per frame.
+ *
+ * The honest way past `alpha`'s ceiling of 1: a second blit of the same buffer
+ * adds the same light again, so two passes is roughly twice the halo without
+ * touching its shape. Three starts to flatten the falloff into a disc.
+ */
+export const GLOW_PASSES = 2
+
+/**
+ * Halo radius as a fraction of the vehicle's drawn height.
+ *
+ * Derived from the vehicle rather than fixed, or a bus at 200 m would wear the
+ * same halo as a car at arm's length and distance would stop reading. The height
+ * is the *drawn* height, which is an output of the resampler — see the rule in
+ * `AGENTS.md`: a vehicle's size is never an input.
+ *
+ * 1.4 makes the halo wider than the vehicle is tall, which is what "modern
+ * bloom" means and what the owner asked for. A near car's lower body ends up
+ * washed in its own light; that is the effect, not a defect.
+ */
+export const GLOW_RADIUS_PER_HEIGHT = 1.4
+/**
+ * Floor, in pixels.
+ *
+ * At 4 px the two lamps of a distant car **merge into one glowing point**, which
+ * `AGENTS.md` used to forbid as a smear. Deliberately reversed: at 220 m a car
+ * is 3 px tall, and one point that can be seen beats two that cannot. Direction
+ * still reads, because it is carried by the halo's colour and never by having
+ * two of them.
+ */
+export const GLOW_RADIUS_MIN = 4
+/**
+ * Hard cap, in pixels. Still a cap — without one a bus in the last metres would
+ * light half the viewport — but set where the bloom is allowed to be obvious.
+ */
+export const GLOW_RADIUS_MAX = 18
+/** Brightness of a traffic lamp's halo, 0..1, before the layer alpha. */
+export const GLOW_INTENSITY_TRAFFIC = 1
+
+/**
+ * The white-hot core: a second, small source drawn in `B_WHITE` on top of the
+ * coloured halo.
+ *
+ * This is the one place the game puts a colour on screen that is not in the
+ * palette, and it is deliberate — see `CLAUDE.md`. Additive white raises the
+ * green and blue channels of a red lamp, so the lamp itself blows out toward
+ * white instead of staying a flat red rectangle with a glow beside it. Nothing
+ * in the framebuffer changes; it happens on the glass, like the scanlines.
+ */
+export const GLOW_CORE_INTENSITY = 0.9
+/** Core radius as a fraction of the vehicle's drawn height, floored and capped
+ *  much tighter than the halo — a core that spreads is just a second halo. */
+export const GLOW_CORE_RADIUS_PER_HEIGHT = 0.3
+export const GLOW_CORE_RADIUS_MIN = 2
+export const GLOW_CORE_RADIUS_MAX = 4
+/**
+ * Shortest drawn vehicle that gets a core, in pixels.
+ *
+ * Set at the far/detail LOD boundary (`LOD_FAR_MAX_HEIGHT`, roughly 50 m for a
+ * car) because of what the core costs: it desaturates the halo toward white, and
+ * far away the halo's **colour is the only thing that says which way the vehicle
+ * is going**. Close up the shape already says it, so the light may blow out.
+ */
+export const GLOW_CORE_MIN_HEIGHT = 10
+
+/**
+ * The player's own tail lamps, which are on screen every single frame.
+ *
+ * Dimmer than traffic on purpose: it is a constant in the corner of the eye and
+ * must not compete with the road. Braking is the exception — that is real
+ * feedback about a real input.
+ *
+ * The truck's raster does **not** change on the brake (owner's call), so the
+ * whole signal has to come from the light: it brightens, it grows, and it gains
+ * a core. One of those alone is what made the first attempt unnoticeable —
+ * intensity 0.65 -> 1.0 was a peak of 61 -> 93 out of 765, before scanlines took
+ * a further third of it.
+ */
+export const TRUCK_GLOW_INTENSITY = 0.55
+export const TRUCK_GLOW_BRAKE_INTENSITY = 1
+/**
+ * Fixed — the truck sprite never changes size, so nothing can derive it — and
+ * larger than a traffic halo, for a reason that only applies to this sprite: its
+ * lamps are **surrounded by its own bright pixels**, a white bumper above and
+ * cyan wheels below. Additive light cannot brighten white, so a halo that only
+ * reaches its neighbours is spent before it finds anything dark. These radii
+ * reach the road either side, which is where the light becomes visible at all.
+ */
+export const TRUCK_GLOW_RADIUS = 12
+export const TRUCK_GLOW_BRAKE_RADIUS = 18
+/** Brake-light core radius. Fixed for the same reason as the radii above. */
+export const TRUCK_GLOW_CORE_RADIUS = 3

@@ -19,10 +19,11 @@ import { createDriveScene } from './scenes/drive.ts'
 import { createGameOverScene } from './scenes/gameover.ts'
 import { roadSeedFromSearch } from './game/seed.ts'
 import {
-  contourEnabledFromSearch,
+  contourEnabledFromSearch, glowSettingsFromSearch,
   drawTrafficMatrix, isMatrixRequested, matrixLayoutFor, matrixOptionsFromSearch,
 } from './render/debug/trafficMatrix.ts'
 import { setContourEnabled } from './render/road3d.ts'
+import { renderPendingLampGlow, setGlowSettings } from './render/vehicleGlow.ts'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 
@@ -30,6 +31,11 @@ const canvas = document.getElementById('game') as HTMLCanvasElement
 // two can be compared on identical frames. Read before anything renders, and it
 // applies to the contact sheet as well as to the game.
 setContourEnabled(contourEnabledFromSearch(window.location.search))
+
+// ?glow=0 / ?glow=0.35 — the lamp bloom, off or at a chosen strength. Same
+// reason and the same place: both switches exist to be compared, and both have
+// to be settled before the first frame reaches the glass.
+setGlowSettings(glowSettingsFromSearch(window.location.search))
 
 // ?matrix=1 — the traffic contact sheet, not the game. Renders one static image
 // and stops: no scene manager, no input, no audio, no frame loop. It exists so a
@@ -90,6 +96,12 @@ function bootGame(): void {
     renderUI(ctx)
 
     if (SCANLINE_ALPHA > 0) drawScanlines(ctx, SCANLINE_ALPHA)
+
+    // Last, and after the scanlines on purpose. A lamp's bloom is light on the
+    // glass; drawn any earlier it sits under an overlay that takes the whole
+    // picture to 65% brightness, which is how the first version came out
+    // invisible in the game while looking right on the contact sheet.
+    renderPendingLampGlow(ctx)
 
     requestAnimationFrame(frame)
   }

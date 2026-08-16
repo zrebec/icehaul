@@ -26,7 +26,8 @@ import {
   drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic,
   projectTrafficVehicle,
 } from '../render/road3d.ts'
-import { drawTruck, TRUCK_BMP_H, TRUCK_BMP_W } from '../render/truck.ts'
+import { drawTruck, pushTruckLampSpots, TRUCK_BMP_H, TRUCK_BMP_W } from '../render/truck.ts'
+import { clearPendingGlow, pendingGlow } from '../render/vehicleGlow.ts'
 import { drawHUD } from '../render/hud.ts'
 import { drawTopBar } from '../render/topbar.ts'
 import { startEngine, updateEngine, stopEngine, muteEngine, unmuteEngine } from '../audio/engine.ts'
@@ -138,6 +139,7 @@ export function createDriveScene(
   let lastCoughS = -1
   let lastBuzzS = -1
   let gearBlockFlashMs = 0
+  let braking = false
   // Debug: W cycles gross weight (10/20/30 t) so the mass→accel effect is feelable
   // before the cargo system exists. 20 t = default = today's tuned feel.
   let weightT: number = TRUCK_WEIGHT_T
@@ -292,6 +294,9 @@ export function createDriveScene(
       shiftUpQueued = false
       shiftDownQueued = false
       restartQueued = false
+      // Remembered for the render pass: the tail lamps brighten on the brake, and
+      // input belongs to the update tick rather than being polled again below.
+      braking = input.brake
       const gearBefore = v.gear
 
       const surface: Surface = getSurfaceAt(v.distance)
@@ -540,9 +545,11 @@ export function createDriveScene(
       drawRoadsideObjects(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, roadside,
         (d) => getCurvatureAt(d))
 
+      clearPendingGlow()
+      const glowSpots = pendingGlow()
       const traffic = getVisibleTraffic(v.distance, TRAFFIC_VIEW_DISTANCE_M)
       drawTraffic(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, traffic,
-        (d) => getCurvatureAt(d))
+        (d) => getCurvatureAt(d), glowSpots)
 
       const visible = getVisibleCanisters(v.distance, PERSPECTIVE_K)
       drawCanisters(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, visible,
@@ -559,6 +566,16 @@ export function createDriveScene(
       }
       const steerDir: -1 | 0 | 1 = v.vx < -0.1 ? -1 : v.vx > 0.1 ? 1 : 0
       drawTruck(ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5, steerDir)
+
+      // The truck's own lamps are dead metal while the engine is out — a stalled
+      // truck on the ice is exactly the moment the game should stop reassuring.
+      if (driveState === 'playing' && !v.stalled) {
+        pushTruckLampSpots(
+          glowSpots, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5, steerDir, braking,
+        )
+      }
+      // Nothing is blitted here. The lights are handed to `main.ts`, which lays
+      // them over the frame *after* the scanlines — see `vehicleGlow.ts`.
 
       const timeLeftSec = Math.ceil(mission.timerMs / 1000)
       const tlMin = Math.floor(timeLeftSec / 60).toString().padStart(2, '0')
