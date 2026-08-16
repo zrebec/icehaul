@@ -1,3 +1,10 @@
+# [0.11.0](https://github.com/zrebec/icehaul/compare/v0.10.0...v0.11.0) (2026-08-16)
+
+
+### Features
+
+* **render:** light the lamps ([#43](https://github.com/zrebec/icehaul/issues/43)) ([a8d8805](https://github.com/zrebec/icehaul/commit/a8d8805d84411fc36290b4c5d05413f6450b79f5)), closes [#42](https://github.com/zrebec/icehaul/issues/42) [#FFFF00](https://github.com/zrebec/icehaul/issues/FFFF00)
+
 # [0.10.0](https://github.com/zrebec/icehaul/compare/v0.9.0...v0.10.0) (2026-08-16)
 
 
