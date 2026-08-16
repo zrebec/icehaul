@@ -1,5 +1,5 @@
 /**
- * Completability simulation — first 5 km (first delivery target).
+ * Completability simulation — the delivery run.
  *
  * Runs the vehicle physics frame-by-frame (16 ms ticks, ~60 fps) with a
  * proportional speed controller and a simple steering P-controller that
@@ -25,6 +25,21 @@
  * "is there enough time and fuel" stays answerable independently of "can it be
  * steered". Two questions, two verdicts — collapsing them would mean one broken
  * axis blinds the other. See `controllability.test.ts` for the lateral envelope.
+ *
+ * ── Past the first delivery ─────────────────────────────────────────────────
+ * The sweep below stops at 5 km, and for a long time that was the whole file —
+ * which is exactly how 0.8.1 shipped a second leg asking for 15 to 25 km against
+ * a clock that had just been reset to eight minutes. "Completable" meant "the
+ * first leg is completable" and nothing more.
+ *
+ * So `runSim` now takes a leg count and walks the real `game/mission.ts` state
+ * machine, the same one the drive scene runs. Beyond one leg the driver also has
+ * to refuel: a delivery only pays back half a tank and a leg costs most of one,
+ * so canisters stop being a bonus and become the thing that keeps the run alive.
+ * The bot detours for them the way a human does — only when it needs the fuel,
+ * only when the road is straight enough and grippy enough to be worth leaving
+ * the middle for — and confirms the pickup by calling the game's own
+ * `checkCanisterPickup`, never a re-derived threshold.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -32,9 +47,13 @@ import { resetRoad, getSurfaceAt, getCurvatureAt, getGripAt, accelFor, type Surf
 import { createVehicle, tickVehicle } from '../vehicle.ts'
 import { computeRoadEdges } from '../roadgeometry.ts'
 import { checkTruckOffroad } from '../offroad.ts'
+import { resetCanisters, getVisibleCanisters, checkCanisterPickup } from '../canisters.ts'
+import {
+  createMission, tickMission, deliverIfArrived, isMissionExpired, legBudgetMs,
+} from '../mission.ts'
 import { TRUCK_BMP_W, TRUCK_BMP_H } from '../../render/truck.ts'
 import {
-  DELIVERY_TIME_LIMIT_MS, FIRST_TARGET_DIST_M,
+  DELIVERY_TIME_LIMIT_MS, FIRST_TARGET_DIST_M, DELIVERY_FUEL_REFILL,
   SURFACE_FUEL_MULT, GEARS, GEAR_COUNT, CLUTCH_MATCH_TOLERANCE,
   GAME_WIDTH, VIEWPORT_BOTTOM, OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S,
 } from '../../config.ts'
@@ -87,6 +106,21 @@ interface SegmentSummary {
   fuelMult: number
 }
 
+/** One delivery leg, as the mission handed it out and as the driver drove it. */
+interface LegSummary {
+  /** 1-based leg number. */
+  index: number
+  lengthM: number
+  timeS: number
+  /** What the mission allowed for this leg alone, ignoring anything banked. */
+  budgetS: number
+  /** Time still on the clock at the drop-off — this is what carries over. */
+  timeLeftS: number
+  fuelStart: number
+  fuelEnd: number
+  canisters: number
+}
+
 interface SimResult {
   strategy: string
   completed: boolean
@@ -96,6 +130,12 @@ interface SimResult {
   fuelRemaining: number
   avgKph: number
   segments: SegmentSummary[]
+  /** Completed deliveries. */
+  deliveries: number
+  /** Per-leg breakdown; empty for a run that never reached a drop-off. */
+  legs: LegSummary[]
+  /** Canisters picked up, across the whole run. */
+  canisters: number
   /** Worst off-road severity seen (0 = never left the road). */
   maxOffroadSeverity: number
   /** Surface the truck was on when it first left the road, if it ever did. */
@@ -160,6 +200,60 @@ function plannedTarget(distM: number, targetKph: Strategy): number {
   return slowest * curveSpeedFactor(distM)
 }
 
+/**
+ * ── Refuelling detour ───────────────────────────────────────────────────────
+ * A delivery pays back half a tank and a leg costs most of one, so past the
+ * first drop-off the run lives or dies on canisters. These say when the driver
+ * is willing to leave the middle of the road for one — the same judgement a
+ * human makes, and deliberately conservative on all three axes.
+ */
+/** Fuel level below which the driver starts detouring for canisters. */
+const CANISTER_SEEK_FUEL = 0.65
+/** How far ahead a canister has to be to be worth aiming at (metres). */
+const CANISTER_SEEK_LOOK_M = 260
+/**
+ * Grip below which the driver stays in the middle whatever the fuel says.
+ * Swerving for a jerrycan on ice is how you end up in the snowbank, and the
+ * off-road assertion below would rightly call that a failure of the route.
+ */
+const CANISTER_SEEK_MIN_GRIP = 0.6
+/**
+ * Sharpest curvature the driver will detour through. A bend moves the road
+ * out from under a truck that is already off-centre.
+ */
+const CANISTER_SEEK_MAX_CURVE = 0.8
+/**
+ * Lateral limit for the detour. Canisters sit at up to ±0.9 and the pickup
+ * radius is 0.25, so ±0.7 reaches every one of them while keeping the truck
+ * clear of the kerb — measured: at x = 1.0 on a straight there are 3 px of
+ * road left, and a bend eats more than that.
+ */
+const CANISTER_SEEK_MAX_X = 0.7
+
+/**
+ * Where the driver wants to be laterally: the middle, unless it is short of
+ * fuel and there is a canister ahead worth a detour.
+ */
+function canisterAimX(distM: number, fuel: number): number {
+  if (fuel >= CANISTER_SEEK_FUEL) return 0
+  if (getGripAt(distM) < CANISTER_SEEK_MIN_GRIP) return 0
+  if (Math.abs(getCurvatureAt(distM)) > CANISTER_SEEK_MAX_CURVE) return 0
+
+  const ahead = getVisibleCanisters(distM, CANISTER_SEEK_LOOK_M)
+  let nearest: number | null = null
+  let nearestDist = Infinity
+  for (const c of ahead) {
+    const gap = c.distM - distM
+    if (gap <= 0 || gap >= nearestDist) continue
+    // Do not commit to a detour that a bend between here and there would spoil.
+    if (Math.abs(getCurvatureAt(c.distM)) > CANISTER_SEEK_MAX_CURVE) continue
+    nearest = c.x
+    nearestDist = gap
+  }
+  if (nearest === null) return 0
+  return Math.max(-CANISTER_SEEK_MAX_X, Math.min(CANISTER_SEEK_MAX_X, nearest))
+}
+
 /** Mirrors `drive.ts:547` — where the truck is drawn for a given lateral state. */
 function truckDrawPos(playerX: number, lateralV: number) {
   return {
@@ -176,8 +270,26 @@ const MULTI_SEEDS = [0, 1, 7, 42, 99, 137, 256, 500, 777, 999,
                      1234, 2025, 4096, 8888, 12345, 19999, 55555, 99999, 123456, 999999,
                      1443866]
 
-function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResult {
+interface SimOptions {
+  /** Deliveries to attempt. 1 — the default — is the original first-leg run. */
+  legs?: number
+  /** Let the driver detour for canisters. Required for more than one leg. */
+  collectCanisters?: boolean
+}
+
+function runSim(
+  strategyName: string,
+  targetKph: Strategy,
+  seed = SEED,
+  opts: SimOptions = {},
+): SimResult {
+  const legCount = opts.legs ?? 1
+  const collectCanisters = opts.collectCanisters ?? false
+
   resetRoad(seed)
+  // Same offset the drive scene uses, so the sim meets the canisters the player
+  // would meet on this route rather than a different set.
+  resetCanisters((seed + 2) >>> 0)
   const v = createVehicle()
 
   let elapsedMs     = 0
@@ -198,6 +310,16 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
   let offroadAccumS = 0
   let offroadSurface: Surface | null = null
   let offroadCrashAtM: number | null = null
+
+  // Mission state — the real one from game/mission.ts, so this bot cannot pass
+  // a leg the drive scene would have handed out differently.
+  const mission = createMission(seed)
+  const legs: LegSummary[] = []
+  let canisters = 0
+  let legStartDist = 0
+  let legStartTime = 0
+  let legStartFuel = v.fuel
+  let legCanisters = 0
 
   function flushSegment(currentSurface: Surface, nowDist: number, nowTime: number, nowFuel: number) {
     const lengthM = nowDist - segStartDist
@@ -223,7 +345,7 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
     segStartFuel = nowFuel
   }
 
-  while (v.distance < FIRST_TARGET_DIST_M && elapsedMs < DELIVERY_TIME_LIMIT_MS) {
+  while (mission.deliveryCount < legCount && !isMissionExpired(mission)) {
     const surface  = getSurfaceAt(v.distance) as Surface
     const curvature = getCurvatureAt(v.distance)
     const grip     = getGripAt(v.distance)
@@ -235,9 +357,11 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
     const throttle = v.speed < target
     const brake    = v.speed > target + 5
 
-    // Steering P-controller — keep x near 0, counter vx drift
-    const steerLeft  = v.x > 0.08 || v.vx > 0.12
-    const steerRight = v.x < -0.08 || v.vx < -0.12
+    // Steering P-controller — hold the aim line, counter vx drift. The aim is
+    // the middle of the road unless the driver is detouring for fuel.
+    const aimX = collectCanisters ? canisterAimX(v.distance, v.fuel) : 0
+    const steerLeft  = v.x > aimX + 0.08 || v.vx > 0.12
+    const steerRight = v.x < aimX - 0.08 || v.vx < -0.12
 
     // Auto-gearbox — keep revs in the power band so the ideal driver can use the
     // full speed range (mirrors what a human does with A/D shifting). rpm = speed / to.
@@ -315,6 +439,40 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
     }
 
     elapsedMs += DT_MS
+    tickMission(mission, DT_MS)
+
+    // Refuelling — the same call drive.ts makes, so a pickup here is a pickup
+    // there. Skipped entirely on a single-leg run, which is what keeps the
+    // "aggressive runs dry" assertion below meaningful.
+    if (collectCanisters) {
+      const gained = checkCanisterPickup(v.distance, v.x)
+      if (gained > 0) {
+        v.fuel = Math.min(1, v.fuel + gained)
+        canisters++
+        legCanisters++
+      }
+    }
+
+    // Delivery. `mission.legStartDist` becomes the drop-off we just reached, so
+    // the leg that ended is the span from where the last one started.
+    if (deliverIfArrived(mission, v.distance)) {
+      const lengthM = mission.legStartDist - legStartDist
+      legs.push({
+        index: mission.deliveryCount,
+        lengthM: Math.round(lengthM),
+        timeS: Math.round((elapsedMs - legStartTime) / 100) / 10,
+        budgetS: Math.round(legBudgetMs(lengthM) / 100) / 10,
+        timeLeftS: Math.round(mission.timerMs / 100) / 10,
+        fuelStart: Math.round(legStartFuel * 1000) / 1000,
+        fuelEnd: Math.round(v.fuel * 1000) / 1000,
+        canisters: legCanisters,
+      })
+      v.fuel = Math.min(1, v.fuel + DELIVERY_FUEL_REFILL)
+      legStartDist = mission.legStartDist
+      legStartTime = elapsedMs
+      legStartFuel = v.fuel
+      legCanisters = 0
+    }
 
     if (v.fuel <= 0 && v.speed < 1) {
       flushSegment(surface, v.distance, elapsedMs, v.fuel)
@@ -327,6 +485,9 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
         fuelRemaining: 0,
         avgKph: v.distance / 1000 / (elapsedMs / 3_600_000),
         segments,
+        deliveries: mission.deliveryCount,
+        legs,
+        canisters,
         maxOffroadSeverity,
         offroadSurface,
         offroadCrashAtM,
@@ -337,7 +498,7 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
   const finalSurface = getSurfaceAt(v.distance) as Surface
   flushSegment(finalSurface, v.distance, elapsedMs, v.fuel)
 
-  const timedOut = elapsedMs >= DELIVERY_TIME_LIMIT_MS && v.distance < FIRST_TARGET_DIST_M
+  const timedOut = mission.deliveryCount < legCount
   return {
     strategy: strategyName,
     completed: !timedOut,
@@ -347,6 +508,9 @@ function runSim(strategyName: string, targetKph: Strategy, seed = SEED): SimResu
     fuelRemaining: Math.round(v.fuel * 1000) / 1000,
     avgKph: Math.round(v.distance / 1000 / (elapsedMs / 3_600_000) * 10) / 10,
     segments,
+    deliveries: mission.deliveryCount,
+    legs,
+    canisters,
     maxOffroadSeverity,
     offroadSurface,
     offroadCrashAtM,
@@ -540,6 +704,8 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
   })
 
   it('aggressive strategy is fuel-limited on at least one seed — FUEL OUT path is reachable', () => {
+    // NOTE: this is a single-leg run, which is why it is still true — a
+    // single-leg run never collects canisters. See the multi-leg block below.
     // Confirms the drive.ts triggerGameOver("fuel") path is exercisable in practice,
     // not just theoretically wired. Aggressive burns fuel fast on heavy-surface seeds;
     // the sim has no canister pickups, so it runs dry before finishing 5 km on those seeds.
@@ -548,5 +714,134 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
       return agg.failReason === 'fuel'
     })
     expect(fuelOut.length).toBeGreaterThan(0)
+  })
+})
+
+// ─── Past the first delivery ─────────────────────────────────────────────────
+//
+// The gap that let 0.8.1 ship a mission nobody could finish. Everything above
+// stops at 5 km, so the second leg — a different length, on a clock that carries
+// over, with a tank that only got half a refill — had never been simulated once.
+
+const MULTI_LEG_COUNT = 3
+const MULTI_LEG_SEEDS = [1443866, 534501, 1327161, 52662, 42]
+
+describe(`completability — ${MULTI_LEG_COUNT} legs (past the first delivery)`, () => {
+  type LegRun = { seed: number; results: SimResult[]; best: SimResult }
+
+  const runs: LegRun[] = MULTI_LEG_SEEDS.map(seed => {
+    const results = Object.entries(STRATEGIES).map(([name, s]) =>
+      runSim(name, s, seed, { legs: MULTI_LEG_COUNT, collectCanisters: true }))
+    const best = results.reduce((a, b) =>
+      (b.completed && !a.completed) ? b :
+      (a.completed && !b.completed) ? a :
+      b.deliveries > a.deliveries ? b :
+      b.distanceM > a.distanceM ? b : a
+    )
+    return { seed, results, best }
+  })
+
+  it('prints the per-leg breakdown', () => {
+    for (const { seed, results } of runs) {
+      console.log(`\n═══ seed ${seed} — ${MULTI_LEG_COUNT} legs ═══`)
+      for (const r of results) {
+        const status = r.completed
+          ? `✓ ${r.deliveries}/${MULTI_LEG_COUNT} deliveries`
+          : `✗ ${r.failReason} after ${r.deliveries} (at ${r.distanceM}m)`
+        console.log(`  ${r.strategy.padEnd(13)} ${status}  ${r.canisters} canisters`)
+        console.log(
+          '    ' + 'Leg'.padEnd(4) + 'Length(m)'.padStart(10) + 'Budget(s)'.padStart(10) +
+          'Time(s)'.padStart(9) + 'Left(s)'.padStart(9) + 'Fuel in'.padStart(9) +
+          'Fuel out'.padStart(9) + 'Cans'.padStart(6),
+        )
+        for (const l of r.legs) {
+          console.log(
+            '    ' + String(l.index).padEnd(4) + String(l.lengthM).padStart(10) +
+            String(l.budgetS).padStart(10) + String(l.timeS).padStart(9) +
+            String(l.timeLeftS).padStart(9) +
+            (l.fuelStart * 100).toFixed(1).padStart(9) +
+            (l.fuelEnd * 100).toFixed(1).padStart(9) +
+            String(l.canisters).padStart(6),
+          )
+        }
+      }
+    }
+    expect(runs.length).toBe(MULTI_LEG_SEEDS.length)
+  })
+
+  it('at least one strategy completes every leg on every seed', () => {
+    // The assertion 0.8.1 was missing. Before the proportional budget this
+    // failed on all five seeds at the first delivery: the second leg asked for
+    // 15 to 25 km inside eight minutes, which is 113 to 188 km/h against a
+    // MAX_SPEED of 120.
+    const failed = runs.filter(r => !r.best.completed)
+    if (failed.length > 0) {
+      console.log(`\n❌ ${failed.length}/${runs.length} seed(s) cannot be finished past the first delivery:`)
+      for (const f of failed) {
+        console.log(`  seed ${f.seed}: best=${f.best.strategy} got ${f.best.deliveries}/${MULTI_LEG_COUNT} (${f.best.failReason} at ${f.best.distanceM}m)`)
+      }
+    }
+    expect(failed.length).toBe(0)
+  })
+
+  it('the winning run clears each leg inside that leg\'s own budget', () => {
+    // Carry-over must be a reward, not a crutch. If a leg only fits because of
+    // time banked earlier, the pace is a lie and the first bad leg ends the run.
+    const overrun = runs.flatMap(r =>
+      r.best.legs
+        .filter(l => l.timeS > l.budgetS)
+        .map(l => ({ seed: r.seed, strategy: r.best.strategy, l })),
+    )
+    if (overrun.length > 0) {
+      console.log('\n❌ Leg(s) that only fit because of banked time:')
+      for (const { seed, strategy, l } of overrun) {
+        console.log(`  seed ${seed} ${strategy} leg ${l.index}: ${l.lengthM}m took ${l.timeS}s against a ${l.budgetS}s budget`)
+      }
+    }
+    expect(overrun.length).toBe(0)
+  })
+
+  it('never runs dry — half a tank plus canisters covers a leg', () => {
+    // A delivery only refills DELIVERY_FUEL_REFILL and a leg costs most of a
+    // tank, so this is really an assertion about canister density.
+    const dry = runs.filter(r => r.best.failReason === 'fuel')
+    if (dry.length > 0) {
+      console.log('\n❌ Ran out of fuel past the first delivery:')
+      for (const d of dry) {
+        console.log(`  seed ${d.seed}: dry at ${d.best.distanceM}m after ${d.best.deliveries} deliveries, ${d.best.canisters} canisters collected`)
+      }
+    }
+    expect(dry.length).toBe(0)
+  })
+
+  it('the refuelling detour never puts the truck off the road', () => {
+    // The bot leaves the middle of the road to collect, which is a new way to
+    // fail that the single-leg runs never had. Measured: severity stays at 0,
+    // so the ±0.7 aim clamp plus the grip and curvature gates hold.
+    const crashed = runs.flatMap(r =>
+      r.results
+        .filter(x => x.offroadCrashAtM !== null)
+        .map(x => ({ seed: r.seed, x })),
+    )
+    if (crashed.length > 0) {
+      console.log('\n❌ Off-road while running multiple legs:')
+      for (const { seed, x } of crashed) {
+        console.log(`  seed ${seed}: ${x.strategy} left the road at ${Math.round(x.offroadCrashAtM!)}m on ${x.offroadSurface}`)
+      }
+    }
+    expect(crashed.length).toBe(0)
+  })
+
+  it('reports how much time the carry-over banks by the last leg', () => {
+    // Not an assertion — a number the owner asked to watch. Unused time carries
+    // over in full (DELIVERY_TIME_CARRY_PCT = 1.0), so a good driver arrives at
+    // each drop-off with more clock than the leg was given. If this keeps
+    // climbing, the clock has stopped being a pressure and the dial is the fix.
+    console.log('\nBanked time at each drop-off (winning strategy):')
+    for (const r of runs) {
+      const banked = r.best.legs.map(l => `leg ${l.index}: ${(l.timeLeftS / 60).toFixed(1)} min`).join('   ')
+      console.log(`  seed ${String(r.seed).padEnd(8)} ${banked}`)
+    }
+    expect(runs.every(r => r.best.legs.length === MULTI_LEG_COUNT)).toBe(true)
   })
 })

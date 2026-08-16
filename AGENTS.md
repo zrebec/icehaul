@@ -7,12 +7,16 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.8.1 (2026-08-15), 374 tests. Everything below is done and merged unless marked.
+State at 0.8.1 (2026-08-15), 395 tests. Everything below is done and merged unless marked.
 
 > **The graphics thread is parked, not finished.** 0.8.1 shipped and was played end to end, and the
-> playtest turned up four things — one of them a mission that is arithmetically impossible to
+> playtest turned up four things — one of them a mission that was arithmetically impossible to
 > complete. **Read "Playtest findings, 0.8.1" below before picking up the sprite work**; the ordered
 > graphics list further down is still correct but is no longer the top of the queue.
+>
+> **§1 (impossible mission) is fixed** — proportional budget, shorter targets, seeded draw, and the
+> rules extracted to `game/mission.ts` so three legs can be simulated. §2 (continuous score) is next
+> and is the other half of the same work. §3 (snow) and §4 (surface dominance, not a bug) stand.
 
 **Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
 speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
@@ -48,11 +52,9 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 **Next, in order:**
 
-0. **Make the mission completable, and make the score continuous.** New, and it goes first because
-   the game currently asks for a distance no player can cover — see "Playtest findings, 0.8.1"
-   below. The two belong in one piece of work: continuous score changes what a leg is *worth*,
-   which is an input to how long a leg should be. Also extend `completability.test.ts` past the
-   first delivery, which is the gap that let this ship.
+0. **Make the score continuous.** The other half of item 0; the mission half is done. 10 points per
+   100 m × the surface, per §2 of the playtest findings. It changes what a leg is *worth*, which is
+   why it was scoped alongside leg length — now that legs are 5–8 km, the numbers in §2 hold.
 1. **Redraw the six traffic sprites by hand.** They were auto-imported and are asymmetric, have
    their rear lamps in the middle of the car, and have no wheel gap. No renderer can fix that, and
    after #35 it is unambiguously the largest thing left. **Still the top of the graphics list** —
@@ -77,7 +79,7 @@ costs anything, and a third tier would only put back a boundary where there is c
 Owner played the released 0.8.1 end to end and reported four things. All four are recorded here
 with the arithmetic behind them; none is fixed yet. The first is the one that matters.
 
-#### 1 · The mission is impossible after the first delivery
+#### 1 · The mission is impossible after the first delivery — **fixed, see the end of this section**
 
 Reported as: *"5 km is doable in 8 minutes, but when you get there you only gain 2 minutes and you
 are asked for 22 km, which is impossible."*
@@ -121,6 +123,42 @@ the next time leg length changes. Either way `completability.test.ts` has to gro
 Related, and worth fixing in the same pass: the next target is drawn with `hash(deliveryCount * 71)`
 — **no `_seed`** — so every route in the game asks for the same sequence of distances. Everything
 else about a route is seeded; this is not.
+
+##### What was done
+
+Both fixes, not one: a proportional budget **and** shorter targets. `MISSION_PACE_KMH = 37.5` is not
+a new number — it is exactly what the tuned first leg already asks (5 km in 8 min), so
+`DELIVERY_TIME_LIMIT_MS` is now *derived* from it and comes out at the same 480 000 ms it always was.
+Every later leg gets `length / pace`, so the clock makes one promise everywhere. `NEXT_TARGET_RANGE`
+went to `[5000, 8000]`, the draw now mixes in the route seed, and unused time carries over in full
+(`DELIVERY_TIME_CARRY_PCT = 1.0`, owner's call) instead of the clock jumping back to a fixed budget.
+
+The rules left `drive.ts` and became **`src/game/mission.ts`** — a plain state machine with no
+canvas, audio or vehicle in it. That is the structural half of the fix: while the mission lived as
+three locals inside a scene closure there was nothing to unit-test, which is the real reason this
+shipped. `mission.test.ts` now pins the arithmetic and `completability.test.ts` walks **three legs**
+through that same state machine.
+
+Measured across five seeds after the fix (aggressive strategy, 3 legs each):
+
+| | |
+|---|---|
+| legs completed | 15/15, none on banked time — every leg fits its own budget |
+| fuel | never ran dry; +50 % refill plus canisters is enough |
+| off-road | severity 0.00 — the refuelling detour never leaves the road |
+| leg lengths drawn | 5100 – 7470 m, spread across the range |
+
+**One number to watch, and it is a design consequence rather than a defect.** Full carry-over banks
+a lot: the ideal driver arrives at drop-off 3 with **15.8 to 21.8 minutes** on the clock, against a
+leg budget of 8 to 12. By the third delivery the timer has stopped being a pressure. The owner chose
+full carry deliberately and it is one constant to turn down — `DELIVERY_TIME_CARRY_PCT` — but it
+wants a playtest verdict rather than a quiet tune. `completability.test.ts` prints the banked figure
+per leg on every run so the trend stays visible.
+
+Two things the multi-leg sweep found that are **not** new and were not touched: `moderate` and
+`conservative` cannot finish the first leg at all on the ice-heavy catalogue seeds (measured
+identical with the canister detour disabled, so it is the strategies, not the detour), and the
+single-leg sweep still proves the FUEL OUT path because a one-leg run never collects canisters.
 
 #### 2 · Score is a single lump, and should be continuous
 
@@ -559,11 +597,13 @@ never overshoots a target speed and never has to recover from a slide. Every see
 more fuel — the reference seed's human margin was 12 s against the bot's 61 s. Treat these as
 "the route is not impossible", not as a par score.
 
-**And note what it does not cover: the bot stops at 5 km.** It walks the first delivery and no
-further, so it has never once seen the second leg — which is why a target range that is
-arithmetically unreachable (§1 of the playtest findings) survived every green run. "Completable"
-currently means "the first leg is completable". Extending the walk past the first delivery is part
-of item 0 in the queue.
+**These two columns are still a 5 km, single-leg measurement** — that run collects no canisters, so
+the numbers stay comparable with everything recorded before the mission fix.
+
+The bot no longer stops there, though. A separate block walks **three legs** on five of these seeds
+through the real `game/mission.ts`, refuelling from canisters on the way; that is what now answers
+"can the game be finished", and it is the block that would have caught §1 of the playtest findings.
+Its per-leg table prints on every run.
 
 ### Adding more
 
