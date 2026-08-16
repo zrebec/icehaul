@@ -1,3 +1,10 @@
+## [0.11.1](https://github.com/zrebec/icehaul/compare/v0.11.0...v0.11.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **config:** edited some settings in game ([#44](https://github.com/zrebec/icehaul/issues/44)) ([2a812e0](https://github.com/zrebec/icehaul/commit/2a812e0e5c29196f2d404da85afbc4216aaef115))
+
 # [0.11.0](https://github.com/zrebec/icehaul/compare/v0.10.0...v0.11.0) (2026-08-16)
 
 
