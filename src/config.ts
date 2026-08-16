@@ -1211,8 +1211,10 @@ export const TRUCK_GLOW_BRAKE_INTENSITY = 1
  * cyan wheels below. Additive light cannot brighten white, so a halo that only
  * reaches its neighbours is spent before it finds anything dark. These radii
  * reach the road either side, which is where the light becomes visible at all.
+ * 
+ * Rrmeber: TRUCK_GLOW_BRAKE_RADIUS must be greater than TRUCK_GLOW_RADIUS
  */
-export const TRUCK_GLOW_RADIUS = 10
+export const TRUCK_GLOW_RADIUS = 8
 export const TRUCK_GLOW_BRAKE_RADIUS = 10
 /** Brake-light core radius. Fixed for the same reason as the radii above. */
 export const TRUCK_GLOW_CORE_RADIUS = 2
