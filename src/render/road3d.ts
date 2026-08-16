@@ -234,6 +234,7 @@ import {
   SAME_BUS_ROWS, ONCOMING_BUS_ROWS,
   SAME_MINI_COLORS, ONCOMING_MINI_COLORS, SAME_CAR_COLORS, ONCOMING_CAR_COLORS,
   SAME_BUS_COLORS, ONCOMING_BUS_COLORS,
+  SAME_MINI_BRAKE_COLORS, SAME_CAR_BRAKE_COLORS,
   type RowColors,
 } from './sprites/vehicles.ts'
 
@@ -320,7 +321,7 @@ export function drawTraffic(
     if (v.dir === 'oncoming') {
       drawOncomingVehicle(ctx, p)
     } else {
-      drawSameDirVehicle(ctx, p)
+      drawSameDirVehicle(ctx, p, v.braking === true)
     }
   }
 }
@@ -460,9 +461,13 @@ function scaleTrafficSprite(
   return far ? { ...far, lod } : { ...detail, lod: 'detail' }
 }
 
-function drawSameDirVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
+function drawSameDirVehicle(
+  ctx: CanvasRenderingContext2D,
+  p: TrafficProjection,
+  braking = false,
+): void {
   drawVehicleContour(ctx, p)
-  drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('same', p.type), p)
+  drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('same', p.type, braking), p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
@@ -533,7 +538,18 @@ export function getTrafficSpriteRows(dir: TrafficVehicle['dir'], type: VehicleTy
   }
 }
 
-function getTrafficSpriteColors(dir: TrafficVehicle['dir'], type: VehicleType): RowColors {
+/**
+ * `braking` swaps the tail lamps from `RED` to `B_RED` — the ZX BRIGHT bit, and
+ * a change in the framebuffer rather than in the bloom, so it survives
+ * `?glow=0`. Oncoming vehicles have no brake state (their lamps face away from
+ * whatever they are doing) and the bus has none either: its bodywork *is*
+ * `B_RED`, so a bright red lamp on it would be a brake light nobody can see.
+ */
+export function getTrafficSpriteColors(
+  dir: TrafficVehicle['dir'],
+  type: VehicleType,
+  braking = false,
+): RowColors {
   if (dir === 'oncoming') {
     switch (type) {
       case 'mini': return ONCOMING_MINI_COLORS
@@ -543,8 +559,8 @@ function getTrafficSpriteColors(dir: TrafficVehicle['dir'], type: VehicleType): 
   }
 
   switch (type) {
-    case 'mini': return SAME_MINI_COLORS
-    case 'car': return SAME_CAR_COLORS
+    case 'mini': return braking ? SAME_MINI_BRAKE_COLORS : SAME_MINI_COLORS
+    case 'car': return braking ? SAME_CAR_BRAKE_COLORS : SAME_CAR_COLORS
     case 'bus': return SAME_BUS_COLORS
   }
 }

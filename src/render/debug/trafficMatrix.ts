@@ -186,7 +186,7 @@ function renderCell(
   )
   if (opts.showTruck) {
     const truckX = GAME_WIDTH / 2 + opts.playerX * 50
-    drawTruck(cellCtx, truckX, VIEWPORT_BOTTOM - 2, 0, 0)
+    drawTruck(cellCtx, truckX, VIEWPORT_BOTTOM - 2, 0, 0, opts.brake)
     // The player's lamps are in every real frame, so they are in every cell too.
     // `?truck=0` takes the truck and its halo out together.
     pushTruckLampSpots(glowSpots, truckX, VIEWPORT_BOTTOM - 2, 0, 0, opts.brake)

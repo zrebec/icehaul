@@ -331,3 +331,41 @@ describe('projectTrafficVehicle', () => {
     expect(projected).toBeNull()
   })
 })
+
+describe('brake lights on a same-direction vehicle', () => {
+  // The follower is the only thing that ever slows a same-direction vehicle, so
+  // "it went slower this tick" is the brake pedal. The renderer reads this flag
+  // and swaps RED for B_RED in the framebuffer — see sprites/vehicles.ts.
+  //
+  // Worth knowing what this can and cannot show: the guard only acts on traffic
+  // *behind* the player, which is the last 10 m of the visible window. A vehicle
+  // ahead has no braking behaviour at all today.
+  it('slows a vehicle that is closing on a slower player', () => {
+    const fast = 90
+    expect(followPlayerSpeed(1000, fast, 1005, 20, 16)).toBeLessThan(fast)
+  })
+
+  it('lights nothing while the player is the faster one', () => {
+    resetTraffic(SEED)
+    for (let i = 0; i < 30; i++) tickTraffic(1000 + i * 30, 0, 110, 500)
+    const seen = getVisibleTraffic(1000 + 29 * 30, 400)
+    expect(seen.length, 'no traffic to check').toBeGreaterThan(0)
+    expect(seen.every(v => v.braking !== true)).toBe(true)
+  })
+
+  // There is deliberately no end-to-end "and then you see it light up" test,
+  // because today you would not. Measured: the guard starts braking a vehicle at
+  // roughly `TRAFFIC_MIN_FOLLOW_GAP_M + speed * TRAFFIC_FOLLOW_TIME_S` ~= 28 m
+  // behind the player, and `getVisibleTraffic` only returns vehicles from 10 m
+  // behind. By the time one is on screen it has already settled at the player's
+  // speed and stopped braking. The colour swap is correct and costs nothing; it
+  // is the *behaviour* that has nowhere to show yet. A vehicle **ahead** never
+  // brakes at all — nothing in the model slows it.
+
+  it('never lights an oncoming vehicle — its lamps face the other way', () => {
+    resetTraffic(SEED)
+    for (let i = 0; i < 40; i++) tickTraffic(900 + i * 20, 0, 60, 200)
+    const seen = getVisibleTraffic(900 + 39 * 20, 400)
+    expect(seen.filter(v => v.dir === 'oncoming').every(v => v.braking === undefined)).toBe(true)
+  })
+})

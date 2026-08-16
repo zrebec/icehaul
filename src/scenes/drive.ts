@@ -39,6 +39,7 @@ import {
   createMission, tickMission, deliverIfArrived, isMissionExpired, remainingM,
 } from '../game/mission.ts'
 import { createScore, accrueScore, addScoreBonus } from '../game/score.ts'
+import type { RunSummary } from '../game/runStats.ts'
 import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../game/offroad.ts'
 
 function hash(n: number): number {
@@ -89,7 +90,7 @@ function emitWheelSpray(
 type DriveState = 'waiting' | 'playing' | 'paused' | 'crashing'
 
 export function createDriveScene(
-  onGameOver: (stats: { distance: number; elapsedMs: number; reason: 'fuel' | 'offroad' | 'timeout' | 'crash'; score: number }) => void,
+  onGameOver: (stats: RunSummary) => void,
   gameSeed: number,
 ): Scene {
   const v: Vehicle = createVehicle()
@@ -140,6 +141,8 @@ export function createDriveScene(
   let lastBuzzS = -1
   let gearBlockFlashMs = 0
   let braking = false
+  /** Canisters picked up this run — a game-over statistic, not a game rule. */
+  let canistersCollected = 0
   // Debug: W cycles gross weight (10/20/30 t) so the mass→accel effect is feelable
   // before the cargo system exists. 20 t = default = today's tuned feel.
   let weightT: number = TRUCK_WEIGHT_T
@@ -469,6 +472,7 @@ export function createDriveScene(
       // Canister pickup
       const fuelGained = checkCanisterPickup(v.distance, v.x)
       if (fuelGained > 0) {
+        canistersCollected++
         v.fuel = Math.min(1, v.fuel + fuelGained)
         if (ctxAudio) beep(880, 40, ctxAudio.currentTime)
         flashBorder(C.B_YELLOW, 1, 100)
@@ -517,7 +521,13 @@ export function createDriveScene(
       function triggerGameOver(reason: 'fuel' | 'offroad' | 'timeout' | 'crash') {
         gameOverFired = true
         stopEngine()
-        onGameOver({ distance: v.distance, elapsedMs, reason, score: score.points })
+        onGameOver({
+          distance: v.distance,
+          elapsedMs,
+          canisters: canistersCollected,
+          score: score.points,
+          reason,
+        })
       }
     },
 
@@ -565,7 +575,13 @@ export function createDriveScene(
         shakeY = ((hash(tick + 7) * 4) | 0) - 2
       }
       const steerDir: -1 | 0 | 1 = v.vx < -0.1 ? -1 : v.vx > 0.1 ? 1 : 0
-      drawTruck(ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5, steerDir)
+      // The brake reaches the sprite as well as the glow: the lamps go BRIGHT in
+      // the framebuffer, so it reads with `?glow=0` too. Only while actually
+      // driving — a paused or crashing frame is not the player standing on the
+      // pedal. The stalled engine is deliberately not a condition: pressing the
+      // brake lights the lamps whether or not the engine is running.
+      const brakeLightsOn = driveState === 'playing' && braking
+      drawTruck(ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5, steerDir, brakeLightsOn)
 
       // The truck's own lamps are dead metal while the engine is out — a stalled
       // truck on the ice is exactly the moment the game should stop reassuring.

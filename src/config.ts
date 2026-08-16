@@ -1196,11 +1196,13 @@ export const GLOW_CORE_MIN_HEIGHT = 8
  * must not compete with the road. Braking is the exception — that is real
  * feedback about a real input.
  *
- * The truck's raster does **not** change on the brake (owner's call), so the
- * whole signal has to come from the light: it brightens, it grows, and it gains
- * a core. One of those alone is what made the first attempt unnoticeable —
- * intensity 0.65 -> 1.0 was a peak of 61 -> 93 out of 765, before scanlines took
- * a further third of it.
+ * The brake is now carried **twice over**: the lamps themselves swap `RED` for
+ * `B_RED` in the framebuffer (see `TRUCK_LAMP_COLORS` in `render/truck.ts`), and
+ * the halo brightens, grows and gains a core on top of that. The raster half is
+ * what makes the brake readable with `?glow=0`; the glow half is what makes it
+ * obvious with glow on. One signal alone is what made the first attempt
+ * unnoticeable — intensity 0.65 -> 1.0 was a peak of 61 -> 93 out of 765, before
+ * the scanlines took a further third of it.
  */
 export const TRUCK_GLOW_INTENSITY = 0.55
 export const TRUCK_GLOW_BRAKE_INTENSITY = 1

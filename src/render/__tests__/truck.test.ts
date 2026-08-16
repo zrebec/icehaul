@@ -3,7 +3,7 @@ import { C } from 'zx-kit'
 import type { GlowSource } from 'zx-kit'
 import {
   TRUCK_BMP_DATA, TRUCK_BMP_LEFT_DATA, TRUCK_BMP_RIGHT_DATA, TRUCK_BMP_W, TRUCK_BMP_H,
-  TRUCK_LAMPS, pushTruckLampSpots,
+  TRUCK_LAMPS, TRUCK_LAMP_COLORS, pushTruckLampSpots,
 } from '../truck.ts'
 import {
   TRUCK_GLOW_BRAKE_INTENSITY, TRUCK_GLOW_BRAKE_RADIUS,
@@ -187,10 +187,29 @@ describe('pushTruckLampSpots', () => {
     expect(out[0]!.x).toBeCloseTo(spots(false)[0]!.x + 6, 6)
   })
 
-  it('leaves the raster alone on the brake — the light does the talking', () => {
-    // Recorded as a test because it is a decision, not an oversight: the lamps
-    // stay B_RED in the framebuffer whether or not the player is braking, so
-    // nothing here may start depending on a raster change.
+  it('emits one halo per lamp, whatever the brake is doing', () => {
+    // The count is the invariant; the colour and size are what change.
+    expect(spots(false).filter(s => s.color === C.B_RED)).toHaveLength(2)
     expect(spots(true).filter(s => s.color === C.B_RED)).toHaveLength(2)
+  })
+})
+
+describe('the truck says it is braking in the framebuffer', () => {
+  // Not only in the bloom. `?glow=0` is a setting a player may choose, and the
+  // brake has to be readable with the lights switched off — so the lamps change
+  // colour, which is the ZX BRIGHT bit and the only period-correct way to do it.
+  it('rolls on RED and brakes on B_RED', () => {
+    expect(TRUCK_LAMP_COLORS.rolling).toBe(C.RED)
+    expect(TRUCK_LAMP_COLORS.braking).toBe(C.B_RED)
+  })
+
+  it('brakes brighter than it rolls, whatever the two colours become', () => {
+    // Holds the property rather than the pair: a repaint may move both, but the
+    // brake may never end up the darker of the two.
+    const lum = (hex: string) => {
+      const n = Number.parseInt(hex.slice(1), 16)
+      return ((n >> 16) & 0xFF) + ((n >> 8) & 0xFF) + (n & 0xFF)
+    }
+    expect(lum(TRUCK_LAMP_COLORS.braking)).toBeGreaterThan(lum(TRUCK_LAMP_COLORS.rolling))
   })
 })
