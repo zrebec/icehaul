@@ -982,7 +982,7 @@ export const FIRST_TARGET_DIST_M = 5000
 export const NEXT_TARGET_RANGE: readonly [number, number] = [5000, 8000]
 /** Fuel refill fraction awarded on successful delivery (0–1). */
 export const DELIVERY_FUEL_REFILL = 0.50
-/** Score points awarded per delivery. */
+/** Score points awarded per delivery, on top of what the driving earned. */
 export const DELIVERY_SCORE = 500
 /**
  * The average speed a leg's time budget assumes, in km/h.
@@ -1013,6 +1013,33 @@ export const DELIVERY_TIME_LIMIT_MS =
  * pressure at all. If it does, this is the dial — no code changes with it.
  */
 export const DELIVERY_TIME_CARRY_PCT = 1.0
+
+// ── Scoring ─────────────────────────────────────────────────────────────────
+
+/**
+ * Points for every 100 m covered, before the surface multiplier.
+ *
+ * Delivery used to be the only thing that ever moved the score, so 5 km of
+ * driving and every hazard survived along the way read as a flat 500 whatever
+ * happened. Distance is what the player actually spends, so distance is what
+ * pays.
+ */
+export const SCORE_PER_100M = 10
+/**
+ * What each surface multiplies those points by — the risk premium.
+ *
+ * Sized so the bonus is a real signal without dominating: on the measured mean
+ * surface mix of a route the weighted multiplier is about 1.085, so a 5 km leg
+ * scores ~543. The extremes are 500 (all asphalt) against 700 (all ice), which
+ * is the shape wanted — ice is worth driving, not worth farming.
+ */
+export const SURFACE_SCORE_MULT: Record<Surface, number> = {
+  asphalt: 1.0,
+  snow: 1.2,
+  ice: 1.4,
+  sand: 1.3,
+  mud: 1.1,
+}
 
 // ── Traffic ─────────────────────────────────────────────────────────────────
 
