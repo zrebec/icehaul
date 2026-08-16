@@ -7,7 +7,7 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.9.0 (2026-08-16), 466 tests. Everything below is done and merged unless marked.
+State at 0.10.0 (2026-08-16), 531 tests. Everything below is done and merged unless marked.
 
 > **The graphics thread is parked, not finished.** 0.8.1 shipped and was played end to end, and the
 > playtest turned up four things — one of them a mission that was arithmetically impossible to
@@ -39,6 +39,7 @@ order and came out of a playtest:
 | 3a | Contrast outline + contact shadow, drawn behind the vehicle | #35 |
 | 3b | Traffic fits its lane, and sits in it | #37 |
 | 4 | All six vehicles redrawn by hand, and moved to `sprites/vehicles.ts` | #42 |
+| 3c | Lamps bloom through the `glow` layer — traffic and the player's own tail lights | #43 |
 
 **The pipeline was done before the drawings were** — the story of why, and the one measurement the
 redraw turned up, are under "The sprites themselves are the bottleneck now" below.
@@ -60,18 +61,17 @@ without needing a measurement to argue for it. Worth remembering when the next i
    often is no longer a cost. `TRAFFIC_SPACING_M` is the lever; a distance term goes in
    `game/traffic.ts` where spacing is drawn.
 1½. **Snow grip**, if it is being played anyway — one constant plus a controllability re-pin.
-2. **Lamps through the `glow` layer.** `glow` and `lighting` ship in zx-kit 0.42 with zero consumers
-   here.
-3. **Distance fog**, then night per the open decision below.
-4. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
+2. **Distance fog**, then night per the open decision below. Glow is in (#43), so the cheap half of
+   the "daylight only" path in the night table below is already paid for.
+3. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
    "Parametric, vector, and what each would actually buy".
-5. **The far field's remaining stillness** — the redraw took the worst case from 1.97 s to 1.28 s
+4. **The far field's remaining stillness** — the redraw took the worst case from 1.97 s to 1.28 s
    (a mini at ~192 m) by widening its interior features, so this is smaller than it was but not
    gone: a four-pixel-wide vehicle whose true size grows by a tenth of a pixel has nothing left to
    draw differently. The remaining levers are still `TRAFFIC_SCALE_FAR` and
    `TRAFFIC_VIEW_DISTANCE_M`, and both change how distance reads. **Owner's call, deliberately not
    pulled.**
-6. **Resolution** — still rejected; revisit only for HUD space.
+5. **Resolution** — still rejected; revisit only for HUD space.
 
 A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
 costs anything, and a third tier would only put back a boundary where there is currently none.
@@ -802,7 +802,7 @@ not. The fix is largely reuse, not invention. *(It was correct in shape but not 
 
 | # | Item | State | Effort |
 |---|---|---|---|
-| 0 | Screenshot matrix, fixed seed from the catalogue above — so every later change is judged against the same frames | **DONE** #26. `?matrix=1` plus `scripts/traffic-matrix.mjs`. `?trafficRenderer=` was never built — there was never a second renderer to switch to. `?glow=0` **not built**, nothing emits glow yet | 2–4 h |
+| 0 | Screenshot matrix, fixed seed from the catalogue above — so every later change is judged against the same frames | **DONE** #26. `?matrix=1` plus `scripts/traffic-matrix.mjs`. `?trafficRenderer=` was never built — there was never a second renderer to switch to. `?glow=` **built in #43**, and it takes a strength and a radius as well as an on/off. **#43 also found the sheet's one lie** — it drew no scanlines, so every brightness judgement made on it over-read by 1.54x; `?scanlines=1` and `?brake=1` close that | 2–4 h |
 | 1 | **One shared raster.** The same raster feeds draw, collision and emissive; cache it | **DONE** #28, and gone further in #34 — the raster now rides on the projection, so there is no size for two readers to re-derive it from | 4–8 h |
 | 2 | Far LOD by meaning, tier chosen by **projected height** with hysteresis | **DONE** #29, reshaped in #34 — the far tier now recolours the real silhouette instead of drawing its own. A middle tier is **closed, not deferred** | 1–2 days |
 | — | *(not in the original order)* Hyperbolic growth curve in world depth | **DONE** #30 | — |
@@ -811,7 +811,7 @@ not. The fix is largely reuse, not invention. *(It was correct in shape but not 
 | 3a | Contact shadow + contrast outline | **DONE** #35. Derived from the raster, no art. Kept *outside* the raster so the hitbox is unchanged; `?outline=0` for A/B | 0.5 day |
 | 3b | Traffic fits its lane, and sits in it | **DONE** #37. `ROAD_HALF_TOP` 14 → 24 plus the spawn lane fix. Jumped the queue — it came out of a playtest. See "Two ways a vehicle was not in its lane" | 0.5 day |
 | 3b′ | **Redraw the six traffic sprites by hand** | **TODO** — the top of the list. See "The sprites themselves are the bottleneck now" | 1–2 days |
-| 3c | Lights through restrained `glow` | **TODO** — `glow` and `lighting` still have zero consumers | 0.5 day |
+| 3c | Lights through restrained `glow` | **DONE** #43. Traffic lamps and the player's own tail lights; positions read off the art, halo clipped to the viewport, `?glow=0` / `?glow=0.35`. `lighting` still has no consumer | 0.5 day |
 | 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | **TODO**, and easier than when it was written: #34 already made size an output. Not the same as 3D vector — see the table above | 1–2 days |
 | 5 | Distance fog; night per the decision below | **TODO** | 4–6 h + night |
 | 6 | Resolution decision — only here, and probably no | **Still no** | — |
@@ -825,9 +825,116 @@ point. Starting with sprite art would be the mistake: 3 types × 2 directions ×
 Step 4 has a gate, and it is a real one: *does a ~20–31 px parametric car look clearly better than a
 properly resampled sprite?* If not, stop the procedural direction there rather than widening it.
 
-`glow` (`createGlowLayer` / `drawGlowSource` / `renderGlow`) and `lighting` (`ditherBlack`,
-`brightnessAt`, `DarknessLayer`) both ship in zx-kit 0.42 with **zero consumers here**. Ice Haul
-does not use `AttrScreen`, so `stampMono(glow: true)` is not available — go through the layer.
+`glow` (`createGlowLayer` / `drawGlowSource` / `renderGlow`) has one consumer since #43 —
+`render/vehicleGlow.ts`. `lighting` (`ditherBlack`, `brightnessAt`, `DarknessLayer`) still has none,
+and is the module night would be built on. Ice Haul does not use `AttrScreen`, so
+`stampMono(glow: true)` is not available — go through the layer.
+
+### What the glow landed as (#43)
+
+Half a day, as costed. Four decisions are worth keeping:
+
+- **The lamps are read off the art, never declared.** This was planned as a hand-written table of
+  lamp coordinates, because the *imported* sprites used `Y` and `R` for bodywork as well as for
+  lamps and a rule that looked for the colour would have lit the whole vehicle. #42 landed first and
+  removed the need: the redrawn sprites put lamps in the outermost columns and use the direction's
+  lamp char nowhere else, so the position is now a measurement — the centroid of each side's lamp
+  cells, normalised to the sprite box. **A redraw moves the halo with the lamp for free.** The
+  planned table would have been one more thing to keep in step with the pixels, which is the
+  mistake `road3d.ts` already made once with sprite dimensions.
+- **The same trick works on the player's truck** and for a stronger reason: its `red` layer contains
+  its two tail lamps and nothing else, so the centroids are exact. They brighten on the brake, which
+  is the only light in the game that answers an input.
+- **The blit is clipped to the road viewport, and happens last of all.** `renderGlow` covers the
+  whole canvas, and a vehicle sitting under the horizon would otherwise wash the status bar.
+  Instruments stay flat. And since the scanline finding below, it goes on *after* the scanlines
+  too — from `main.ts` rather than from the scene, which now only fills a buffer.
+- **`?glow=` takes a strength and a radius, not just an on/off** (`0` off, `1` on, `0.5` on at that
+  alpha, `0.8,1.5` also half again the radius). Both are judged by eye, and needing a rebuild between
+  two comparisons is how a comparison gets lost. Anything ≥ 1 in the first slot means "on" rather
+  than alpha 1.0. It paid for itself immediately — the four alpha rows below were four page loads,
+  not four builds.
+
+#### The costed alpha was too low, and the reason generalises
+
+`AGENTS.md` costed the bloom at **alpha 0.2–0.35** before anything emitted glow. The sheets say
+that is too low for this frame, and the arithmetic behind it is worth keeping because it applies to
+any future emissive work here:
+
+| alpha | pixels changed | mean delta | peak delta | reads as |
+|---|---|---|---|---|
+| 0.28 | 0.61 % | 14 | 66 / 765 | present in the diff, invisible to the eye |
+| 0.35 | 0.64 % | 17 | 82 | still a hint |
+| **0.60** | 0.72 % | 26 | 142 | **light, at 100 m and at 25 m** |
+| 0.90 | 0.77 % | 37 | 214 | starts smearing the vehicle |
+
+*(oncoming car, zoom 6, asphalt, `?glow=` against `?glow=0`.)*
+
+**A lamp is already `#FFFF00`, and additive light cannot brighten a saturated channel.** The blob's
+peak lands exactly where it can do nothing; everything the player sees is the *tail* of it falling
+on the dark road. A guideline borrowed from bloom over photographic content therefore under-reads
+badly on flat palette art.
+
+The same effect, worse, on **the player's own truck**: its lamps are ringed by a white bumper and
+cyan wheels, so a halo sized for a distant car is spent on pixels it cannot change. `radius 5,
+intensity 0.45` measured a peak of **32 / 765** — not a dim halo, *no* halo.
+
+#### And even 0.60 was invisible in the game, because the harness was lying
+
+Owner played the branch: *"glow brzdových svetiel prakticky nevidno, a keď brzdím, žiadna zmena."*
+The table above was right about the sheet and wrong about the game, and the gap is a property of the
+harness rather than of the renderer:
+
+- **`main.ts` draws `drawScanlines(ctx, SCANLINE_ALPHA = 0.7)` over every finished frame.** That is
+  a 70 %-black line on every odd *device* row; at `CANVAS_SCALE = 4` it darkens two of the four rows
+  of every game pixel, so **the whole picture plays at 0.65** — bloom included, because the bloom
+  was underneath it.
+- **`?matrix=1` draws no scanlines at all.** It is a static path with no frame loop. Every number in
+  the table above was therefore measured **1.54× brighter than the game**.
+
+Two fixes, and the first is worth more than all the tuning:
+
+1. **The bloom is blitted after the scanlines.** The scene now fills a pending buffer
+   (`pendingGlow()`), `main.ts` empties it with `renderPendingLampGlow(ctx)` after `drawScanlines`.
+   Free brightness, and truer: light belongs on the glass, in front of the mask. The halo fills the
+   dark rows instead of being cut by them, which is what a hard-driven phosphor actually does.
+2. **The sheet can wear the scanlines** — `?matrix=1&scanlines=1`, applied to the *output* rows so
+   it holds at any zoom. **Use it for anything about brightness.** Off by default so the reference
+   sheets from #26 onward stay comparable.
+
+The sheet had a second blind spot: it drew the truck cruising only, so the brake could not be judged
+without driving. `?brake=1` fixes that.
+
+#### Where it ended up
+
+Owner's call, explicitly: *"trochu modernejšie, aj za cenu malej straty ZX identity"*. So the bloom
+is now arcade-sized — `alpha 0.8`, **two passes**, radius `1.4 × drawn height` capped at 18 px — and
+each lamp gains a **white-hot core**: a second, small `B_WHITE` source on the same spot. White raises
+the green and blue channels of a red lamp, so the lamp itself blows out toward white instead of
+staying a flat rectangle with a glow beside it. That is the change that makes it read instantly.
+
+Measured after all of it, **with scanlines on**, so these are numbers about the game and not about
+the sheet:
+
+| | changed | mean delta | peak |
+|---|---|---|---|
+| traffic, round 1 (no scanlines, over-read) | 2.5 % | 15.7 | 142 / 765 |
+| **traffic, round 2 (with scanlines)** | **5.6 %** | **47.3** | **606** |
+| **player braking vs cruising** | **4.3 %** | **42.0** | **292** |
+
+Two constraints on the core, both deliberate:
+
+- **Only above `GLOW_CORE_MIN_HEIGHT` (10 px, the far/detail LOD boundary, ~50 m for a car).** White
+  desaturates the halo it sits in, and far away that halo's *colour* is the only thing carrying
+  which way the vehicle is going. Close up the shape already says it, so the light may blow out.
+- **The brake carries three changes at once** — brighter, bigger, and cored — because the owner chose
+  to leave the raster alone (the lamps stay `B_RED` whether braking or not). A signal carried by one
+  number is exactly what round 1 was.
+
+One side effect worth knowing before it gets reported as a fix: the same-direction bus is `B_RED`
+bodywork with `RED` lamps, which #42 recorded as the weakest lamp contrast in the fleet and left
+alone. Its halo is drawn in `B_RED`, so the glow is *brighter than the lamp it comes from* and does
+more for that vehicle than for any other. That is a workaround, not the repaint the note asks for.
 
 ### Night mode — open, both paths costed
 
@@ -900,11 +1007,16 @@ deferred: it existed to soften a handover that no longer costs anything.
 - **One raster, three consumers.** Draw, collision and glow must read the same rendered raster.
   Collision must never independently rescale the source sprite. Test that every solid pixel of the
   collision mask corresponds to a drawn solid pixel.
-- **Glow only on lights, never the body.** Bloom over a whole vehicle just makes a bigger blob, and
-  at the horizon two lamps merge into one smear. Start at alpha 0.2–0.35, one pass, downscale 2,
-  radius derived from vehicle height and hard-capped.
+- **Glow only on lights, never the body.** Bloom over a whole vehicle just makes a bigger blob. Two
+  lamps per vehicle is still a hard limit. **The rest of this rule was measured and reversed in #43**
+  (see above): 0.2–0.35 alpha is invisible on flat palette art seen through a 0.65 scanline overlay,
+  the shipped values are `alpha 0.8` with **two passes** and a radius of 1.4x the drawn height, and
+  the lamps **may merge into one glowing point at the horizon** — one light that can be seen beats
+  two that cannot, and direction is carried by colour, never by there being two of them.
 - **Glow stays opt-in** and never widens the palette; the module promises a byte-identical frame
-  when unused, so assert it. Keep `?glow=0` for instant A/B.
+  when unused, so assert it. Keep `?glow=0` for instant A/B. *Asserted in `vehicleGlow.test.ts`:
+  with glow off, `drawTraffic` emits no sources at all while still drawing the vehicle — the two
+  are otherwise the same empty array.*
 - **Dither is for surfaces big enough to hold it** — medium and near tiers only. On a 5–8 px car it
   eats half the pixels and reads as noise. Tie the pattern to vehicle-local coordinates so it never
   changes between frames.

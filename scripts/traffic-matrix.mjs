@@ -49,6 +49,35 @@ const SHEETS = [
     name: 'lane-old-vs-new',
     params: { surface: 'snow', curve: 0, zoom: 2, types: 'bus', dirs: 'same', vx: 0.05, dist: '100,40,25,10' },
   },
+  // The lamp bloom, on and off, over identical frames. Asphalt because a halo
+  // shows least against a bright road and most against a dark one, and if it is
+  // worth having it has to earn its keep on the surface that flatters it before
+  // anything is claimed about the others. Zoom 2: a halo is a few pixels wide.
+  //
+  // `scanlines: 1` is not optional on these two. The game lays a 70% black grid
+  // over every frame — two of the four device rows of each game pixel — so it
+  // plays at 0.65 of what a bare sheet shows. The first glow pass was tuned on a
+  // bare sheet and came out invisible in the game; that is the whole story.
+  {
+    name: 'glow-on',
+    params: { surface: 'asphalt', curve: 0, zoom: 2, types: 'car', dist: '220,100,50,25,10', scanlines: 1 },
+  },
+  {
+    name: 'glow-off',
+    params: { surface: 'asphalt', curve: 0, zoom: 2, types: 'car', dist: '220,100,50,25,10', scanlines: 1, glow: 0 },
+  },
+  // The player's own brake lights, which no driving frame can show on demand:
+  // the brake is carried entirely by the glow, so `?brake=1` is the only way to
+  // put the two states side by side. One distant vehicle, because the subject is
+  // the bottom of the frame.
+  {
+    name: 'brake-on',
+    params: { surface: 'asphalt', curve: 0, zoom: 4, types: 'car', dirs: 'same', dist: '220', scanlines: 1, brake: 1 },
+  },
+  {
+    name: 'brake-off',
+    params: { surface: 'asphalt', curve: 0, zoom: 4, types: 'car', dirs: 'same', dist: '220', scanlines: 1 },
+  },
 ]
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))

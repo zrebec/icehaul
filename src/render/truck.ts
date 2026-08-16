@@ -1,4 +1,13 @@
-import { C, createBitmap, createAttrMap, drawBitmapAttrs, type Bitmap, type AttrMap, type SpectrumColor } from 'zx-kit'
+import {
+  C, createBitmap, createAttrMap, drawBitmapAttrs,
+  type Bitmap, type AttrMap, type GlowSource, type SpectrumColor,
+} from 'zx-kit'
+import {
+  GLOW_CORE_INTENSITY,
+  TRUCK_GLOW_BRAKE_INTENSITY, TRUCK_GLOW_BRAKE_RADIUS,
+  TRUCK_GLOW_CORE_RADIUS, TRUCK_GLOW_INTENSITY, TRUCK_GLOW_RADIUS,
+} from '../config.ts'
+import { glowRadiusScale } from './vehicleGlow.ts'
 
 /**
  * 24x32 rear view of a black box truck.
@@ -241,6 +250,56 @@ export const TRUCK_COLLISION_BMP: Bitmap = createBitmap(
   TRUCK_BMP_H,
 )
 
+// ── Tail lamps ──────────────────────────────────────────────────────────────
+
+/** A lamp centre, in bitmap pixels from the sprite's top-left corner. */
+export interface TruckLamp {
+  dx: number
+  dy: number
+}
+
+/**
+ * The two tail lamps, measured off the red layer rather than written down.
+ *
+ * The red layer of this truck is *only* its lamps — the rear cluster is two red
+ * blocks with a yellow plate between them, and no other part of the drawing is
+ * red — so the centroid of each half is exactly where a lamp is. Measuring it
+ * means the glow follows the sprite: move the lamps, redraw the truck, swap in
+ * the lean variants, and nothing here needs to know.
+ *
+ * Both variants are measured separately because the left and right sprites are
+ * true perspective drawings, not the straight one shifted, so their lamps are
+ * not in the same place.
+ */
+function tailLamps(layers: TruckLayers): readonly TruckLamp[] {
+  const mid = TRUCK_BMP_W / 2
+  const sums = [{ x: 0, y: 0, n: 0 }, { x: 0, y: 0, n: 0 }]
+
+  for (let y = 0; y < TRUCK_BMP_H; y++) {
+    for (let x = 0; x < TRUCK_BMP_W; x++) {
+      if (!layers.red[y]![x]) continue
+      const side = sums[x + 0.5 < mid ? 0 : 1]!
+      side.x += x + 0.5
+      side.y += y + 0.5
+      side.n++
+    }
+  }
+
+  return sums.filter(s => s.n > 0).map(s => ({ dx: s.x / s.n, dy: s.y / s.n }))
+}
+
+type TruckVariant = 'left' | 'straight' | 'right'
+
+function variantOf(steerDir: -1 | 0 | 1): TruckVariant {
+  return steerDir < 0 ? 'left' : steerDir > 0 ? 'right' : 'straight'
+}
+
+export const TRUCK_LAMPS: Record<TruckVariant, readonly TruckLamp[]> = {
+  left: tailLamps(LEFT_LAYERS),
+  straight: tailLamps(STRAIGHT_LAYERS),
+  right: tailLamps(RIGHT_LAYERS),
+}
+
 type RenderLayers = Record<keyof TruckLayers, Bitmap>
 
 function createRenderLayers(layers: TruckLayers): RenderLayers {
@@ -273,6 +332,67 @@ const CYAN_ATTRS = solidAttrs(C.B_CYAN)
 const RED_ATTRS = solidAttrs(C.B_RED)
 const YELLOW_ATTRS = solidAttrs(C.B_YELLOW)
 
+/** Top-left corner the sprite is drawn from. Shared with the lamp positions
+ *  below so the halo cannot land a pixel off the lamp it belongs to. */
+function truckOrigin(cx: number, baseY: number, lean: number): { x: number; y: number } {
+  return {
+    x: Math.round(cx - TRUCK_BMP_W / 2 + lean),
+    y: Math.round(baseY - TRUCK_BMP_H),
+  }
+}
+
+const RENDER_LAYERS: Record<TruckVariant, RenderLayers> = {
+  left: LEFT_RENDER,
+  straight: STRAIGHT_RENDER,
+  right: RIGHT_RENDER,
+}
+
+/**
+ * The player's own tail lamps as glow sources.
+ *
+ * The truck is on screen every frame, so this is the one halo that never goes
+ * away — hence the low base intensity in `config.ts`.
+ *
+ * ── Why braking changes three things at once ────────────────────────────────
+ * The raster does not change on the brake: the lamps are `B_RED` whether the
+ * player is stopping or not (owner's call — the light does the talking). That
+ * puts the entire signal on the glow, and a signal carried by one number is what
+ * the first attempt was: intensity 0.65 -> 1.0, a peak of 61 -> 93 out of 765,
+ * before the scanlines took a further third. Nobody saw it.
+ *
+ * So it brightens, it **grows**, and it gains a **white core** — three changes
+ * in the same frame, which is the difference between "slightly warmer" and
+ * "the brakes are on".
+ */
+export function pushTruckLampSpots(
+  out: GlowSource[],
+  cx: number,
+  baseY: number,
+  lean: number,
+  steerDir: -1 | 0 | 1,
+  braking: boolean,
+): void {
+  const { x, y } = truckOrigin(cx, baseY, lean)
+  const scale = glowRadiusScale()
+  const intensity = braking ? TRUCK_GLOW_BRAKE_INTENSITY : TRUCK_GLOW_INTENSITY
+  const radius = (braking ? TRUCK_GLOW_BRAKE_RADIUS : TRUCK_GLOW_RADIUS) * scale
+
+  for (const lamp of TRUCK_LAMPS[variantOf(steerDir)]) {
+    const lx = x + lamp.dx
+    const ly = y + lamp.dy
+    out.push({ x: lx, y: ly, radius, color: C.B_RED, intensity })
+    if (braking) {
+      out.push({
+        x: lx,
+        y: ly,
+        radius: TRUCK_GLOW_CORE_RADIUS * scale,
+        color: C.B_WHITE,
+        intensity: GLOW_CORE_INTENSITY,
+      })
+    }
+  }
+}
+
 /**
  * Draw the truck at centre-bottom position.
  * `lean` shifts it horizontally; `steerDir` selects a true perspective sprite.
@@ -284,9 +404,8 @@ export function drawTruck(
   lean = 0,
   steerDir: -1 | 0 | 1 = 0,
 ): void {
-  const x = Math.round(cx - TRUCK_BMP_W / 2 + lean)
-  const y = Math.round(baseY - TRUCK_BMP_H)
-  const layers = steerDir < 0 ? LEFT_RENDER : steerDir > 0 ? RIGHT_RENDER : STRAIGHT_RENDER
+  const { x, y } = truckOrigin(cx, baseY, lean)
+  const layers = RENDER_LAYERS[variantOf(steerDir)]
 
   drawBitmapAttrs(ctx, layers.black, BLACK_ATTRS, x, y)
   drawBitmapAttrs(ctx, layers.white, WHITE_ATTRS, x, y)

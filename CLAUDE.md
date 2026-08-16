@@ -40,7 +40,9 @@ GitHub repo: `zrebec/icehaul`. Built on **[zx-kit](https://github.com/zrebec/zx-
 - Initialise with `setupCanvas(canvas, 4, 256, 192)` → 1024 × 768 CSS px.
 - Integer scaling only. Never alter `CELL` or the palette in `zx-kit/src/palette.ts`.
 - **Colour clash is a feature, not a bug.** Use `drawBitmapAttrs` with `AttrMap` (per 8×8 cell ink/paper) so two adjacent palette colours visibly bleed across a sprite — that's the look.
-- Palette is the 15 hex values in `C` from `zx-kit/src/palette.ts`. No other colours, ever.
+- Palette is the 15 hex values in `C` from `zx-kit/src/palette.ts`. No other colours **in the
+  framebuffer**, ever. The one thing composited over it — the lamp bloom — is covered under
+  "What NOT to do" and is the owner's explicit exception, not a precedent.
 
 ## HUD layout target (matches `first_impression.png`)
 
@@ -108,6 +110,7 @@ src/
   render/
     road3d.ts        ✓ scrolling pseudo-3D road with per-scanline surface
     truck.ts         ✓ rear-view player truck sprite
+    vehicleGlow.ts   ✓ lamp bloom through zx-kit's glow layer (?glow=)
     hud.ts           ✓ bottom instrument cluster (SPEED wired, rest cosmetic)
     topbar.ts        ✓ score/title/dist/time/ice-ahead-blink
   audio/
@@ -170,8 +173,16 @@ node scripts/traffic-matrix.mjs matrix     # traffic contact sheets — the rend
 ?seed=1443866        a specific route; no parameter means today's daily route
 ?matrix=1            the traffic contact sheet instead of the game
 ?outline=0           traffic without its dark outline and contact shadow (A/B)
+?glow=0              no bloom on the lamps (A/B). ?glow=0.5 sets its strength,
+                     ?glow=0.8,1.5 also its radius (defaults 0.8 and 1)
 ?matrix=1&surface=ice&curve=2&zoom=4&types=car&dist=220,50,10,2
+?matrix=1&scanlines=1&brake=1   sheet with the game's scanline overlay, truck braking
 ```
+
+**Judge brightness only on a sheet with `scanlines=1`.** The game lays a 70 %-black line over every
+odd device row, which takes the whole picture to 0.65; a bare sheet over-reads by 1.54x and the first
+glow pass was tuned on one. `?brake=1` exists for the same reason — the brake lights are carried
+entirely by the glow, so no cruising frame can show them.
 
 **CI / Pages rule (2026-07-03):** the deploy workflow must use `actions/upload-pages-artifact@v5+`
 and `actions/deploy-pages@v5+` — the Pages backend rejects v3-era artifacts since 2026-07-03 with a
@@ -276,7 +287,11 @@ Re-score after every other phase. Drift triggers a scope cut.
 
 ## What NOT to do
 
-- Don't introduce non-Spectrum colours, anti-aliasing, or non-integer scaling.
+- Don't introduce non-Spectrum colours, anti-aliasing, or non-integer scaling. **One deliberate
+  exception, owner's decision (#43):** the lamp bloom is composited over the finished frame with
+  `'lighter'`, and its white core puts off-palette colours *on the glass* — the same place the
+  scanlines and the screen curve live. The framebuffer itself is untouched, and `?glow=0` restores
+  a byte-identical frame. Do not extend this to anything the game actually draws.
 - Don't add a physics engine. Vehicle physics is ~150 LoC of scalar math, not Box2D.
 - Don't add a networking/multiplayer layer.
 - Don't bypass zx-kit primitives by drawing directly with `ctx.fillRect` when a kit function exists — if a primitive is missing, propose adding it to zx-kit (with the "second consumer" test above).

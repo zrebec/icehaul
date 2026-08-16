@@ -1,4 +1,4 @@
-import { C, type SpectrumColor } from 'zx-kit'
+import { C, type GlowSource, type SpectrumColor } from 'zx-kit'
 import {
   type Surface,
   GAME_WIDTH, HORIZON_PCT,
@@ -12,6 +12,10 @@ import { computeCurveOffsets } from './projection.ts'
 import { rasteriseVehicleAtScale } from './vehicleRaster.ts'
 import { applyFarLamps, chooseLodTier, type LodTier } from './vehicleLod.ts'
 import { CONTOUR_CHAR, type VehicleContour } from './vehicleContour.ts'
+// Circular by design, the same shape as `vehicleRaster.ts` above: the glow needs
+// the art to find the lamps, the renderer needs the glow to place them. Both
+// sides only read through functions, so nothing is touched at module load.
+import { isGlowEnabled, pushTrafficLampSpots } from './vehicleGlow.ts'
 import {
   visibleMarkers, visibleKerbStripes, visibleCentreDashes,
   kerbDetailScanline, centreDetailScanline,
@@ -287,6 +291,12 @@ export function drawCanisters(
 /**
  * Draw traffic vehicles in perspective. Call AFTER drawRoad, BEFORE drawTruck.
  * Same-direction traffic: rear views. Oncoming traffic: front views with headlights.
+ *
+ * `glowOut` collects the lamp haloes of everything actually drawn, for the
+ * caller to blit once the rest of the scene is down. It is filled here rather
+ * than re-derived later because this is the only place that knows which vehicles
+ * survived projection and clipping — and projecting them a second time to find
+ * out would be two answers to one question.
  */
 export function drawTraffic(
   ctx: CanvasRenderingContext2D,
@@ -296,11 +306,16 @@ export function drawTraffic(
   playerX: number,
   vehicles: readonly TrafficVehicle[],
   getCurvature: (distM: number) => number,
+  glowOut?: GlowSource[],
 ): void {
+  const glowSink = glowOut && isGlowEnabled() ? glowOut : null
+
   for (const v of vehicles) {
     const p = projectTrafficVehicle(viewportTop, viewportBottom, cameraDistance, playerX, v, getCurvature)
     if (!p) continue
     if (p.x < -20 || p.x > GAME_WIDTH + 20) continue
+
+    if (glowSink) pushTrafficLampSpots(glowSink, p, v.dir)
 
     if (v.dir === 'oncoming') {
       drawOncomingVehicle(ctx, p)
