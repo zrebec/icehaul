@@ -7,7 +7,7 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.8.2 (2026-08-16), 406 tests. Everything below is done and merged unless marked.
+State at 0.9.0 (2026-08-16), 466 tests. Everything below is done and merged unless marked.
 
 > **The graphics thread is parked, not finished.** 0.8.1 shipped and was played end to end, and the
 > playtest turned up four things — one of them a mission that was arithmetically impossible to
@@ -17,7 +17,8 @@ State at 0.8.2 (2026-08-16), 406 tests. Everything below is done and merged unle
 > **§1 (impossible mission) and §2 (continuous score) are both fixed** — the mission rules and the
 > scoring rules are now pure modules with their own tests, and the bot simulates three legs. §2½
 > records what the 0.8.2 playtest said about where the difficulty actually lives. §3 (snow) and §4
-> (surface dominance, not a bug) stand. **The sprite work is now the top of the queue.**
+> (surface dominance, not a bug) stand. **The sprite redraw is done too** — what is left of the
+> graphics list starts at traffic density.
 
 **Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
 speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
@@ -37,9 +38,10 @@ order and came out of a playtest:
 | — | Fractional scale: the drawing grows a pixel at a time, and the far tier only recolours | #34 |
 | 3a | Contrast outline + contact shadow, drawn behind the vehicle | #35 |
 | 3b | Traffic fits its lane, and sits in it | #37 |
+| 4 | All six vehicles redrawn by hand, and moved to `sprites/vehicles.ts` | #42 |
 
-**The pipeline is done. The drawings are not** — see "The sprites themselves are the bottleneck now"
-below, which is the finding that should drive everything next.
+**The pipeline was done before the drawings were** — the story of why, and the one measurement the
+redraw turned up, are under "The sprites themselves are the bottleneck now" below.
 
 Owner after #35: *"the game really has a look now and it comes across a lot better."* The outline
 was the cheapest item on the whole list and the first change since #29 that read as an improvement
@@ -53,23 +55,22 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 **Next, in order:**
 
-1. **Redraw the six traffic sprites by hand.** They were auto-imported and are asymmetric, have
-   their rear lamps in the middle of the car, and have no wheel gap. No renderer can fix that, and
-   after #35 it is unambiguously the largest thing left. **Now the top of the whole queue**, and
-   §2½ raised its stakes: traffic is where the difficulty actually lives, and there is going to be
-   more of it.
-1½. **Traffic density scaling with distance** — owner's, from the 0.8.2 playtest (§2½). Deliberately
-   *after* the redraw: more traffic means seeing the same six drawings more often.
-1¾. **Snow grip**, if it is being played anyway — one constant plus a controllability re-pin.
+1. **Traffic density scaling with distance** — owner's, from the 0.8.2 playtest (§2½), and now the
+   top of the queue: the redraw that was blocking it is done, so seeing the same six drawings more
+   often is no longer a cost. `TRAFFIC_SPACING_M` is the lever; a distance term goes in
+   `game/traffic.ts` where spacing is drawn.
+1½. **Snow grip**, if it is being played anyway — one constant plus a controllability re-pin.
 2. **Lamps through the `glow` layer.** `glow` and `lighting` ship in zx-kit 0.42 with zero consumers
    here.
 3. **Distance fog**, then night per the open decision below.
 4. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
    "Parametric, vector, and what each would actually buy".
-5. **The far field's remaining stillness** — a mini at 200 m holds one drawing for 1.97 s because
-   it is four pixels wide and its true size grows by a tenth of a pixel in that time. The
-   resampler cannot touch this; the levers are `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`,
-   and both change how distance reads. **Owner's call, deliberately not pulled.**
+5. **The far field's remaining stillness** — the redraw took the worst case from 1.97 s to 1.28 s
+   (a mini at ~192 m) by widening its interior features, so this is smaller than it was but not
+   gone: a four-pixel-wide vehicle whose true size grows by a tenth of a pixel has nothing left to
+   draw differently. The remaining levers are still `TRAFFIC_SCALE_FAR` and
+   `TRAFFIC_VIEW_DISTANCE_M`, and both change how distance reads. **Owner's call, deliberately not
+   pulled.**
 6. **Resolution** — still rejected; revisit only for HUD space.
 
 A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
@@ -361,7 +362,7 @@ unit, while traffic's `vehicle.x` moves it `half` px per unit with ±1 the road 
 means two different things for the player and for a traffic vehicle. The `50` is written out four
 times (`drive.ts:270`, `drive.ts:551`, `trafficMatrix.ts`, `completability.test.ts`).
 
-### The sprites themselves are the bottleneck now
+### The sprites themselves are the bottleneck now — **redrawn, see the end of this section**
 
 Owner, after #34: *"we are at a better level but honestly the sprites are terrible — not even a
 person with imagination could tell it is a car if they did not already know."*
@@ -405,6 +406,52 @@ evidence that the problem is the drawing and not the pipeline.
 **Do not re-import these from generated images.** The importer earns its keep on roadside scenery,
 where lumpiness reads as nature. A vehicle at 16 × 11 has about thirty pixels that matter and each
 one has to be placed deliberately.
+
+#### What the redraw did, and the one thing it taught
+
+All six are hand-drawn in **`src/render/sprites/vehicles.ts`** — moved out of `road3d.ts`, next to
+the roadside sprites, because a hundred lines of art inside a renderer is a hundred lines nobody
+edits. Dimensions are untouched (mini 14×11, car 22×15, bus 28×18, trailing empty row kept), so the
+projection, the LOD boundary, the lane-fit property and every collision raster are undisturbed:
+this is a redraw, not a re-scale. Colours are untouched for the same reason.
+
+`vehicleArt.test.ts` pins the rules as properties rather than pixels — symmetry, lamps at the
+outermost columns, nothing but wheels below the bumper, road between them, a colour defined for
+every char drawn, and the size box. It was checked against the old art and fails on four of them,
+which is the only way to know a test of this kind is worth having.
+
+**The finding worth keeping: symmetry costs far-field motion, and the cure is feature width.**
+
+The first symmetric mini failed `approachCadence` — it held one drawing for **2.58 s** at 204 m,
+against a 2 s budget and against **1.97 s** for the sprite it replaced. That is not a regression in
+the renderer. The old mini's off-centre window flipped on and off as the sampling grid drifted and
+each flip counted as a change, so part of what the far field had been reading as *motion* was the
+asymmetry flickering — the exact noise the redraw exists to remove.
+
+The fix was art, not budget. The same mini's rear window and plate were six pixels wide where the
+oncoming mini's were eight, and the oncoming mini was already fine at 0.95 s. Widening both to eight
+gave **1.28 s** — better than the sprite it replaced, symmetry kept. **A feature has to be wide
+enough to survive down to four pixels, or it stops contributing at the distance where contribution
+is scarcest.** Longest hold across the fleet afterwards:
+
+```
+same      mini 1.28 s   car 0.83 s   bus 0.57 s
+oncoming  mini 0.95 s   car 0.83 s   bus 0.82 s
+```
+
+One renderer change came with it, and it is the far tier honouring what its own comment already
+promised. `applyFarLamps` picks the row above the base "so the lamps sit on the body rather than in
+the wheels", and it tested only for a row that was *entirely* transparent. Now that wheels are
+genuinely separated, the row is often *split* — opaque at both ends, road between — and the bus at
+half scale was getting red lamps painted onto its tyres. It now walks up to the first unbroken run
+of body.
+
+**Still open, and deliberately not taken:** the same-direction bus is `B_RED` bodywork with `RED`
+lamps, the weakest lamp contrast in the fleet, and `applyFarLamps` writes exactly that near-invisible
+colour. The redraw works around it with a black inboard edge on each lamp cluster. The real fix is a
+body colour that is not red — `B_YELLOW` frees red entirely and no other vehicle is yellow — but
+that is a repaint and a visible one, so it is the owner's call rather than something smuggled in
+with a redraw.
 
 ### Parametric, vector, and what each would actually buy
 
