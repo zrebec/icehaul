@@ -30,6 +30,7 @@ import { computeRoadEdges } from '../roadgeometry.ts'
 import { checkTruckOffroad } from '../offroad.ts'
 import { TRUCK_BMP_W, TRUCK_BMP_H } from '../../render/truck.ts'
 import { GAME_WIDTH, VIEWPORT_BOTTOM, GEARS, GEAR_COUNT } from '../../config.ts'
+import { SURFACE_GRIP } from '../../config.ts'
 
 const DT_MS = 16
 /** Long enough for the lateral state to settle; drift saturates far sooner. */
@@ -219,15 +220,21 @@ describe('controllability envelope', () => {
   })
 
   it('grip ordering is respected — more grip is never a smaller envelope', () => {
-    // asphalt > snow > mud > sand > ice, matching SURFACE_GRIP.
-    const byGrip: readonly Surface[] = ['asphalt', 'snow', 'mud', 'sand', 'ice']
+    // Order comes from the config, never from a copy of it: two surfaces on the
+    // same grip are not ordered *by grip*, so there is nothing to assert about                                                             // them — SURFACE_STEER_DAMP_MULT and SURFACE_CURVE_DRIFT_MULT decide, and
+    // they are entitled to.
+    const byGrip = [...SURFACES].sort((a, b) => SURFACE_GRIP[b] - SURFACE_GRIP[a])
     for (let c = 0; c < CURVATURES.length; c++) {
       for (let i = 1; i < byGrip.length; i++) {
-        expect(COASTING[byGrip[i - 1]!][c]!, `c=${CURVATURES[c]}: ${byGrip[i - 1]} vs ${byGrip[i]}`)
-          .toBeGreaterThanOrEqual(COASTING[byGrip[i]!][c]!)
+        const more = byGrip[i - 1]!
+        const less = byGrip[i]!
+        if (SURFACE_GRIP[more] === SURFACE_GRIP[less]) continue
+        expect(COASTING[more][c]!, `c=${CURVATURES[c]}: ${more} vs ${less}`)
+          .toBeGreaterThanOrEqual(COASTING[less][c]!)
       }
     }
   })
+
 })
 
 // ─── Braking (audit §3c) ─────────────────────────────────────────────────────
