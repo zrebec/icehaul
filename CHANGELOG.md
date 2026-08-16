@@ -1,3 +1,10 @@
+# [0.10.0](https://github.com/zrebec/icehaul/compare/v0.9.0...v0.10.0) (2026-08-16)
+
+
+### Features
+
+* **render:** redraw all six traffic vehicles by hand ([#42](https://github.com/zrebec/icehaul/issues/42)) ([367bb1c](https://github.com/zrebec/icehaul/commit/367bb1ce8e595b2add5f756102f0417e2bb4ff52))
+
 # [0.9.0](https://github.com/zrebec/icehaul/compare/v0.8.2...v0.9.0) (2026-08-16)
 
 
