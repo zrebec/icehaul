@@ -1,3 +1,10 @@
+# [0.13.0](https://github.com/zrebec/icehaul/compare/v0.12.0...v0.13.0) (2026-08-18)
+
+
+### Features
+
+* **mission:** a clock that knows the road ([#47](https://github.com/zrebec/icehaul/issues/47)) ([a052846](https://github.com/zrebec/icehaul/commit/a052846bc52e03fa8eaaa2acdd93e8f3c48692f4))
+
 # [0.12.0](https://github.com/zrebec/icehaul/compare/v0.11.1...v0.12.0) (2026-08-16)
 
 
