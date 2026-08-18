@@ -965,6 +965,167 @@ export const LOW_FUEL_BEEP_COOLDOWN_S = 0.8
 /** Critical fuel beep cooldown (faster). */
 export const LOW_FUEL_CRIT_BEEP_COOLDOWN_S = 0.4
 
+// ── Route planning — the clock that knows the road ──────────────────────────
+//
+// The route is a deterministic function of the seed, so the game knows what is
+// coming before the player does: which surfaces, how long, how tight the bends.
+// The delivery clock is built from *that* rather than from a flat pace, which
+// means a leg over ice is granted the time ice costs, and a leg over asphalt is
+// not granted time it does not need.
+//
+// ── What this changes about the game, stated once ───────────────────────────
+// A flat pace punishes **slowness**. A route-aware budget punishes **caution**.
+// An ice route becomes calmer (the plan knows you must crawl) and an asphalt
+// route becomes tense (the plan expects you to use the grip you have). That is
+// Fox's decision, made with the consequence in front of him, and it is the whole
+// point of the feature — not a side effect to tune away later.
+//
+// ── The rule that keeps the safety net honest ───────────────────────────────
+// `completability.test.ts` drives a deliberately crude human heuristic and its
+// own comment explains why: a bot steering by the physics it is meant to audit
+// proves nothing. The same trap sits here, one level up. **The planner and the
+// bot must not share a single constant.** The planner is physics-anchored; the
+// bot stays a human guess; the slack below is calibrated by running one against
+// the other.
+
+/**
+ * Reference speed for the safe-speed law, km/h.
+ *
+ * Not invented — read off the measured envelope in `controllability.test.ts`.
+ * That table has twenty cells (five surfaces x four curvatures) and one formula
+ * reproduces all of them to within about 5 %:
+ *
+ *     v_safe = min(MAX_SPEED, PLAN_V_REF / sqrt(max(c, PLAN_C_MIN)) * sqrt(grip))
+ *
+ *     surface   c=2 measured   formula     grip
+ *     asphalt        85          84.9      1.00
+ *     snow           55          56.9      0.45
+ *     ice            40          42.4      0.25
+ *     sand           50          50.2      0.35
+ *     mud            60          56.9      0.45
+ *
+ * The `sqrt(grip)` half is not a fit, it is the friction circle — `AGENTS.md`
+ * already argues that safe curve speed scales as `sqrt(mu)` when it explains why
+ * ice holds 40 and not 45.
+ */
+export const PLAN_V_REF = 120
+/**
+ * Curvature floor for the law above. Below this the formula would divide by
+ * almost nothing and hand a straight road an infinite speed; `MAX_SPEED` caps it
+ * anyway, and this keeps the arithmetic finite rather than relying on the cap.
+ */
+export const PLAN_C_MIN = 0.35
+
+/**
+ * Highest speed the truck can actually hold on each surface, km/h.
+ *
+ * The cornering law above answers "how fast may I go round this bend" and says
+ * nothing about drag — on sand and mud the truck cannot reach 120 on a straight,
+ * so a sandy leg would be handed a budget nobody could drive. These are measured
+ * by `routeplan.test.ts`, which runs the real `tickVehicle` flat out on a
+ * straight and fails if any number here is optimistic by more than 2 km/h — the
+ * sweep stops when ten seconds of throttle buys under 0.05 km/h, so it lands
+ * just under the true asymptote. Deliberately measured
+ * rather than copied from the completability bot's strategy table — see the
+ * no-shared-constants rule above.
+ *
+ * The numbers were a surprise and are the reason the measurement exists:
+ *
+ *     asphalt  120.0    ice  120.0    snow  45.7    sand  44.4    mud  41.0
+ *
+ * **Snow, sand and mud top out in the forties.** The lateral envelope says snow
+ * holds the road at 120 through a gentle bend, and that is true and irrelevant —
+ * the truck cannot get there, because `SURFACE_DRAG` takes the engine's output
+ * long before the bend does. A plan built on the cornering law alone would have
+ * budgeted a snow leg at twice the speed the truck can reach.
+ */
+export const PLAN_SURFACE_VMAX: Record<Surface, number> = {
+  asphalt: 120,
+  snow: 47,
+  ice: 120,
+  sand: 46,
+  mud: 43,
+}
+
+/**
+ * Acceleration the plan assumes, m/s².
+ *
+ * Deliberately far below what the engine can do on paper. The plan does not
+ * model the gearbox — a shift takes time, a missed one takes more, and the
+ * torque curve means the truck pulls hardest in the middle of a gear — so this
+ * is the *effective* figure a competent driver achieves through the gears.
+ * Modelling the box properly here would mean a second copy of `vehicle.ts`, and
+ * the copy would drift.
+ */
+export const PLAN_ACCEL_MS2 = 1.1
+/**
+ * Distance between plan samples, metres. Fine enough that a 100 m ice segment is
+ * ten samples and coarse enough that an 8 km leg is 800 — computed once per leg,
+ * never per frame.
+ */
+export const PLAN_STEP_M = 10
+
+/**
+ * How much more time than the ideal line the clock grants.
+ *
+ * The ideal is a driver who knows every metre of the route in advance, never
+ * misses a shift and never lifts out of doubt. Nobody is that driver, and a
+ * first-time visitor to a seed is a long way from it. This is the whole margin
+ * for imperfect shifting, hesitation, a cautious line and reading the road
+ * through the windscreen instead of from the seed.
+ *
+ * Calibrated, not guessed: `completability.test.ts` runs three strategies across
+ * the seed catalogue, and the target Fox set is **moderate passes with a small
+ * margin, conservative fails on the harder routes**.
+ */
+export const PLAN_SLACK = 1.6
+/**
+ * Extra seconds on the first leg only, on top of the slack.
+ *
+ * The plan reads the route from the seed; a player on their first run of it
+ * cannot. That gap is widest at the very start, before anyone has learned where
+ * the ice is — and the first leg is also the one that begins from a standstill
+ * with a cold engine.
+ */
+export const PLAN_FIRST_LEG_BONUS_S = 45
+/** Seconds granted for the standing start, the crank and the first two shifts. */
+export const PLAN_START_ALLOWANCE_S = 15
+/**
+ * Seconds per kilometre for traffic, which the plan cannot see.
+ *
+ * Traffic is seeded, but it reacts to the player, so it is not a function of
+ * distance the way the road is. A flat allowance is the honest shape. It will
+ * need raising when traffic density starts scaling with distance travelled.
+ */
+export const PLAN_TRAFFIC_ALLOWANCE_S_PER_KM = 6
+
+/** Seconds added to the clock by one canister, on top of its fuel. */
+export const CANISTER_TIME_BONUS_S = 10
+/**
+ * The share of a leg's canisters the budget assumes will be collected.
+ *
+ * Not 1.0, and that is the design: some canisters sit at the road edge, in a
+ * bend or on ice, and a sensible driver leaves those. Budgeting for all of them
+ * would make the clock unaffordable for anyone who drives sanely; budgeting for
+ * none of them would hand back **+14.3 s per kilometre** at today's spacing —
+ * more than the surplus this whole feature exists to remove.
+ *
+ * So the clock is priced for a driver who takes the easy ones. Taking a hard one
+ * buys time; leaving them all costs it.
+ */
+export const PLAN_EXPECTED_CANISTER_PCT = 0.6
+
+/**
+ * Hard bounds on the average speed a leg may ever demand, km/h.
+ *
+ * The guard rail that makes a planner bug survivable. 0.8.1 shipped a mission
+ * asking for 188 km/h against a 120 km/h truck, and it shipped because nothing
+ * stood between an arithmetic slip and the player. `PLAN_PACE_MAX` is that
+ * something. The lower bound stops an over-generous plan from making a leg free.
+ */
+export const PLAN_PACE_MIN_KMH = 22
+export const PLAN_PACE_MAX_KMH = 80
+
 // ── Mission / delivery ──────────────────────────────────────────────────────
 
 /** Distance of the first delivery target from start (metres). */

@@ -14,7 +14,7 @@ import {
   DELIVERY_FUEL_REFILL, DELIVERY_SCORE,
   OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S, CRASH_ANIM_MS,
   TRAFFIC_COLLISION_DEPTH_M,
-  CRANK_NEEDED_MS,
+  CRANK_NEEDED_MS, CANISTER_TIME_BONUS_S,
   TRUCK_WEIGHT_T, TRUCK_WEIGHTS_T,
 } from '../config.ts'
 import {
@@ -36,8 +36,9 @@ import { getRoadsideObjects } from '../game/roadside.ts'
 import { tickTraffic, getVisibleTraffic, resetTraffic } from '../game/traffic.ts'
 import { computeRoadEdges } from '../game/roadgeometry.ts'
 import {
-  createMission, tickMission, deliverIfArrived, isMissionExpired, remainingM,
+  addMissionTime, createMission, tickMission, deliverIfArrived, isMissionExpired, remainingM,
 } from '../game/mission.ts'
+import type { RoadSampler } from '../game/routeplan.ts'
 import { createScore, accrueScore, addScoreBonus } from '../game/score.ts'
 import type { RunSummary } from '../game/runStats.ts'
 import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../game/offroad.ts'
@@ -184,7 +185,22 @@ export function createDriveScene(
   // player notices is a nasty way to lose a delivery.
   window.addEventListener('blur', () => { clutchHeld = false })
 
-  const mission = createMission(gameSeed)
+  /**
+   * The road, as the mission planner asks about it. The clock is built from what
+   * is actually coming — see `game/routeplan.ts` — so this is the one place the
+   * two systems meet.
+   */
+  const road: RoadSampler = {
+    surfaceAt: (d) => getSurfaceAt(d),
+    gripAt: (d) => getGripAt(d),
+    curvatureAt: (d) => getCurvatureAt(d),
+  }
+  const mission = createMission(gameSeed, road)
+
+  /** Centre-screen note with its own life, in ms: NEW LOAD, +10s and the like. */
+  let flashText: string | null = null
+  let flashMs = 0
+  const flash = (text: string, ms = 2200) => { flashText = text; flashMs = ms }
 
   return {
     name: 'drive',
@@ -249,6 +265,7 @@ export function createDriveScene(
       if (gameOverFired) return
       elapsedMs += dt
       gearBlockFlashMs = Math.max(0, gearBlockFlashMs - dt)
+      if (flashMs > 0) { flashMs = Math.max(0, flashMs - dt); if (flashMs === 0) flashText = null }
 
       if (!engineStarted && getAudioContext() != null) {
         startEngine()
@@ -474,6 +491,11 @@ export function createDriveScene(
       if (fuelGained > 0) {
         canistersCollected++
         v.fuel = Math.min(1, v.fuel + fuelGained)
+        // Canisters pay in seconds as well as in fuel. The budget already
+        // expects a share of them to be taken (PLAN_EXPECTED_CANISTER_PCT), so
+        // this is not free time — it is time the plan has already spent.
+        addMissionTime(mission, CANISTER_TIME_BONUS_S * 1000)
+        flash(`+${CANISTER_TIME_BONUS_S}s`, 900)
         if (ctxAudio) beep(880, 40, ctxAudio.currentTime)
         flashBorder(C.B_YELLOW, 1, 100)
       }
@@ -486,9 +508,16 @@ export function createDriveScene(
 
       // Delivery — the clock, the next target and the carry-over all live in
       // game/mission.ts, so the completability bot walks the same rules.
-      if (deliverIfArrived(mission, v.distance)) {
+      if (deliverIfArrived(mission, v.distance, road)) {
         addScoreBonus(score, DELIVERY_SCORE)
         v.fuel = Math.min(1, v.fuel + DELIVERY_FUEL_REFILL)
+        // The new leg's budget, shown once. Without this the clock only ever
+        // counts down and a veteran cannot read what the route is going to be —
+        // which is half the reason the budget knows the road at all.
+        const budgetS = Math.round(mission.lastBudgetMs / 1000)
+        const bm = Math.floor(budgetS / 60).toString().padStart(2, '0')
+        const bs = (budgetS % 60).toString().padStart(2, '0')
+        flash(`NEW LOAD  ${bm}:${bs}`)
         if (ctxAudio) {
           playPattern([
             { freq: 523, dur: 80 }, { freq: 0, dur: 20 },
@@ -615,6 +644,9 @@ export function createDriveScene(
       })
 
       // ── Overlays ──
+      if (flashText && driveState === 'playing') {
+        drawTextCentered(ctx, flashText, 36, COLS, C.B_GREEN, C.BLACK)
+      }
       if (driveState === 'waiting') {
         if (isCranking) {
           drawTextCentered(ctx, 'STARTING...', 56, COLS, C.B_GREEN, C.BLACK)
