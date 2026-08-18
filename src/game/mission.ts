@@ -15,9 +15,9 @@
  */
 
 import {
-  FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE, MISSION_PACE_KMH,
-  DELIVERY_TIME_LIMIT_MS, DELIVERY_TIME_CARRY_PCT,
+  FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE, DELIVERY_TIME_CARRY_PCT,
 } from '../config.ts'
+import { planLeg, type RoadSampler } from './routeplan.ts'
 
 function hash(n: number): number {
   let x = (n + 0x9E3779B9) | 0
@@ -37,17 +37,26 @@ export interface MissionState {
   timerMs: number
   /** How many deliveries have been completed. */
   deliveryCount: number
+  /** What the current leg was granted, ms — shown on pickup so a veteran can
+   *  read the route off the clock, which is the point of the whole thing. */
+  lastBudgetMs: number
 }
 
 /**
- * Time allowed for a leg of `lengthM` metres.
+ * Time allowed for the leg from `startM` to `endM`, given the road it crosses.
  *
- * Proportional, so the clock makes the same promise on every leg. A flat budget
- * is what created the discontinuity at the first delivery, and it would create
- * another one the next time leg length changed.
+ * It was `lengthM / MISSION_PACE_KMH` — proportional, which fixed the 0.8.1
+ * discontinuity, but blind: every kilometre was priced the same whether it was
+ * asphalt or ice. A competent run holds 42-46 km/h against a 37.5 km/h pace, so
+ * the surplus compounded until the clock stopped meaning anything.
+ *
+ * Now the budget is read off *this* road — see `routeplan.ts`. The consequence
+ * is deliberate and worth knowing before playing: a flat pace punishes being
+ * slow, and a route-aware one punishes being **cautious**. Ice legs get calmer,
+ * asphalt legs get tense.
  */
-export function legBudgetMs(lengthM: number): number {
-  return Math.round(lengthM / 1000 / MISSION_PACE_KMH * 3_600_000)
+export function legBudgetMs(startM: number, endM: number, road: RoadSampler, firstLeg = false): number {
+  return Math.round(planLeg(startM, endM, road, { firstLeg }).budgetS * 1000)
 }
 
 /**
@@ -62,13 +71,20 @@ export function nextTargetLengthM(deliveryCount: number, seed: number): number {
   return minD + (maxD - minD) * hash(deliveryCount * 71 + 23 + seed)
 }
 
-export function createMission(seed: number): MissionState {
+/**
+ * The road is injected rather than imported so this module stays pure and the
+ * planner can be tested over a road that does not exist. It also keeps the
+ * dependency pointing one way: the mission asks the road questions, never the
+ * other way round.
+ */
+export function createMission(seed: number, road: RoadSampler): MissionState {
   return {
     seed,
     targetDist: FIRST_TARGET_DIST_M,
     legStartDist: 0,
-    timerMs: DELIVERY_TIME_LIMIT_MS,
+    timerMs: legBudgetMs(0, FIRST_TARGET_DIST_M, road, true),
     deliveryCount: 0,
+    lastBudgetMs: legBudgetMs(0, FIRST_TARGET_DIST_M, road, true),
   }
 }
 
@@ -91,7 +107,7 @@ export function isMissionExpired(m: MissionState): boolean {
  * read to the player as gaining a couple of minutes when it was really the
  * clock jumping backwards.
  */
-export function deliverIfArrived(m: MissionState, distanceM: number): boolean {
+export function deliverIfArrived(m: MissionState, distanceM: number, road: RoadSampler): boolean {
   if (distanceM < m.targetDist) return false
 
   m.deliveryCount++
@@ -99,8 +115,16 @@ export function deliverIfArrived(m: MissionState, distanceM: number): boolean {
   const legLength = nextTargetLengthM(m.deliveryCount, m.seed)
   m.legStartDist = m.targetDist
   m.targetDist = m.targetDist + legLength
-  m.timerMs = carried + legBudgetMs(legLength)
+  // Planned once, here, and never again: the road ahead does not change under
+  // the player, so a per-frame recomputation would be the same answer at a cost.
+  m.lastBudgetMs = legBudgetMs(m.legStartDist, m.targetDist, road)
+  m.timerMs = carried + m.lastBudgetMs
   return true
+}
+
+/** Add time to the clock — canisters pay in seconds as well as in fuel. */
+export function addMissionTime(m: MissionState, ms: number): void {
+  m.timerMs += ms
 }
 
 /** Metres still to drive on the current leg (never negative). */

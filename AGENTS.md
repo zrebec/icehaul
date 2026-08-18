@@ -75,6 +75,32 @@ without needing a measurement to argue for it. Worth remembering when the next i
    pulled.**
 5. **Resolution** — still rejected; revisit only for HUD space.
 
+#### Five proposals off the 0.11.1 playtest — ideas, not decisions
+
+Written down so they stop living in a chat window. None is scheduled; the queue above still rules.
+
+1. **`feat(traffic)`: traffic that slows for what is ahead** *(~0.5-1 day, best return)*. Nothing in
+   the model slows a vehicle ahead of the player, so the brake lights have nowhere to show and every
+   overtake is the same problem. Same-direction traffic slowing for sharp curvature and for low-grip
+   surfaces would pay three times over: the brake lights gain a purpose, an overtake becomes a
+   decision (*"it is braking, so there is ice — do I go round?"*), and the density work in item 1
+   gets something to modulate. Sits directly on §2½: traffic **is** the difficulty.
+2. **`feat(mission)`: make the clock bite again** *(2-4 h, but a decision first)*. See §A above for
+   the arithmetic and the three levers. Recommendation: pace to 42 and a cap on the bank; leave
+   `DELIVERY_TIME_CARRY_PCT` alone, because Fox already decided that once.
+3. **`feat(fuel)`: canisters that cost something to take** *(~0.5 day)*. §B shows fuel cannot bite
+   below 87 km/h. Turning a constant is the dull answer; the interesting one is to stop scattering
+   canisters uniformly and place them where a detour costs something — road edge, mid-bend, on the
+   ice — and to thin them out with distance travelled. Fuel stops being a tax and becomes a
+   decision, which is the fantasy this game is actually about.
+4. **`feat(scene)`: a title screen and a local best-per-route** *(~0.5-1 day)*. Fox has asked for a
+   start screen, and the results screen finally produces comparable numbers to put on one. Daily
+   seed plus a best score for that seed gives replay value with no network and nothing stored that
+   matters. It is also the natural home for a glow switch for players who dislike it.
+5. **`feat(render)`: distance fog** *(4-6 h)*. Next in the graphics queue and glow already paid half
+   of it — the layer and the blit order exist. Strongest depth cue available, and it turns "smear on
+   the horizon" from a defect into an intention, which is what still reads worst about the far field.
+
 A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
 costs anything, and a third tier would only put back a boundary where there is currently none.
 
@@ -119,6 +145,78 @@ because the clock was never meant to be the difficulty. Here, Fox calls the same
 benevolent". Both were said after playing; the difference is that the runs are now long enough for
 compounding to show. It is Fox's call which way it goes, and it should be made once rather than
 drifted into.
+
+##### What was done — the clock now reads the road (0.12)
+
+Fox's call, and not a tune of the constant: the route is a deterministic function of the seed, so
+the budget is computed from **this** road. `game/routeplan.ts` is the whole of it, and three things
+in it are worth keeping.
+
+**The safe-speed law is read off the measured envelope, not invented.** One line reproduces all
+twenty cells of `controllability.test.ts` to within 5%:
+
+    v_safe = min(MAX_SPEED, PLAN_SURFACE_VMAX, 120 / sqrt(max(c, 0.35)) * sqrt(grip))
+
+**The second cap was the surprise.** The cornering law answers "how fast may I take this bend" and
+says nothing about drag, so the plan measures what the truck can actually *hold* — full throttle, in
+a straight line, through the gears — and the answer is not what the lateral envelope suggests:
+
+    asphalt >=118    ice >=118    snow 45.7    sand 44.4    mud 41.0
+
+**Snow, sand and mud top out in the forties.** Snow holds the road at 120 through a gentle bend and
+cannot get anywhere near it. A plan built on cornering alone would have budgeted a snow leg at twice
+the truck's actual speed.
+
+**The budget is a speed profile, not a sum.** `Σ(distance / v_safe)` assumes instant speed changes,
+and a route alternating asphalt at 120 with ice at 40 spends most of its time doing neither. Two
+passes — backwards for braking, forwards for acceleration — so a limit ahead reaches back up the
+road as the braking distance it really needs. That is also the game's thesis expressed as
+arithmetic: the plan starts slowing about 99 m before the ice, and so must the player.
+
+Plus a standing-start allowance, a flat traffic allowance, a first-leg beginner bonus, and **minus
+the time the road is about to hand back**: canisters now pay **+10 s** each (Fox's, and the "cink"
+is the point), which at today's spacing is +14.3 s per kilometre — *more* than the 10.3 s/km surplus
+this whole feature exists to remove. The budget therefore prices in 60% of them. Never 100%: some
+canisters sit at the edge, in a bend or on ice, and budgeting for those would make the clock
+unaffordable for anyone driving sanely. Taking a hard one buys time; leaving them all costs it.
+
+Finally the whole thing is clamped to a demanded average between 22 and 80 km/h. **That clamp is
+what 0.8.1 did not have.**
+
+##### The calibration table, and what it exposed
+
+`PLAN_SLACK` was picked by measurement, at Fox's brief of *moderate passes, conservative fails*:
+
+| PLAN_SLACK | demanded on seed 42 | moderate | conservative |
+|---|---|---|---|
+| 1.35 | 43.9 km/h | fails at 4769 m | fails at 4115 m |
+| 1.50 | 40.0 km/h | passes, 429 s | fails at 4571 m |
+| **1.60** | **37.7 km/h** | **passes, 429 s** | **fails at 4892 m** |
+| 1.70 | 35.7 km/h | passes | passes, 487 s |
+
+Across the 21-seed sweep the demanded pace now runs from **33.0 to 45.1 km/h** — the point of the
+feature, in one range: the clock is a different number on a different road.
+
+**The table also exposed something structural, and it is the most useful thing to come out of this
+work.** At first, four seeds could not be completed by *any* strategy — and they were the
+**asphalt-heavy** ones, where the plan demands 40-45 km/h. None of the three bots could deliver it,
+because none of them drives differentially: `aggressive` is quick on asphalt and also reckless on
+ice (it dies on fuel), `moderate` and `conservative` are uniformly careful and never exceed 65 km/h
+anywhere. With a flat pace that never mattered. **With a budget read off the road, using the grip
+where there is grip is the entire skill, and there was no bot that could express it.**
+
+So a fourth strategy exists now — `smart` (asphalt 100, snow 42, ice 34, sand 42, mud 38) — and with
+it every seed in the sweep is completed by someone. Completion counts at the shipped slack:
+
+    aggressive 8/21 · moderate 13/21 · conservative 2/21 · smart 16/21
+
+`moderate` failing on eight of twenty-one is not a defect. It is the clock biting, which is what was
+asked for.
+
+**Two things to watch in the next playtest,** both consequences rather than bugs. Timeout will
+become a more common death than fuel or a crash — the results screen's average speed is the
+diagnostic for it. And the seed catalogue below now has a second axis: a seed's difficulty is no
+longer only what it does to the truck, it is also what the clock asks of it.
 
 #### B · Fuel cannot bite below about 87 km/h
 

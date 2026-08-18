@@ -11,15 +11,29 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  createMission, legBudgetMs, nextTargetLengthM, tickMission,
+  addMissionTime, createMission, legBudgetMs, nextTargetLengthM, tickMission,
   deliverIfArrived, isMissionExpired, remainingM,
 } from '../mission.ts'
+import type { RoadSampler } from '../routeplan.ts'
 import {
-  FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE, MISSION_PACE_KMH,
-  DELIVERY_TIME_LIMIT_MS, DELIVERY_TIME_CARRY_PCT, MAX_SPEED,
+  FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE,
+  DELIVERY_TIME_CARRY_PCT, MAX_SPEED, SURFACE_GRIP,
+  PLAN_PACE_MAX_KMH, PLAN_PACE_MIN_KMH,
 } from '../../config.ts'
 
 const SEED = 1_443_866
+
+/**
+ * A road that never changes, so these tests stay about the *mission* — what it
+ * demands and how it hands legs over. Whether a real route's budget is drivable
+ * is `routeplan.test.ts` and `completability.test.ts`.
+ */
+const flatRoad = (surface: 'asphalt' | 'ice' = 'asphalt'): RoadSampler => ({
+  surfaceAt: () => surface,
+  gripAt: () => SURFACE_GRIP[surface],
+  curvatureAt: () => 0,
+})
+const ROAD = flatRoad()
 
 /** Average km/h a leg of `lengthM` demands inside `budgetMs`. */
 function requiredKph(lengthM: number, budgetMs: number): number {
@@ -27,23 +41,37 @@ function requiredKph(lengthM: number, budgetMs: number): number {
 }
 
 describe('leg budget', () => {
-  it('leaves the first leg at exactly the 8 minutes it was tuned to', () => {
-    // The one leg with a human run behind it: the owner finished 5 km on the
-    // reference seed with ~12 s to spare. Any change to the pace that moves
-    // this number invalidates that playtest, so it is pinned by value and not
-    // merely by formula.
-    expect(DELIVERY_TIME_LIMIT_MS).toBe(8 * 60 * 1000)
-    expect(legBudgetMs(FIRST_TARGET_DIST_M)).toBe(DELIVERY_TIME_LIMIT_MS)
+  it('is read off the road rather than off a flat pace', () => {
+    // The change 0.11.x makes: the same five kilometres cost different amounts
+    // of time depending on what they are made of. A flat pace could not say
+    // that, which is why a competent run banked ten seconds a kilometre.
+    const easy = legBudgetMs(0, 5000, flatRoad('asphalt'))
+    const hard = legBudgetMs(0, 5000, flatRoad('ice'))
+    expect(hard).toBeGreaterThan(easy)
   })
 
-  it('asks the same average speed of every leg length', () => {
-    for (const lengthM of [1000, 5000, 6500, 8000, 25000]) {
-      expect(requiredKph(lengthM, legBudgetMs(lengthM))).toBeCloseTo(MISSION_PACE_KMH, 3)
+  it('gives the first leg a beginner allowance the others do not get', () => {
+    // The planner reads the route from the seed; a player on their first run of
+    // it cannot, and the first leg also starts from a cold standstill.
+    expect(legBudgetMs(0, 5000, ROAD, true)).toBeGreaterThan(legBudgetMs(0, 5000, ROAD))
+  })
+
+  it('still grows with the length of the leg', () => {
+    // Not linearly any more — a longer leg may cross easier ground — but the
+    // 0.8.1 defect was a budget that did not grow at all.
+    expect(legBudgetMs(0, 8000, ROAD)).toBeGreaterThan(legBudgetMs(0, 4000, ROAD))
+  })
+
+  it('never demands a pace outside the guard rails, on any road', () => {
+    // The clamp that 0.8.1 did not have, checked here through the mission's own
+    // entry point rather than only inside the planner.
+    for (const road of [flatRoad('asphalt'), flatRoad('ice')]) {
+      for (const lengthM of [1000, 5000, 8000]) {
+        const kph = requiredKph(lengthM, legBudgetMs(0, lengthM, road))
+        expect(kph).toBeLessThanOrEqual(PLAN_PACE_MAX_KMH + 0.01)
+        expect(kph).toBeGreaterThanOrEqual(PLAN_PACE_MIN_KMH - 0.01)
+      }
     }
-  })
-
-  it('scales linearly, so twice the road is twice the clock', () => {
-    expect(legBudgetMs(10_000)).toBe(2 * legBudgetMs(5000))
   })
 })
 
@@ -53,17 +81,7 @@ describe('target range is reachable', () => {
   it('never demands more than the truck can do', () => {
     const [minD, maxD] = NEXT_TARGET_RANGE
     for (const lengthM of [minD, (minD + maxD) / 2, maxD]) {
-      expect(requiredKph(lengthM, legBudgetMs(lengthM))).toBeLessThan(MAX_SPEED)
-    }
-  })
-
-  it('demands no more than the first leg does, at any drawn length', () => {
-    // Every leg the generator can produce must sit at the pace a human has
-    // already driven — that is the whole point of a proportional budget.
-    const firstLegKph = requiredKph(FIRST_TARGET_DIST_M, DELIVERY_TIME_LIMIT_MS)
-    for (let i = 0; i < 200; i++) {
-      const lengthM = nextTargetLengthM(i, SEED)
-      expect(requiredKph(lengthM, legBudgetMs(lengthM))).toBeLessThanOrEqual(firstLegKph + 0.01)
+      expect(requiredKph(lengthM, legBudgetMs(0, lengthM, ROAD))).toBeLessThan(MAX_SPEED)
     }
   })
 
@@ -96,46 +114,47 @@ describe('leg lengths hang off the route seed', () => {
 
 describe('delivery', () => {
   it('does nothing until the truck reaches the drop-off', () => {
-    const m = createMission(SEED)
-    expect(deliverIfArrived(m, FIRST_TARGET_DIST_M - 1)).toBe(false)
+    const m = createMission(SEED, ROAD)
+    expect(deliverIfArrived(m, FIRST_TARGET_DIST_M - 1, ROAD)).toBe(false)
     expect(m.deliveryCount).toBe(0)
     expect(m.targetDist).toBe(FIRST_TARGET_DIST_M)
   })
 
   it('adds the new leg to what was left instead of resetting the clock', () => {
     // The 0.8.1 behaviour was `timerMs = DELIVERY_TIME_LIMIT_MS` — a jump back
-    // to a full budget that the owner read as "you only gain 2 minutes".
-    const m = createMission(SEED)
-    tickMission(m, 5 * 60 * 1000)          // 3 minutes left of the first leg
+    // to a full budget that Fox read as "you only gain 2 minutes".
+    const m = createMission(SEED, ROAD)
+    const granted = m.timerMs
+    tickMission(m, granted / 2)
     const leftover = m.timerMs
-    expect(leftover).toBe(3 * 60 * 1000)
+    expect(leftover).toBeCloseTo(granted / 2, 6)
 
-    deliverIfArrived(m, FIRST_TARGET_DIST_M)
-    const legLength = m.targetDist - m.legStartDist
-    expect(m.timerMs).toBeCloseTo(leftover * DELIVERY_TIME_CARRY_PCT + legBudgetMs(legLength), 6)
-    expect(m.timerMs).toBeGreaterThan(legBudgetMs(legLength))
+    deliverIfArrived(m, FIRST_TARGET_DIST_M, ROAD)
+    const legBudget = legBudgetMs(m.legStartDist, m.targetDist, ROAD)
+    expect(m.timerMs).toBeCloseTo(leftover * DELIVERY_TIME_CARRY_PCT + legBudget, 6)
+    expect(m.timerMs).toBeGreaterThan(legBudget)
   })
 
   it('measures the next leg from the drop-off, not from where the truck stopped', () => {
     // Called a few metres late (a frame's worth of overshoot), the leg must
     // still be the length it was drawn as — otherwise the target creeps
     // forward by a frame of travel on every delivery.
-    const m = createMission(SEED)
-    deliverIfArrived(m, FIRST_TARGET_DIST_M + 7.3)
+    const m = createMission(SEED, ROAD)
+    deliverIfArrived(m, FIRST_TARGET_DIST_M + 7.3, ROAD)
     expect(m.legStartDist).toBe(FIRST_TARGET_DIST_M)
     expect(m.targetDist - m.legStartDist).toBeCloseTo(nextTargetLengthM(1, SEED), 6)
   })
 
   it('keeps every leg of a long run inside the pace', () => {
-    const m = createMission(SEED)
+    const m = createMission(SEED, ROAD)
     let dist = 0
     for (let leg = 0; leg < 20; leg++) {
-      const budget = m.timerMs
-      const lengthM = m.targetDist - m.legStartDist
-      // Each leg's own budget, ignoring anything banked, must cover it at pace.
-      expect(legBudgetMs(lengthM)).toBeLessThanOrEqual(budget + 0.01)
+      const onTheClock = m.timerMs
+      // Each leg's own budget, ignoring anything banked, must be on the clock.
+      expect(legBudgetMs(m.legStartDist, m.targetDist, ROAD))
+        .toBeLessThanOrEqual(onTheClock + 0.01)
       dist = m.targetDist
-      expect(deliverIfArrived(m, dist)).toBe(true)
+      expect(deliverIfArrived(m, dist, ROAD)).toBe(true)
     }
     expect(m.deliveryCount).toBe(20)
   })
@@ -143,22 +162,29 @@ describe('delivery', () => {
 
 describe('timer', () => {
   it('counts down and stops at zero', () => {
-    const m = createMission(SEED)
-    tickMission(m, DELIVERY_TIME_LIMIT_MS + 5000)
+    const m = createMission(SEED, ROAD)
+    tickMission(m, m.timerMs + 5000)
     expect(m.timerMs).toBe(0)
     expect(isMissionExpired(m)).toBe(true)
   })
 
   it('is not expired while time remains', () => {
-    const m = createMission(SEED)
-    tickMission(m, DELIVERY_TIME_LIMIT_MS - 1)
+    const m = createMission(SEED, ROAD)
+    tickMission(m, m.timerMs - 1)
     expect(isMissionExpired(m)).toBe(false)
+  })
+
+  it('takes the canister bonus straight onto the clock', () => {
+    const m = createMission(SEED, ROAD)
+    const before = m.timerMs
+    addMissionTime(m, 10_000)
+    expect(m.timerMs).toBe(before + 10_000)
   })
 })
 
 describe('remaining distance', () => {
   it('never reads negative once the truck is past the target', () => {
-    const m = createMission(SEED)
+    const m = createMission(SEED, ROAD)
     expect(remainingM(m, 0)).toBe(FIRST_TARGET_DIST_M)
     expect(remainingM(m, FIRST_TARGET_DIST_M + 500)).toBe(0)
   })
