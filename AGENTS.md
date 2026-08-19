@@ -989,8 +989,8 @@ not. The fix is largely reuse, not invention. *(It was correct in shape but not 
 | — | *(not in the original order)* Fractional scale — growth a pixel at a time | **DONE** #34 | — |
 | 3a | Contact shadow + contrast outline | **DONE** #35. Derived from the raster, no art. Kept *outside* the raster so the hitbox is unchanged; `?outline=0` for A/B | 0.5 day |
 | 3b | Traffic fits its lane, and sits in it | **DONE** #37. `ROAD_HALF_TOP` 14 → 24 plus the spawn lane fix. Jumped the queue — it came out of a playtest. See "Two ways a vehicle was not in its lane" | 0.5 day |
-| 3b′ | **Redraw the six traffic sprites by hand** | **TODO** — the top of the list. See "The sprites themselves are the bottleneck now" | 1–2 days |
-| 3c | Lights through restrained `glow` | **DONE** #43. Traffic lamps and the player's own tail lights; positions read off the art, halo clipped to the viewport, `?glow=0` / `?glow=0.35`. `lighting` still has no consumer | 0.5 day |
+| 3b′ | **Redraw the six traffic sprites by hand** | **DONE** #42. All six redrawn and moved to `sprites/vehicles.ts`; the five rules are held as tests rather than as pixels. See "The sprites themselves are the bottleneck now" | 1–2 days |
+| 3c | Lights through restrained `glow` | **DONE #43 and CLOSED 2026-08-19** — playtested and signed off, see "The glow is finished" below. Traffic lamps and the player's own tail lights; positions read off the art, halo clipped to the viewport, `?glow=0` for A/B. `lighting` still has no consumer | 0.5 day |
 | 4 | Parametric near-vehicle prototype, one type, behind a flag, with an explicit gate | **TODO**, and easier than when it was written: #34 already made size an output. Not the same as 3D vector — see the table above | 1–2 days |
 | 5 | Distance fog; night per the decision below | **TODO** | 4–6 h + night |
 | 6 | Resolution decision — only here, and probably no | **Still no** | — |
@@ -1130,6 +1130,26 @@ One side effect worth knowing before it gets reported as a fix: the same-directi
 bodywork with `RED` lamps, which #42 recorded as the weakest lamp contrast in the fleet and left
 alone. Its halo is drawn in `B_RED`, so the glow is *brighter than the lamp it comes from* and does
 more for that vehicle than for any other. That is a workaround, not the repaint the note asks for.
+
+#### The glow is finished — closed 2026-08-19, and it does not reopen
+
+Fox, after playing it: **the glow is now recorded as playing excellently.** That closes the item.
+It is no longer a thing awaiting his playtest, and it should not be listed as one anywhere — the
+tuning happened, over three rounds (#43 the first pass, the scanline correction that showed round one
+had been measured 1.54x too bright, then #44 pulling the constants back), and it ended where he
+wanted it.
+
+**What that means for anyone reading this later.** Do not propose "one more pass on the glow", do not
+re-run the brightness tables to see whether they still hold, and do not treat the numbers in this
+chapter as provisional. They are where a person who played the game put them. The one thing that
+legitimately reopens it is a **change to what the lamps are saying** — and exactly one such change is
+in flight: once traffic ahead has a reason to brake, brake lights start appearing at distances they
+never appeared at before, and Fox has said he will tune from there. That is a new question about a
+new signal, not the old question again.
+
+Still true, and still not a defect: `?glow=0` must keep restoring a byte-identical frame, and the
+raster must keep carrying the meaning on its own (`RED` → `B_RED` for a braking vehicle). Those are
+invariants of the design rather than open tuning.
 
 ### Night mode — open, both paths costed
 

@@ -1228,6 +1228,137 @@ export const TRAFFIC_COLLISION_DEPTH_M = 6
 /** First traffic vehicle appears after this many metres (safe start). */
 export const TRAFFIC_START_M = 800
 
+// ── Traffic driver behaviour ────────────────────────────────────────────────
+//
+// What a driver in traffic *does*, as opposed to what the tyres *allow*. The
+// cornering law in `game/safespeed.ts` answers the second question and this block
+// answers the first, and the gap between them is the whole reason this block
+// exists: traffic cruises at 30-55 km/h, which is nowhere near the friction limit
+// of any bend on asphalt (the sharpest asks 84.9 km/h), so a model built on grip
+// alone would never light a single brake light.
+
+/**
+ * Share of the physics cornering limit a driver in traffic actually uses.
+ *
+ * Real traffic corners at roughly a quarter of a g against a limit near 0.8 g.
+ * 0.55 is picked so the numbers land either side of `TRAFFIC_SAME_SPEED`, which
+ * is what makes two cars meeting one bend look like two decisions:
+ *
+ *     surface   c=0.4   c=1.0   c=1.5   c=2.0     (km/h, this factor applied)
+ *     asphalt   104.4    66.0    53.9    46.7
+ *     snow       70.0    44.3    36.1    31.3
+ *     ice        52.2    33.0    26.9    23.3
+ *     sand       61.7    39.0    31.9    27.6
+ *     mud        70.0    44.3    36.1    31.3
+ *
+ * So the sharpest asphalt bend is braked for by the fast half of the fleet and
+ * ignored by the slow half, and everything on ice slows for everything.
+ */
+export const TRAFFIC_CORNER_COMFORT_PCT = 0.55
+
+/**
+ * Fastest a traffic driver will go on each surface whatever the road is doing,
+ * km/h. `null` means the surface never caps anything by itself.
+ *
+ * The cornering law is silent about a straight — `PLAN_C_MIN` floors the
+ * curvature, so bare ice comes out at 55.8 km/h, which is a car doing 55 on ice
+ * and a lie the player can see. This table is the second half of the answer.
+ *
+ * Deliberately **not** `PLAN_SURFACE_VMAX`: that is what the truck's engine can
+ * hold against `SURFACE_DRAG`, and it puts ice at 120 because ice is not draggy —
+ * true of the drivetrain, exactly backwards as a statement about a driver.
+ *
+ * These are a design decision, not physics, and they are the first dial to turn
+ * if traffic on ice ends up blocking the player more than it warns them.
+ */
+export const TRAFFIC_SURFACE_MAX_KPH: Record<Surface, number | null> = {
+  asphalt: null,
+  snow: 45,
+  ice: 30,
+  sand: 40,
+  mud: 38,
+}
+
+/**
+ * Per-vehicle caution, drawn once at spawn: above 1 reads further ahead and
+ * accepts a lower speed, below 1 is the driver who brakes late.
+ *
+ * Drawn from the seed rather than from `Math.random`, because a route *is* a
+ * seed and that has to include what the traffic on it does — otherwise the same
+ * playtest cannot be run twice and no test can pin any of this.
+ */
+export const TRAFFIC_CAUTION_RANGE: readonly [number, number] = [0.85, 1.25]
+/**
+ * Per-vehicle braking vigour, drawn once at spawn — how hard this driver leans
+ * on the pedal once they have decided to. Separate from caution so that "brakes
+ * early and gently" and "brakes late and hard" are both drivers that exist.
+ */
+export const TRAFFIC_VIGOUR_RANGE: readonly [number, number] = [0.85, 1.20]
+
+/**
+ * Seconds of travel a driver reads ahead. At 45 km/h that is 75 m.
+ *
+ * A time rather than a distance, because the honest braking distance at these
+ * speeds is tiny — shedding 45 to 30 km/h takes about 6 m — and a light that came
+ * on 6 m before the ice would be a blink, not a warning. Drivers lift early; this
+ * is that, and it is what makes the lamps readable from behind.
+ */
+export const TRAFFIC_LOOKAHEAD_S = 6
+export const TRAFFIC_LOOKAHEAD_MIN_M = 25
+export const TRAFFIC_LOOKAHEAD_MAX_M = 140
+/** Sample spacing of the look-ahead, metres. Same as `PLAN_STEP_M`, same reason. */
+export const TRAFFIC_LOOKAHEAD_STEP_M = 10
+/**
+ * How often a vehicle re-reads the road, ms.
+ *
+ * Not every frame: the road does not change under it, so the answer would be the
+ * same at sixty times the cost — and a target that only moves ten times a second
+ * is also what keeps the brake lamp from strobing.
+ */
+export const TRAFFIC_PLAN_INTERVAL_MS = 100
+
+/**
+ * Seconds over which a driver sheds the excess speed. This is what sets the
+ * deceleration: the gap to the target divided by this, then clamped and scaled
+ * by the driver's vigour. A driver braking for a bend 100 m off does not stand on
+ * the pedal, and one that has left it late does.
+ */
+export const TRAFFIC_BRAKE_RESPONSE_S = 1.8
+/** Gentlest deceleration still worth calling braking, km/h/s. */
+export const TRAFFIC_BRAKE_MIN_KMH_S = 8
+/**
+ * Hardest a traffic driver ever brakes, for any reason, km/h/s.
+ *
+ * Defined as the rear-end guard's rate rather than as a new number: that rate was
+ * already chosen for exactly this question, and two constants for one limit is
+ * how two limits start. Step 5 folds the guard into the general model, at which
+ * point `TRAFFIC_FOLLOW_BRAKE_KMH_S` becomes the older name for this.
+ */
+export const TRAFFIC_BRAKE_MAX_KMH_S = TRAFFIC_FOLLOW_BRAKE_KMH_S
+/**
+ * Below this deceleration the lamps stay dark — it is a lift, not a brake.
+ * Real pedals work this way and it keeps a driver who is merely easing off from
+ * telling the player there is ice ahead.
+ */
+export const TRAFFIC_BRAKE_LAMP_MIN_KMH_S = 6
+/**
+ * Minimum time the lamp stays lit once lit, ms.
+ *
+ * A real pedal is not tapped for one frame. Without this, a target that crosses
+ * back and forth over the current speed strobes the lights, and a strobing brake
+ * light reads as a rendering fault rather than as a car.
+ */
+export const TRAFFIC_BRAKE_LAMP_HOLD_MS = 250
+/** Getting back up to cruise once the reason to slow is behind, km/h/s. */
+export const TRAFFIC_ACCEL_KMH_S = 6
+/**
+ * How far under the leader a follower settles, km/h.
+ *
+ * Was a bare `- 2` inside `followPlayerSpeed`. Named because it is the difference
+ * between a queue that holds station and one that creeps forward until it touches.
+ */
+export const TRAFFIC_FOLLOW_UNDERSHOOT_KMH = 2
+
 // ── UI timing ───────────────────────────────────────────────────────────────
 
 export const BLINK_MS = 400

@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { followPlayerSpeed, resetTraffic, tickTraffic, getVisibleTraffic } from '../traffic.ts'
 import { getTrafficSpriteRows, projectTrafficVehicle } from '../../render/road3d.ts'
-import { VIEWPORT_TOP, VIEWPORT_BOTTOM, TRAFFIC_VIEW_DISTANCE_M } from '../../config.ts'
+import {
+  VIEWPORT_TOP, VIEWPORT_BOTTOM, TRAFFIC_VIEW_DISTANCE_M,
+  TRAFFIC_SPACING_M, TRAFFIC_SAME_DIR_PCT, TRAFFIC_COLLISION_DEPTH_M,
+} from '../../config.ts'
 import type { TrafficVehicle } from '../traffic.ts'
 
 const SEED = 123
@@ -367,5 +370,145 @@ describe('brake lights on a same-direction vehicle', () => {
     for (let i = 0; i < 40; i++) tickTraffic(900 + i * 20, 0, 60, 200)
     const seen = getVisibleTraffic(900 + 39 * 20, 400)
     expect(seen.filter(v => v.dir === 'oncoming').every(v => v.braking === undefined)).toBe(true)
+  })
+})
+
+// ─── What the density actually is, measured ──────────────────────────────────
+
+describe('traffic density, measured', () => {
+  /**
+   * Printed rather than asserted, in the style of `completability.test.ts`: these
+   * are the numbers a tuning decision gets made from, and pinning them would only
+   * mean re-pinning them the day `TRAFFIC_SPACING_M` moves.
+   *
+   * The question they answer is whether car-to-car braking has anything to bite
+   * on, and the measurement **overturned the arithmetic that predicted it would
+   * not**. Spacing is `TRAFFIC_SPACING_M` over every vehicle and only
+   * `TRAFFIC_SAME_DIR_PCT` of them go the player's way, which says consecutive
+   * same-direction vehicles should sit 220 / 0.55 = 400 m apart. They do not:
+   *
+   *     seed        w/leader <=100m   mean gap   closest ever
+   *     42                    65.7%        61m            0 m
+   *     1443866               51.2%        89m            0 m
+   *     534501                65.5%        69m            0 m
+   *     7                     20.7%       174m            0 m
+   *     99999                 52.6%        89m            0 m
+   *
+   * Spawn spacing is not what survives. Same-direction vehicles cruise anywhere
+   * in `TRAFFIC_SAME_SPEED` (30-55) while the player holds ~45, so the slow ones
+   * fall back toward the player and the quick ones run forward through them —
+   * nothing sees anything, so nothing stops a 55 from passing straight through a
+   * 30. The gap distribution is therefore set by drift, not by the spawner, and
+   * it compresses to zero regularly.
+   *
+   * Two consequences, both good for the feature about to be written: a follower
+   * has someone in front of it **half the time**, and the overlaps are a defect
+   * that car-to-car following fixes on the way past.
+   */
+  const SEEDS = [42, 1_443_866, 534_501, 7, 99_999]
+  const PLAYER_KPH = 45
+  const STEP_MS = 100
+  const RUN_M = 5000
+  /** A gap worth calling "following" — beyond this nobody is holding anybody up. */
+  const REACH_M = 100
+
+  interface Density {
+    seed: number
+    samples: number
+    withLeader: number
+    meanGapM: number
+    minGapM: number
+    overlaps: number
+    slowest: number
+    fastest: number
+  }
+
+  function measure(seed: number): Density {
+    resetTraffic(seed)
+    let dist = 0
+    let samples = 0
+    let withLeader = 0
+    let gapSum = 0
+    let gapCount = 0
+    let minGapM = Infinity
+    let overlaps = 0
+    let slowest = Infinity
+    let fastest = 0
+
+    while (dist < RUN_M) {
+      tickTraffic(dist, 0, PLAYER_KPH, STEP_MS)
+      dist += (PLAYER_KPH / 3.6) * (STEP_MS / 1000)
+
+      // Sorted by depth so "the next one" is the vehicle immediately ahead. The
+      // spawn order cannot be trusted for this: vehicles move at their own
+      // speeds, so the array order and the road order come apart.
+      const same = getVisibleTraffic(dist, 600)
+        .filter(v => v.dir === 'same')
+        .slice()
+        .sort((a, b) => a.distM - b.distM)
+
+      for (let i = 0; i < same.length; i++) {
+        const v = same[i]!
+        samples++
+        if (v.speed < slowest) slowest = v.speed
+        if (v.speed > fastest) fastest = v.speed
+
+        const leader = same[i + 1]
+        if (!leader) continue
+        const gapM = leader.distM - v.distM
+        gapSum += gapM
+        gapCount++
+        if (gapM < minGapM) minGapM = gapM
+        if (gapM < TRAFFIC_COLLISION_DEPTH_M) overlaps++
+        if (gapM <= REACH_M) withLeader++
+      }
+    }
+
+    return {
+      seed,
+      samples,
+      withLeader,
+      meanGapM: gapCount > 0 ? gapSum / gapCount : 0,
+      minGapM: Number.isFinite(minGapM) ? minGapM : 0,
+      overlaps,
+      slowest: Number.isFinite(slowest) ? slowest : 0,
+      fastest,
+    }
+  }
+
+  it('prints how often a same-direction vehicle has another one within reach', () => {
+    const rows = SEEDS.map(measure)
+    const head = `${'Seed'.padEnd(9)} ${'samples'.padStart(8)} ${'w/leader'.padStart(9)}`
+      + ` ${'mean gap'.padStart(9)} ${'min gap'.padStart(8)} ${'overlaps'.padStart(9)}`
+      + ` ${'speeds km/h'.padStart(12)}`
+    const lines = [head, '─'.repeat(head.length)]
+    for (const r of rows) {
+      const pct = r.samples > 0 ? (r.withLeader / r.samples * 100).toFixed(1) : '0.0'
+      lines.push(
+        `${String(r.seed).padEnd(9)} ${String(r.samples).padStart(8)} ${`${pct}%`.padStart(9)}`
+        + ` ${`${r.meanGapM.toFixed(0)}m`.padStart(9)} ${`${r.minGapM.toFixed(0)}m`.padStart(8)}`
+        + ` ${String(r.overlaps).padStart(9)}`
+        + ` ${`${r.slowest.toFixed(0)}-${r.fastest.toFixed(0)}`.padStart(12)}`,
+      )
+    }
+    lines.push('─'.repeat(head.length))
+    lines.push(`analytic mean gap between same-direction vehicles:`
+      + ` ${TRAFFIC_SPACING_M} / ${TRAFFIC_SAME_DIR_PCT} = ${(TRAFFIC_SPACING_M / TRAFFIC_SAME_DIR_PCT).toFixed(0)} m`)
+    console.log(`\n═══ Same-direction density over ${RUN_M / 1000} km at ${PLAYER_KPH} km/h ═══\n${lines.join('\n')}`)
+
+    expect(rows.length).toBe(SEEDS.length)
+  })
+
+  it('records that two same-direction vehicles pass through each other today', () => {
+    // A baseline, not a bug report — though it is also a bug. Vehicles do not see
+    // each other at all, so the only thing keeping them apart is where they were
+    // spawned, and drift undoes that within a couple of kilometres. Asserted the
+    // wrong way round on purpose: **this is the expectation that has to flip**
+    // once car-to-car following exists, and a test that only printed it would let
+    // the fix land without anyone noticing it worked.
+    const worst = Math.min(...SEEDS.map(s => measure(s).minGapM))
+    console.log(`\nClosest two same-direction vehicles ever got: ${worst.toFixed(2)} m`
+      + ` (a vehicle is ${TRAFFIC_COLLISION_DEPTH_M} m of road)`)
+    expect(worst).toBeLessThan(TRAFFIC_COLLISION_DEPTH_M)
   })
 })

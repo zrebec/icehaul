@@ -293,6 +293,11 @@ Re-score after every other phase. Drift triggers a scope cut.
   `'lighter'`, and its white core puts off-palette colours *on the glass* — the same place the
   scanlines and the screen curve live. The framebuffer itself is untouched, and `?glow=0` restores
   a byte-identical frame. Do not extend this to anything the game actually draws.
+- **Don't reopen the glow.** It is **closed as of 2026-08-19** — Fox played it and it is where he
+  wants it. It is not an item awaiting his playtest and must not be listed as one. No further
+  brightness passes, no re-measuring the tables in `AGENTS.md` → "The glow is finished". The only
+  thing that reopens it is a change to *what the lamps say* — and the one such change in flight is
+  traffic ahead gaining a reason to brake, which is a new question, not the old one.
 - Don't add a physics engine. Vehicle physics is ~150 LoC of scalar math, not Box2D.
 - Don't add a networking/multiplayer layer.
 - Don't bypass zx-kit primitives by drawing directly with `ctx.fillRect` when a kit function exists — if a primitive is missing, propose adding it to zx-kit (with the "second consumer" test above).
