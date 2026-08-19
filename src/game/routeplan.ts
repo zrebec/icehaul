@@ -11,7 +11,8 @@
  *
  * ── Three layers, and each answers a different question ─────────────────────
  * 1. **How fast may I go here?** — the friction circle, anchored on the measured
- *    envelope in `controllability.test.ts`. See {@link safeSpeedKph}.
+ *    envelope in `controllability.test.ts`. Lives in `game/safespeed.ts` now that
+ *    traffic asks it too; see {@link safeSpeedKph}.
  * 2. **How fast can I actually be going here?** — the same road with braking and
  *    acceleration applied, because a limit you cannot reach or cannot leave is
  *    not a limit you drive. See {@link speedProfile}.
@@ -35,43 +36,22 @@
  */
 
 import {
-  MAX_SPEED,
-  PLAN_ACCEL_MS2, PLAN_C_MIN, PLAN_STEP_M, PLAN_SURFACE_VMAX, PLAN_V_REF,
+  PLAN_ACCEL_MS2, PLAN_STEP_M,
   PLAN_EXPECTED_CANISTER_PCT, PLAN_FIRST_LEG_BONUS_S, PLAN_SLACK,
   PLAN_START_ALLOWANCE_S, PLAN_TRAFFIC_ALLOWANCE_S_PER_KM,
   PLAN_PACE_MAX_KMH, PLAN_PACE_MIN_KMH,
   CANISTER_SPACING_M, CANISTER_TIME_BONUS_S,
   SURFACE_BRAKE,
-  type Surface,
 } from '../config.ts'
+import { safeSpeedKph, type RoadSampler } from './safespeed.ts'
 
-/** Everything the planner needs to know about the road, and nothing more.
- *  Injected so the planner can be tested over a road that does not exist. */
-export interface RoadSampler {
-  surfaceAt(distM: number): Surface
-  gripAt(distM: number): number
-  curvatureAt(distM: number): number
-}
+// The safe-speed law and the road interface moved to `game/safespeed.ts` when
+// traffic gained a reason to ask the same question — see that module. Re-exported
+// here because this is where callers have always found them, and a second import
+// path for one law is how two laws start.
+export { safeSpeedKph, type RoadSampler }
 
 const KPH_TO_MS = 1 / 3.6
-
-/**
- * The fastest this point may be taken, km/h.
- *
- * `v = V_REF / sqrt(curvature) * sqrt(grip)`, capped by the truck's top speed and
- * by what the surface's drag allows on a straight. The first half is the
- * friction circle and the second is the measured envelope — twenty cells of
- * `controllability.test.ts` reproduced by one line, to within about 5 %.
- *
- * Grip comes from `getGripAt`, not from `SURFACE_GRIP[surface]`, so the 20 m
- * ramp across a seam is already in it: the plan must not assume an edge the
- * physics does not have.
- */
-export function safeSpeedKph(curvature: number, grip: number, surface: Surface): number {
-  const bend = PLAN_V_REF / Math.sqrt(Math.max(Math.abs(curvature), PLAN_C_MIN))
-  const cornering = bend * Math.sqrt(Math.max(0, grip))
-  return Math.min(MAX_SPEED, PLAN_SURFACE_VMAX[surface], cornering)
-}
 
 /**
  * The speed a driver who knows the road would actually carry, sample by sample,
