@@ -117,12 +117,18 @@ On ice above 30 km/h: wheels lock → you also lose lateral control. Pump the br
 
 ## Traffic
 
-- Same-direction vehicles are slower than you — overtake by shifting left or right. Their tail
-  lamps are dark red, and go **bright red when they brake**.
+- Same-direction vehicles are slower than you — overtake by shifting left or right. **They brake for
+  what is ahead of them**: a sharp bend, a patch of ice or snow, and whatever is in front of them.
+  Their tail lamps are dark red, and go **bright red when they brake**.
+- **Brake lights are information, not decoration.** A car slowing 40 m before a hazard is telling you
+  the hazard is there, often before the warning strip does.
 - Oncoming vehicles travel fast on the left side, with **yellow headlights** — stay right. Red means
-  going away from you, yellow means coming at you, at every distance and in every size.
+  going away from you, yellow means coming at you, at every distance and in every size. The
+  same-direction bus is yellow-bodied and the oncoming one red, but neither body colour is what
+  carries direction: the lamps and their halo do.
 - Both sets of lamps **bloom** (`?glow=0` turns that off, and the colours still tell you which is
-  which — the brightness change is in the pixels, not only in the glow).
+  which — the brightness change is in the pixels, not only in the glow). A braking vehicle's halo is
+  wider and denser, never a different colour, so it can never read as oncoming.
 - **Collision = instant game over.** Plan overtakes well ahead — acceleration takes 15+ seconds.
 
 ---

@@ -315,3 +315,77 @@ describe('the radius multiplier from ?glow=alpha,radius', () => {
     expect(glowSettingsFromSearch('?glow=0.8,99').radiusScale, 'clamped').toBe(4)
   })
 })
+
+// ─── The brake, which the halo has to carry on its own ───────────────────────
+
+describe('a braking same-direction vehicle', () => {
+  /**
+   * The measurement that forced this, kept where it will be read: the raster
+   * swaps `RED` (#CD0000) for `B_RED` (#FF0000), and with the bloom on, the
+   * finished frame came out **byte-identical** — `'lighter'` drives the red
+   * channel to 255 on and around the lamp whether it started at 205 or at 255.
+   * The brake was not faint, it was erased.
+   *
+   * So the halo carries it: wider and stacked, never a different colour, because
+   * at distance the halo's colour is the only thing saying which way the vehicle
+   * is pointing.
+   */
+  const project = (type: VehicleType, distM: number) =>
+    projectTrafficVehicle(
+      VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0,
+      { spawnDist: 0, distM, x: 0.5, speed: 40, dir: 'same' as const, type, gone: false },
+      () => 0,
+    )
+
+  it('emits a wider halo than the same vehicle rolling', () => {
+    for (const distM of [220, 100, 50, 25, 10]) {
+      const p = project('car', distM)
+      if (!p) continue
+      const rolling: GlowSource[] = []
+      const braking: GlowSource[] = []
+      pushTrafficLampSpots(rolling, p, 'same', false)
+      pushTrafficLampSpots(braking, p, 'same', true)
+
+      const widest = (out: GlowSource[]) => Math.max(...out.map(s => s.radius))
+      expect(widest(braking), `car at ${distM}m`).toBeGreaterThan(widest(rolling))
+    }
+  })
+
+  it('stacks the halo instead of recolouring it', () => {
+    const p = project('car', 100)!
+    const braking: GlowSource[] = []
+    pushTrafficLampSpots(braking, p, 'same', true)
+    // Every source is still the going-away colour. A braking car must not become
+    // yellow, or it would read as oncoming — the one thing the halo must never say.
+    expect(braking.every(s => s.color === C.B_RED)).toBe(true)
+  })
+
+  it('changes nothing for oncoming traffic, whatever it is asked', () => {
+    const p = projectTrafficVehicle(
+      VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0,
+      { spawnDist: 0, distM: 100, x: -0.5, speed: 60, dir: 'oncoming', type: 'car', gone: false },
+      () => 0,
+    )!
+    const rolling: GlowSource[] = []
+    const braking: GlowSource[] = []
+    pushTrafficLampSpots(rolling, p, 'oncoming', false)
+    pushTrafficLampSpots(braking, p, 'oncoming', true)
+    expect(braking).toEqual(rolling)
+  })
+
+  it('widens for the bus too, which no longer depends on the halo alone', () => {
+    // For one afternoon the halo *was* the bus's only brake signal — its bodywork
+    // was `B_RED`, so a bright red lamp on it would have been a brake light
+    // nobody could see, and the raster refused it one. That was a knowing breach
+    // of "glow may amplify meaning, never carry it alone", and the repaint to
+    // `B_YELLOW` closed it: measured through the real render path, a braking bus
+    // now changes the frame with `?glow=0` as well (0.01-0.05% of pixels, peak
+    // 50), where it changed nothing at all before.
+    const p = project('bus', 50)!
+    const rolling: GlowSource[] = []
+    const braking: GlowSource[] = []
+    pushTrafficLampSpots(rolling, p, 'same', false)
+    pushTrafficLampSpots(braking, p, 'same', true)
+    expect(braking.length).toBeGreaterThan(rolling.length)
+  })
+})

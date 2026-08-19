@@ -1227,6 +1227,21 @@ export const TRAFFIC_FOLLOW_BRAKE_KMH_S = 45
 export const TRAFFIC_COLLISION_DEPTH_M = 6
 /** First traffic vehicle appears after this many metres (safe start). */
 export const TRAFFIC_START_M = 800
+/**
+ * Clearance a new vehicle needs from one already on the road, metres.
+ *
+ * Spawn spacing is measured from the previous *spawn point*, which is not where
+ * the previous vehicle is: same-direction traffic cruises anywhere from 30 to
+ * 55 km/h, so a quick one drives well past the spot the next one is due at.
+ * Measured before this existed — a car spawned at 4507 m landed **0.35 m** behind
+ * one that had started 286 m further back and overtaken the spot. That is two
+ * vehicles inside each other, and it was the real reason traffic looked like it
+ * was drawn through itself; the car-following model was never the cause.
+ *
+ * 25 m rather than a vehicle length: they must not merely miss, they must not
+ * look stacked either.
+ */
+export const TRAFFIC_MIN_SPAWN_GAP_M = 25
 
 // ── Traffic driver behaviour ────────────────────────────────────────────────
 //
@@ -1280,6 +1295,32 @@ export const TRAFFIC_SURFACE_MAX_KPH: Record<Surface, number | null> = {
 }
 
 /**
+ * How much of its own cruising speed a driver keeps on each surface.
+ *
+ * The cap above alone is not enough, and the measurement that showed it is worth
+ * keeping: an absolute cap only slows the vehicles that were already above it, so
+ * on snow (cap 45) **only 40 % of a `TRAFFIC_SAME_SPEED` fleet had any reason to
+ * brake at all** — the rest were already slower, sailed onto the snow unchanged,
+ * and never lit a lamp. Fox reported exactly that from the driving seat: *"a to
+ * ani keď sme obaja prechádzali na sneh."*
+ *
+ * A share of cruise fixes it, because it is what a driver actually does: everyone
+ * comes off their own pace by roughly the same proportion. The two rules are
+ * taken together — `min(cap, cruise x this)` — so "nobody does 55 on bare ice"
+ * and "everybody slows for ice" are both true.
+ *
+ * Ice is the sharpest cut on purpose: it is the surface the whole game is about,
+ * and a lamp coming on ahead of it is the warning this feature exists to give.
+ */
+export const TRAFFIC_SURFACE_PACE_PCT: Record<Surface, number> = {
+  asphalt: 1.0,
+  snow: 0.78,
+  ice: 0.55,
+  sand: 0.70,
+  mud: 0.66,
+}
+
+/**
  * Per-vehicle caution, drawn once at spawn: above 1 reads further ahead and
  * accepts a lower speed, below 1 is the driver who brakes late.
  *
@@ -1318,6 +1359,29 @@ export const TRAFFIC_LOOKAHEAD_STEP_M = 10
 export const TRAFFIC_PLAN_INTERVAL_MS = 100
 
 /**
+ * The deceleration a driver *plans* with, km/h/s — what decides how far ahead of
+ * a hazard the lamps come on.
+ *
+ * Separate from `TRAFFIC_BRAKE_MAX_KMH_S`, and the separation is the whole reason
+ * the anticipation is visible at all. The look-ahead *time* is not what puts the
+ * lights on early; the assumed deceleration is. Measured, for a car shedding
+ * 55 → 30 km/h onto ice:
+ *
+ *     planned at 45 km/h/s   braking starts   6.6 m before the ice
+ *     planned at 12 km/h/s                   24.6 m
+ *     planned at  7 km/h/s                   42.2 m      <- this
+ *     planned at  5 km/h/s                   59.0 m
+ *
+ * At 45 the brake light is a blink nobody can read, which defeats the point of
+ * traffic braking being a signal. 7 km/h/s is about 0.2 g — what a driver who has
+ * seen the ice coming actually does — and it lights the lamps roughly 40 m out,
+ * which is a couple of seconds of warning at closing speed.
+ *
+ * `TRAFFIC_BRAKE_MAX_KMH_S` stays what it is: the ceiling for a driver who left
+ * it late, or who had a car pull up in front of them.
+ */
+export const TRAFFIC_BRAKE_PLAN_KMH_S = 7
+/**
  * Seconds over which a driver sheds the excess speed. This is what sets the
  * deceleration: the gap to the target divided by this, then clamped and scaled
  * by the driver's vigour. A driver braking for a bend 100 m off does not stand on
@@ -1344,11 +1408,18 @@ export const TRAFFIC_BRAKE_LAMP_MIN_KMH_S = 6
 /**
  * Minimum time the lamp stays lit once lit, ms.
  *
- * A real pedal is not tapped for one frame. Without this, a target that crosses
- * back and forth over the current speed strobes the lights, and a strobing brake
- * light reads as a rendering fault rather than as a car.
+ * Two jobs. The small one: a real pedal is not tapped for one frame, and without
+ * a hold a target that crosses back and forth over the current speed strobes the
+ * lights, which reads as a rendering fault rather than as a car.
+ *
+ * The larger one is Fox's, from the driving seat: *"brzdenie musí držať ešte aj
+ * chvíľu na povrchu (stačí pár metrov)"* — a driver comes off the ice-warning
+ * brake gradually, not the instant the tyres touch. 600 ms is about **5 m at
+ * 30 km/h**, so the lamps are still lit as the vehicle crosses the seam, which
+ * is the moment the player behind is looking straight at them. At 250 ms it was
+ * two metres and they went dark just too early.
  */
-export const TRAFFIC_BRAKE_LAMP_HOLD_MS = 250
+export const TRAFFIC_BRAKE_LAMP_HOLD_MS = 600
 /** Getting back up to cruise once the reason to slow is behind, km/h/s. */
 export const TRAFFIC_ACCEL_KMH_S = 6
 /**
@@ -1454,6 +1525,33 @@ export const GLOW_RADIUS_MIN = 3
 export const GLOW_RADIUS_MAX = 18
 /** Brightness of a traffic lamp's halo, 0..1, before the layer alpha. */
 export const GLOW_INTENSITY_TRAFFIC = 1
+/**
+ * How much wider a same-direction lamp's halo gets when the vehicle is braking,
+ * and how many times its source is stacked.
+ *
+ * **This is what carries the brake at any distance, and the measurement that
+ * says so is worth keeping.** The raster swaps `RED` (#CD0000) for `B_RED`
+ * (#FF0000) — 50 units on one channel, across two cells at 200 m. Measured
+ * through the real render path with `frame-delta.mjs`:
+ *
+ *     glow off   0.03 % of pixels changed · peak 50 / 765
+ *     glow on    0.00 % of pixels changed · byte-identical
+ *
+ * The bloom is composited with `'lighter'`, so it drives the red channel to 255
+ * on and around the lamp **whether the lamp began at 205 or at 255**. The brake
+ * was not faint; it was erased. This is the same trap `AGENTS.md` records from
+ * the first glow pass — "a lamp is already #FFFF00 and additive light cannot
+ * brighten a saturated channel" — biting a second time, one vehicle further out.
+ *
+ * The signal therefore has to be in the halo's *size and density*, not in the
+ * lamp's colour. Deliberately **not** a white core the way the player's truck
+ * gets one: white desaturates the halo, and at distance that halo's colour is
+ * the only thing saying which way the vehicle is pointing. A braking car reads
+ * as more red, never as a different red.
+ */
+export const GLOW_RADIUS_BRAKE_MULT = 1.7
+/** How many times a braking lamp's halo is stacked. Density without new colour. */
+export const GLOW_BRAKE_PASSES = 2
 
 /**
  * The white-hot core: a second, small source drawn in `B_WHITE` on top of the

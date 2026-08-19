@@ -50,6 +50,7 @@ import {
   GLOW_INTENSITY_TRAFFIC, GLOW_RADIUS_MAX, GLOW_RADIUS_MIN, GLOW_RADIUS_PER_HEIGHT,
   GLOW_CORE_INTENSITY, GLOW_CORE_MIN_HEIGHT,
   GLOW_CORE_RADIUS_MAX, GLOW_CORE_RADIUS_MIN, GLOW_CORE_RADIUS_PER_HEIGHT,
+  GLOW_RADIUS_BRAKE_MULT, GLOW_BRAKE_PASSES,
 } from '../config.ts'
 import { getTrafficSpriteRows, type TrafficProjection } from './road3d.ts'
 import type { TrafficDir, VehicleType } from '../game/traffic.ts'
@@ -175,11 +176,19 @@ export function pushTrafficLampSpots(
   out: GlowSource[],
   p: TrafficProjection,
   dir: TrafficDir,
+  braking = false,
 ): void {
   const lamps = lampPairFor(dir, p.type)
   if (!lamps) return
 
-  const radius = glowRadiusFor(p.h)
+  // A braking vehicle's halo is wider and denser, and that is the whole signal.
+  // The raster swap underneath it (RED -> B_RED) is invisible once the bloom is
+  // on: `'lighter'` saturates the red channel either way, measured as a
+  // byte-identical frame. See GLOW_RADIUS_BRAKE_MULT. Oncoming traffic never
+  // brakes — its lamps face away from whatever it is doing.
+  const lit = braking && dir === 'same'
+  const radius = glowRadiusFor(p.h) * (lit ? GLOW_RADIUS_BRAKE_MULT : 1)
+  const passes = lit ? GLOW_BRAKE_PASSES : 1
   const coreRadius = glowCoreRadiusFor(p.h)
   const core = wantsGlowCore(p.h)
   const color = lampColor(dir)
@@ -187,7 +196,9 @@ export function pushTrafficLampSpots(
   for (const lamp of [lamps.left, lamps.right]) {
     const x = p.left + lamp.u * p.w
     const y = p.top + lamp.v * p.h
-    out.push({ x, y, radius, color, intensity: GLOW_INTENSITY_TRAFFIC })
+    for (let i = 0; i < passes; i++) {
+      out.push({ x, y, radius, color, intensity: GLOW_INTENSITY_TRAFFIC })
+    }
     // The core goes on top of the halo, not instead of it: the halo is the light
     // in the air, the core is the filament being too bright to have a colour.
     if (core) {
