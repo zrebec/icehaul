@@ -1,11 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { followPlayerSpeed, resetTraffic, tickTraffic, getVisibleTraffic } from '../traffic.ts'
 import { getTrafficSpriteRows, projectTrafficVehicle } from '../../render/road3d.ts'
+import { resetRoad, getSurfaceAt, getGripAt, getCurvatureAt } from '../road.ts'
+import { dailyRoadSeed } from '../seed.ts'
 import {
   VIEWPORT_TOP, VIEWPORT_BOTTOM, TRAFFIC_VIEW_DISTANCE_M,
   TRAFFIC_SPACING_M, TRAFFIC_SAME_DIR_PCT, TRAFFIC_COLLISION_DEPTH_M,
+  SURFACE_GRIP, type Surface,
 } from '../../config.ts'
 import type { TrafficVehicle } from '../traffic.ts'
+import type { RoadSampler } from '../safespeed.ts'
 
 const SEED = 123
 const TRAFFIC_SPRITE_DIMS = {
@@ -385,25 +389,28 @@ describe('traffic density, measured', () => {
    * on, and the measurement **overturned the arithmetic that predicted it would
    * not**. Spacing is `TRAFFIC_SPACING_M` over every vehicle and only
    * `TRAFFIC_SAME_DIR_PCT` of them go the player's way, which says consecutive
-   * same-direction vehicles should sit 220 / 0.55 = 400 m apart. They do not:
+   * same-direction vehicles should sit 220 / 0.55 = 400 m apart. They do not —
+   * spawn spacing is not what survives. Vehicles cruise anywhere in
+   * `TRAFFIC_SAME_SPEED` (30-55) while the player holds ~45, so the slow ones
+   * fall back and the quick ones run forward, and the gap distribution ends up
+   * set by drift rather than by the spawner:
    *
    *     seed        w/leader <=100m   mean gap   closest ever
-   *     42                    65.7%        61m            0 m
-   *     1443866               51.2%        89m            0 m
-   *     534501                65.5%        69m            0 m
-   *     7                     20.7%       174m            0 m
-   *     99999                 52.6%        89m            0 m
+   *     42                    63.2%        67m           23 m
+   *     1443866               41.5%       100m           24 m
+   *     534501                62.0%        73m           23 m
+   *     7                     19.7%       178m           29 m
+   *     99999                 58.0%        86m           23 m
    *
-   * Spawn spacing is not what survives. Same-direction vehicles cruise anywhere
-   * in `TRAFFIC_SAME_SPEED` (30-55) while the player holds ~45, so the slow ones
-   * fall back toward the player and the quick ones run forward through them —
-   * nothing sees anything, so nothing stops a 55 from passing straight through a
-   * 30. The gap distribution is therefore set by drift, not by the spawner, and
-   * it compresses to zero regularly.
+   * So a follower has something in front of it **most of the time**, which is far
+   * more than the arithmetic promised.
    *
-   * Two consequences, both good for the feature about to be written: a follower
-   * has someone in front of it **half the time**, and the overlaps are a defect
-   * that car-to-car following fixes on the way past.
+   * The "closest ever" column used to read **0 m on every seed**, and finding out
+   * why was worth more than the rest of this table: a new vehicle was spawned at
+   * a point a quicker one had already driven past, so it appeared 0.35 m behind
+   * a car that had started 286 m further back. That is what made traffic look
+   * drawn through itself. `TRAFFIC_MIN_SPAWN_GAP_M` fixed it; the car-following
+   * model, which was the obvious suspect, was never the cause.
    */
   const SEEDS = [42, 1_443_866, 534_501, 7, 99_999]
   const PLAYER_KPH = 45
@@ -499,16 +506,144 @@ describe('traffic density, measured', () => {
     expect(rows.length).toBe(SEEDS.length)
   })
 
-  it('records that two same-direction vehicles pass through each other today', () => {
-    // A baseline, not a bug report — though it is also a bug. Vehicles do not see
-    // each other at all, so the only thing keeping them apart is where they were
-    // spawned, and drift undoes that within a couple of kilometres. Asserted the
-    // wrong way round on purpose: **this is the expectation that has to flip**
-    // once car-to-car following exists, and a test that only printed it would let
-    // the fix land without anyone noticing it worked.
+  it('never puts two same-direction vehicles inside each other', () => {
+    // This assertion was written the other way round first, as a baseline: it
+    // said "they do touch", because they did — 0.00 m on every seed — and a test
+    // that only printed that would have let the fix land unnoticed. It flipped
+    // when `TRAFFIC_MIN_SPAWN_GAP_M` landed, which is the whole reason it exists
+    // in this shape.
     const worst = Math.min(...SEEDS.map(s => measure(s).minGapM))
     console.log(`\nClosest two same-direction vehicles ever got: ${worst.toFixed(2)} m`
       + ` (a vehicle is ${TRAFFIC_COLLISION_DEPTH_M} m of road)`)
-    expect(worst).toBeLessThan(TRAFFIC_COLLISION_DEPTH_M)
+    expect(worst).toBeGreaterThan(TRAFFIC_COLLISION_DEPTH_M * 2)
+  })
+})
+
+// ─── The lamps, on a real road ───────────────────────────────────────────────
+
+describe('braking for what is ahead', () => {
+  /**
+   * The end-to-end claim, and the one Fox will judge from the driving seat:
+   * **a vehicle in front of you lights its lamps before the hazard, not on it.**
+   *
+   * Driven over the real generated road rather than a synthetic one, because the
+   * thing being checked is not the law — `trafficDriver.test.ts` has that — but
+   * whether the wiring delivers it on the roads the game actually makes.
+   */
+  const PLAYER_KPH = 45
+  const STEP_MS = 50
+
+  interface Brake {
+    distM: number
+    /** Metres from here to the next surface change, or null if none in reach. */
+    toHazardM: number | null
+    surface: Surface
+  }
+
+  function driveAndWatch(seed: number, runM: number): Brake[] {
+    resetRoad(seed)
+    resetTraffic(seed)
+    const road: RoadSampler = {
+      surfaceAt: (d) => getSurfaceAt(d),
+      gripAt: (d) => getGripAt(d),
+      curvatureAt: (d) => getCurvatureAt(d),
+    }
+
+    const events: Brake[] = []
+    const lit = new Set<TrafficVehicle>()
+    let dist = 0
+
+    while (dist < runM) {
+      tickTraffic(dist, 0, PLAYER_KPH, STEP_MS, road)
+      dist += (PLAYER_KPH / 3.6) * (STEP_MS / 1000)
+
+      for (const v of getVisibleTraffic(dist, TRAFFIC_VIEW_DISTANCE_M)) {
+        if (v.dir !== 'same') continue
+        if (v.braking !== true) { lit.delete(v); continue }
+        if (lit.has(v)) continue          // one event per press of the pedal
+        lit.add(v)
+
+        // How far this vehicle is from whatever surface it is heading into.
+        const here = getSurfaceAt(v.distM)
+        let toHazardM: number | null = null
+        for (let d = 0; d <= 120; d += 2) {
+          if (getSurfaceAt(v.distM + d) !== here) { toHazardM = d; break }
+        }
+        events.push({ distM: v.distM, toHazardM, surface: here })
+      }
+    }
+    return events
+  }
+
+  it('lights the lamps of a vehicle ahead, before it reaches the hazard', () => {
+    const events = driveAndWatch(1_443_866, 5000)
+    expect(events.length, 'no same-direction vehicle ever braked').toBeGreaterThan(0)
+
+    // Braking that begins with a surface change in sight is the anticipation
+    // working. Some events will be queueing instead, which is also correct — so
+    // this asks that anticipation happens at all, not that everything is it.
+    const anticipating = events.filter(e => e.toHazardM !== null)
+    expect(anticipating.length, 'nobody ever braked with a hazard in sight')
+      .toBeGreaterThan(0)
+    for (const e of anticipating) {
+      expect(e.toHazardM!, 'braking started before the hazard, not on it')
+        .toBeGreaterThan(0)
+    }
+  })
+
+  it('prints what a player would see, on today\'s route and on the catalogue', () => {
+    const seeds = [dailyRoadSeed(), 1_443_866, 42, 534_501]
+    const rows: string[] = []
+    for (const seed of seeds) {
+      const events = driveAndWatch(seed, 5000)
+      const withHazard = events.filter(e => e.toHazardM !== null)
+      const dists = withHazard.map(e => e.toHazardM!)
+      const mean = dists.length > 0 ? dists.reduce((a, b) => a + b, 0) / dists.length : 0
+      rows.push(
+        `${String(seed).padEnd(10)} ${String(events.length).padStart(6)} brake events`
+        + ` · ${String(withHazard.length).padStart(4)} with a surface change in sight`
+        + ` · lit on average ${mean.toFixed(0)} m before it`,
+      )
+    }
+    console.log(`\n═══ Brake lights over 5 km at ${PLAYER_KPH} km/h ═══\n${rows.join('\n')}`)
+    expect(rows.length).toBe(seeds.length)
+  })
+
+  it('holds the lamps a few metres into the surface it braked for', () => {
+    // Fox, from the driving seat: a driver brakes on the approach *and* keeps the
+    // pedal down a moment once they are on it. Without the hold the lamps would
+    // go dark exactly at the boundary, which is the one moment the player is
+    // looking at them.
+    // Past TRAFFIC_START_M, or nothing has spawned to test with.
+    const ICE_AT = 1200
+    const road: RoadSampler = {
+      surfaceAt: (d) => (d >= ICE_AT ? 'ice' : 'asphalt'),
+      gripAt: (d) => (d >= ICE_AT ? SURFACE_GRIP.ice : SURFACE_GRIP.asphalt),
+      curvatureAt: () => 0,
+    }
+    // Which way the first few vehicles go is a property of the seed, and this
+    // test is not about that — so take the first seed that offers one going the
+    // player's way rather than pinning one and hoping.
+    let target: TrafficVehicle | undefined
+    for (const seed of [7, 42, 123, 999, 1_443_866]) {
+      resetTraffic(seed)
+      tickTraffic(900, 0, 45, 16, road)
+      target = getVisibleTraffic(900, 600).find(x => x.dir === 'same')
+      if (target) break
+    }
+    expect(target, 'no seed offered a same-direction vehicle').toBeTruthy()
+
+    // Placed just before the ice, running at the fleet's top speed.
+    const v = target!
+    v.distM = ICE_AT - 20
+    v.speed = 55
+
+    let litPastBoundary = 0
+    for (let i = 0; i < 400; i++) {
+      tickTraffic(900, 0, 45, 16, road)
+      if (v.distM >= ICE_AT && v.braking === true) litPastBoundary += 1
+    }
+    // Sixteen ticks is a quarter of a second; at 30 km/h that is over two metres.
+    expect(litPastBoundary, 'lamps went dark at the boundary').toBeGreaterThan(16)
   })
 })

@@ -107,6 +107,9 @@ src/
   game/
     vehicle.ts       ✓ throttle/brake/steer + grip-scaled lateral physics
     road.ts          ✓ deterministic surface lookup (asphalt/ice)
+    safespeed.ts     ✓ the cornering law + RoadSampler, shared by the planner and traffic
+    routeplan.ts     ✓ a leg's time budget read off the road it crosses (pure, tested)
+    trafficDriver.ts ✓ what a traffic driver wants to do — brake for bends, ice, the queue
     runStats.ts      ✓ average speed + clock for the results screen (pure, tested)
   render/
     road3d.ts        ✓ scrolling pseudo-3D road with per-scanline surface
@@ -166,6 +169,9 @@ npm run build                              # production bundle (tsc + vite)
 node scripts/screenshot.mjs out.png        # headless capture of canvas bitmap (dev server must be running)
 node scripts/drive-shot.mjs out.png 8      # starts the engine, drives, asserts the truck actually moved
 node scripts/traffic-matrix.mjs matrix     # traffic contact sheets — the renderer comparison harness
+node scripts/frame-delta.mjs "<query>" "<extra>"   # what actually changed between two frames:
+                                          # share of pixels, mean delta, peak. Answers "can you
+                                          # see it?" with a number. Judge only with scanlines=1
 ```
 
 **URL switches** (dev server or the deployed build):
@@ -178,6 +184,9 @@ node scripts/traffic-matrix.mjs matrix     # traffic contact sheets — the rend
                      ?glow=0.8,1.5 also its radius (defaults 0.8 and 1)
 ?matrix=1&surface=ice&curve=2&zoom=4&types=car&dist=220,50,10,2
 ?matrix=1&scanlines=1&brake=1   sheet with the game's scanline overlay, truck braking
+?matrix=1&trafficBrake=1       the traffic drawn braking — the same hole ?brake=1 closed for
+                               the truck, since traffic only brakes when the road gives it a
+                               reason and no static sheet would otherwise contain it
 ```
 
 **Judge brightness only on a sheet with `scanlines=1`.** The game lays a 70 %-black line over every
@@ -293,11 +302,13 @@ Re-score after every other phase. Drift triggers a scope cut.
   `'lighter'`, and its white core puts off-palette colours *on the glass* — the same place the
   scanlines and the screen curve live. The framebuffer itself is untouched, and `?glow=0` restores
   a byte-identical frame. Do not extend this to anything the game actually draws.
-- **Don't reopen the glow.** It is **closed as of 2026-08-19** — Fox played it and it is where he
-  wants it. It is not an item awaiting his playtest and must not be listed as one. No further
-  brightness passes, no re-measuring the tables in `AGENTS.md` → "The glow is finished". The only
-  thing that reopens it is a change to *what the lamps say* — and the one such change in flight is
-  traffic ahead gaining a reason to brake, which is a new question, not the old one.
+- **Don't reopen the glow.** It is **closed** — Fox played it and it is where he wants it. No further
+  brightness passes, no re-measuring the tables in `AGENTS.md` → "The glow is finished", and it must
+  not appear in any list as an item awaiting his playtest. The one thing that legitimately reopened
+  it — traffic ahead gaining a reason to brake, so brake lights appear at distances they never did —
+  **has already happened and is also closed**: the halo now widens and stacks for a braking
+  same-direction vehicle, because the raster swap alone was measured as a byte-identical frame.
+  A **new** question about what the lamps say could reopen it again; nothing else can.
 - Don't add a physics engine. Vehicle physics is ~150 LoC of scalar math, not Box2D.
 - Don't add a networking/multiplayer layer.
 - Don't bypass zx-kit primitives by drawing directly with `ctx.fillRect` when a kit function exists — if a primitive is missing, propose adding it to zx-kit (with the "second consumer" test above).

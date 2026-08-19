@@ -163,7 +163,7 @@ export const SAME_BUS_ROWS = [
   'RRRRBXXXXXXXBBBBXXXXXXXBRRRR',
   'RRRRBXXXXXXXXXXXXXXXXXXBRRRR',
   'RRRRBXXXXXXXXXXXXXXXXXXBRRRR',
-  'BBBBBXXXXXYYYYYYYYXXXXXBBBBB',
+  'BBBBBXXXXXBBBBBBBBXXXXXBBBBB',
   'XXXXXXXXXXXXXXXXXXXXXXXXXXXX',
   '...BBBBBB..........BBBBBB...',
   '...BBBBBB..........BBBBBB...',
@@ -222,29 +222,35 @@ export const ONCOMING_CAR_COLORS: RowColors = {
   X: C.B_WHITE, W: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
 }
 /**
- * The one place the palette fights the drawing: bodywork is `B_RED` and the
- * lamps are `RED`, so a same-direction bus signals "going away" in dark red on
- * bright red — the weakest lamp contrast in the fleet, and it gets weaker with
- * distance, not better. The far tier makes it worse rather than better, because
- * `applyFarLamps` writes `R` and `R` is the near-invisible one.
+ * Yellow, since 2026-08-19 — the repaint this file spent two paragraphs asking
+ * for, and Fox's call: *"prekresli autobus (kľudne biely, žltý) a musí byť
+ * vidieť."*
  *
- * The redraw works around it rather than solving it: each lamp cluster gets a
- * black inboard edge (see {@link SAME_BUS_ROWS}), so the eye reads a bounded
- * cluster instead of a slightly darker patch of body. That is as far as art can
- * take it.
+ * **What it was and why it could not stay.** Bodywork was `B_RED` and the lamps
+ * `RED`, so a same-direction bus said "going away" in dark red on bright red —
+ * the weakest lamp contrast in the fleet, and one that got worse with distance
+ * rather than better, because `applyFarLamps` writes `R` and `R` was the
+ * near-invisible one. The redraw could only work around it: a black inboard edge
+ * per lamp cluster, so the eye reads a bounded shape instead of a slightly darker
+ * patch of body. **And the bus had no brake state at all**, because `B_RED` lamps
+ * on `B_RED` bodywork would have been a brake light that lies.
  *
- * The actual fix is a body colour that is not red — `B_YELLOW` would free red
- * for the lamps entirely and no other vehicle is yellow — but that is a repaint
- * and a visible one, so it is the owner's call and not smuggled in here.
+ * `B_YELLOW` frees red entirely, and no other vehicle is yellow. The one thing it
+ * costs is worth stating plainly: **`B_YELLOW` is also the oncoming lamp
+ * colour**, so at 220 m a yellow body is the same hue as an oncoming vehicle's
+ * lights. Direction survives because it was never carried by the body — a
+ * same-direction bus wears a **red** halo and red lamps, an oncoming one a yellow
+ * halo, and the halo is far larger than the body at exactly the distance where
+ * the body is too small to read.
  *
- * **The bus therefore gets no brake state**, and that is the owner's decision
- * rather than an oversight: `B_RED` lamps on a `B_RED` body would be invisible
- * exactly when the information matters most, so it would be a brake light that
- * lies. Mini and car brake; the bus waits for the repaint.
+ * The `Y` strip across the rear panel went black in the same change: on a yellow
+ * body it would have been invisible, and `Y` no longer appears in this drawing
+ * at all.
  */
 export const SAME_BUS_COLORS: RowColors = {
-  X: C.B_RED, W: C.CYAN, Y: C.B_YELLOW, R: C.RED, B: C.BLACK,
+  X: C.B_YELLOW, W: C.CYAN, R: C.RED, B: C.BLACK,
 }
+export const SAME_BUS_BRAKE_COLORS: RowColors = { ...SAME_BUS_COLORS, R: C.B_RED }
 export const ONCOMING_BUS_COLORS: RowColors = {
   X: C.B_RED, W: C.CYAN, B: C.BLACK, Y: C.B_YELLOW,
 }

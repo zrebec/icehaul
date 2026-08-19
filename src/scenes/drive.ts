@@ -375,7 +375,7 @@ export function createDriveScene(
       }
 
       // Traffic — move vehicles, then visual screen-space collision.
-      tickTraffic(v.distance, v.x, v.speed, dt)
+      tickTraffic(v.distance, v.x, v.speed, dt, road)
 
       for (const tv of getVisibleTraffic(v.distance, TRAFFIC_COLLISION_DEPTH_M)) {
         const projected = projectTrafficVehicle(

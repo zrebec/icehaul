@@ -234,7 +234,7 @@ import {
   SAME_BUS_ROWS, ONCOMING_BUS_ROWS,
   SAME_MINI_COLORS, ONCOMING_MINI_COLORS, SAME_CAR_COLORS, ONCOMING_CAR_COLORS,
   SAME_BUS_COLORS, ONCOMING_BUS_COLORS,
-  SAME_MINI_BRAKE_COLORS, SAME_CAR_BRAKE_COLORS,
+  SAME_MINI_BRAKE_COLORS, SAME_CAR_BRAKE_COLORS, SAME_BUS_BRAKE_COLORS,
   type RowColors,
 } from './sprites/vehicles.ts'
 
@@ -311,12 +311,21 @@ export function drawTraffic(
 ): void {
   const glowSink = glowOut && isGlowEnabled() ? glowOut : null
 
-  for (const v of vehicles) {
+  // Painter's order: furthest first, so a near vehicle covers a far one.
+  //
+  // This used to draw in spawn order, which is *nearest* first among the traffic
+  // ahead — exactly backwards — so a distant car was painted over the bus in
+  // front of it and read as being through it. Reported from a playtest: "vidím
+  // aj zelené auto pred autobusom bez toho aby som predbehol autobus". Sorting a
+  // copy, because the caller's array is the live traffic list.
+  const ordered = [...vehicles].sort((a, b) => b.distM - a.distM)
+
+  for (const v of ordered) {
     const p = projectTrafficVehicle(viewportTop, viewportBottom, cameraDistance, playerX, v, getCurvature)
     if (!p) continue
     if (p.x < -20 || p.x > GAME_WIDTH + 20) continue
 
-    if (glowSink) pushTrafficLampSpots(glowSink, p, v.dir)
+    if (glowSink) pushTrafficLampSpots(glowSink, p, v.dir, v.braking === true)
 
     if (v.dir === 'oncoming') {
       drawOncomingVehicle(ctx, p)
@@ -541,9 +550,10 @@ export function getTrafficSpriteRows(dir: TrafficVehicle['dir'], type: VehicleTy
 /**
  * `braking` swaps the tail lamps from `RED` to `B_RED` — the ZX BRIGHT bit, and
  * a change in the framebuffer rather than in the bloom, so it survives
- * `?glow=0`. Oncoming vehicles have no brake state (their lamps face away from
- * whatever they are doing) and the bus has none either: its bodywork *is*
- * `B_RED`, so a bright red lamp on it would be a brake light nobody can see.
+ * `?glow=0`. All three same-direction vehicles have it since the bus was
+ * repainted yellow; before that its `B_RED` bodywork made a bright red lamp a
+ * brake light nobody could see. Oncoming vehicles still have no brake state at
+ * all — their lamps face away from whatever they are doing.
  */
 export function getTrafficSpriteColors(
   dir: TrafficVehicle['dir'],
@@ -561,7 +571,7 @@ export function getTrafficSpriteColors(
   switch (type) {
     case 'mini': return braking ? SAME_MINI_BRAKE_COLORS : SAME_MINI_COLORS
     case 'car': return braking ? SAME_CAR_BRAKE_COLORS : SAME_CAR_COLORS
-    case 'bus': return SAME_BUS_COLORS
+    case 'bus': return braking ? SAME_BUS_BRAKE_COLORS : SAME_BUS_COLORS
   }
 }
 

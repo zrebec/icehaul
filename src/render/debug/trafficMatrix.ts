@@ -115,6 +115,16 @@ export interface MatrixOptions extends MatrixSelection {
   /** Draw the player truck with its brake lights on. The brake is carried
    *  entirely by the glow, so it cannot be judged from a cruising frame. */
   brake: boolean
+  /**
+   * Draw the *traffic* with its brake lights on.
+   *
+   * The same hole `brake` was added to close, one vehicle further away: traffic
+   * only brakes when the road ahead gives it a reason, so no static sheet could
+   * ever show the state we most need to look at. Judging "is a brake light
+   * readable at 200 m" without this means driving until a car happens to brake
+   * at the right distance, which is not a measurement.
+   */
+  trafficBrake: boolean
 }
 
 export const MATRIX_DEFAULTS: MatrixOptions = {
@@ -127,6 +137,7 @@ export const MATRIX_DEFAULTS: MatrixOptions = {
   vehicleX: 0.5,
   scanlines: false,
   brake: false,
+  trafficBrake: false,
 }
 
 /**
@@ -141,7 +152,7 @@ export function matrixLayoutFor(options: Partial<MatrixOptions> = {}): MatrixLay
 
 /** A single vehicle placed at an exact distance, everything else neutral. */
 function cellVehicle(
-  type: VehicleType, dir: TrafficDir, distM: number, vehicleX: number,
+  type: VehicleType, dir: TrafficDir, distM: number, vehicleX: number, braking: boolean,
 ): TrafficVehicle {
   return {
     spawnDist: 0,
@@ -152,6 +163,7 @@ function cellVehicle(
     dir,
     type,
     gone: false,
+    braking,
   }
 }
 
@@ -182,7 +194,7 @@ function renderCell(
   drawRoad(cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX, surfaceAt, curvatureAt)
   drawTraffic(
     cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX,
-    [cellVehicle(type, dir, distM, opts.vehicleX)], curvatureAt, glowSpots,
+    [cellVehicle(type, dir, distM, opts.vehicleX, opts.trafficBrake)], curvatureAt, glowSpots,
   )
   if (opts.showTruck) {
     const truckX = GAME_WIDTH / 2 + opts.playerX * 50
@@ -289,6 +301,7 @@ export function matrixOptionsFromSearch(search: string): Partial<MatrixOptions> 
   if (q.get('truck') === '0') out.showTruck = false
   if (q.get('scanlines') === '1') out.scanlines = true
   if (q.get('brake') === '1') out.brake = true
+  if (q.get('trafficBrake') === '1') out.trafficBrake = true
 
   const types = q.get('types')?.split(',').filter(t => (MATRIX_TYPES as readonly string[]).includes(t))
   if (types?.length) out.types = types as VehicleType[]

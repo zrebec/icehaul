@@ -56,10 +56,20 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 **Next, in order:**
 
-1. **Traffic density scaling with distance** — Fox's, from the 0.8.2 playtest (§2½), and now the
-   top of the queue: the redraw that was blocking it is done, so seeing the same six drawings more
-   often is no longer a cost. `TRAFFIC_SPACING_M` is the lever; a distance term goes in
-   `game/traffic.ts` where spacing is drawn.
+0. **Vehicle detail — interior keylines.** New, and it comes straight out of the traffic-braking
+   playtest: *"hre chýbajú detaily (hlavne vozidiel)"*. The hard reason under the aesthetic one is
+   that **brightness is exhausted as a carrier**: `RED` and `B_RED` are 50 units apart on one
+   channel, which is two cells at 200 m, and the halo saturates them into each other. Any further
+   state a vehicle might need to signal has to come from *shape*, not from brightness. The outer
+   contour already exists (#35); what does not is black keylines *inside* the sprite, the way arcade
+   and Amiga art did it. **A keyline does not grow the sprite, it eats its colour area** — at 22x15
+   every line is a whole row or column — and at the far tier (5x4) nothing of it survives, so meaning
+   there stays with lamp colour and silhouette. Growing the sprite by a pixel instead is a resolution
+   change in miniature: it moves the projection, three LOD thresholds and the collision raster.
+1. **Traffic density scaling with distance** — Fox's, from the 0.8.2 playtest (§2½). `TRAFFIC_SPACING_M`
+   is the lever; a distance term goes in `game/traffic.ts` where spacing is drawn. **Now more valuable
+   than when it was written:** traffic has behaviour worth seeing more of, and a queue that forms
+   behind a braking vehicle is a decision the player has to make rather than scenery.
 1½. ~~**Snow grip**~~ — **done** in #44: `SURFACE_GRIP.snow` 0.55 → 0.45, exactly the experiment §3
    below asked for, plus the controllability re-pin it warned about (the ordering test now derives
    its expectation from `SURFACE_GRIP` instead of carrying a copy of it).
@@ -79,12 +89,12 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 Written down so they stop living in a chat window. None is scheduled; the queue above still rules.
 
-1. **`feat(traffic)`: traffic that slows for what is ahead** *(~0.5-1 day, best return)*. Nothing in
-   the model slows a vehicle ahead of the player, so the brake lights have nowhere to show and every
-   overtake is the same problem. Same-direction traffic slowing for sharp curvature and for low-grip
-   surfaces would pay three times over: the brake lights gain a purpose, an overtake becomes a
-   decision (*"it is braking, so there is ice — do I go round?"*), and the density work in item 1
-   gets something to modulate. Sits directly on §2½: traffic **is** the difficulty.
+1. ~~**`feat(traffic)`: traffic that slows for what is ahead**~~ — **DONE 2026-08-19.** It paid two of
+   the three ways predicted. The brake lights gained a purpose and the overtake gained a reason; what
+   it did not do is read as strongly as hoped, and the measurement says why — see "The brake light was
+   erased by its own glow" below. Fox: *"úprimne som asi čakal väčší efekt... je vidno, že brzdia,
+   naozaj tá žiara, ale `RED` a `B_RED` v strednom alebo ďalekom LOD prakticky nevidno."* That verdict
+   is what put vehicle detail at the top of the queue above.
 2. **`feat(mission)`: make the clock bite again** *(2-4 h, but a decision first)*. See §A above for
    the arithmetic and the three levers. Recommendation: pace to 42 and a cap on the bank; leave
    `DELIVERY_TIME_CARRY_PCT` alone, because Fox already decided that once.
@@ -1150,6 +1160,86 @@ new signal, not the old question again.
 Still true, and still not a defect: `?glow=0` must keep restoring a byte-identical frame, and the
 raster must keep carrying the meaning on its own (`RED` → `B_RED` for a braking vehicle). Those are
 invariants of the design rather than open tuning.
+
+#### The brake light was erased by its own glow — measured 2026-08-19
+
+Traffic braking shipped and Fox could not see it: *"auto predo mnou stále nevidím brzdiť... buď
+nevidím alebo ide o LOD."* It was neither the behaviour nor the LOD tier. The same frame, rendered
+twice through the real path with `scripts/frame-delta.mjs` (new, and the reason it now exists):
+
+    glow off   0.03 % of pixels changed · peak 50 / 765
+    glow on    0.00 % of pixels changed · byte-identical
+
+The raster swaps `RED` (#CD0000) for `B_RED` (#FF0000) — **50 units on one channel**, across two
+cells at 200 m. The bloom is composited with `'lighter'`, so it drives the red channel to 255 on and
+around the lamp *whether the lamp began at 205 or at 255*. **This is the same trap as the first glow
+pass** ("a lamp is already #FFFF00 and additive light cannot brighten a saturated channel"), one
+vehicle further out, and it will happen again to anything that tries to signal by brightening a
+colour the glow already saturates.
+
+The fix is that the halo carries it: **wider (`GLOW_RADIUS_BRAKE_MULT` 1.7) and stacked
+(`GLOW_BRAKE_PASSES` 2), never a different colour.** Deliberately not the white core the player's
+truck gets — white desaturates the halo, and at distance that halo's colour is the only thing saying
+which way a vehicle is pointing. A braking car reads as *more* red, never as a different red.
+
+    car, braking vs rolling, with scanlines
+    220 m   0.72 % of pixels · mean 19.7 · peak 80
+    100 m   2.34 %           · mean 23.4 · peak 88
+     50 m   5.10 %           · mean 27.2 · peak 90
+     25 m   7.91 %           · mean 28.3 · peak 90
+     10 m   9.90 %           · mean 27.9 · peak 92
+
+For scale, the player's own brake is 4.3 % / 42.0 / 292 — traffic covers **more area at a lower
+peak**, which is right: the truck's peak is its white core.
+
+#### The bus is yellow now — Fox's call, 2026-08-19
+
+`SAME_BUS_COLORS.X` was `B_RED` with `RED` lamps, so the bus had **no brake state at all**: a bright
+red lamp on bright red bodywork is a brake light that lies, and `vehicles.ts` had spent two
+paragraphs asking for the repaint it needed. Fox was behind a bus when he reported seeing nothing.
+
+`B_YELLOW` frees red entirely and no other vehicle is yellow. The `Y` strip across the rear panel
+went black in the same change, since on a yellow body it was invisible. Measured after:
+
+    bus, braking vs rolling      glow on              glow off
+    220 m                        1.03 % · peak 82     0.01 % · peak 50
+    100 m                        2.89 % · peak 88     0.03 % · peak 50
+     25 m                        7.70 % · peak 92     0.05 % · peak 50
+
+The `glow off` column is the one that matters for the rule: the bus now signals in the framebuffer
+too, so **the glow is no longer carrying that meaning alone**. It was, for one afternoon, and that
+was a knowing breach.
+
+**One cost, stated rather than discovered later: `B_YELLOW` is also the oncoming lamp colour.** At
+220 m a yellow body is the same hue as an oncoming vehicle's lights. Direction survives because it
+was never carried by the body — a same-direction bus wears a red halo and red lamps, an oncoming one
+a yellow halo — and the halo is far larger than the body at exactly the distance where the body is
+too small to read. Worth watching in a playtest anyway.
+
+#### Two defects found on the way, neither of them the one being chased
+
+- **Traffic was drawn in the wrong order.** `drawTraffic` iterated the live array, which is spawn
+  order — *nearest first* among the traffic ahead — so a distant vehicle was painted over the one in
+  front of it. Fox: *"vidím aj zelené auto pred autobusom bez toho aby som predbehol autobus."*
+  Painter's order (furthest first) is one `sort`.
+- **New vehicles were spawned on top of existing ones.** Spawn spacing is measured from the previous
+  *spawn point*, which is not where the previous vehicle is: a car spawned at 4507 m landed **0.35 m**
+  behind one that had started 286 m further back and driven past the spot. Across five seeds the
+  closest two same-direction vehicles ever got was **0.00 m**, on a road where a vehicle is 6 m long.
+  `TRAFFIC_MIN_SPAWN_GAP_M = 25` fixed it — the same measurement now reads **22.5 m and zero
+  overlaps**. The car-following model was the obvious suspect and was never the cause.
+
+#### New tooling, because the harness could not show the thing being judged
+
+- **`scripts/frame-delta.mjs`** — loads two URLs of one scene and reports what moved: share of pixels
+  changed, mean delta, peak. The methodology the glow tables above use, made repeatable. Every
+  "can you see it?" from here on gets answered this way.
+- **`?trafficBrake=1`** — the contact sheet can draw braking traffic. The same hole `?brake=1` closed
+  for the player's truck: traffic only brakes when the road gives it a reason, so no static sheet
+  could ever contain the state most in need of looking at.
+- **`traffic-brake-on` / `-off` sheets**, with the bus in the set on purpose.
+- **`brakeSignal.test.ts`** — counts the cells that change when the brake comes on, per type, across
+  the whole approach. It is what turned "is it LOD?" into a table in five minutes.
 
 ### Night mode — open, both paths costed
 

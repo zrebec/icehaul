@@ -169,14 +169,14 @@ describe('brake lights are a colour, not only a glow', () => {
   // the ZX BRIGHT bit. Deliberately a change in the framebuffer: `?glow=0` is a
   // setting a player may choose, and "the car ahead is stopping" is safety
   // information rather than decoration, so it has to survive the lights off.
-  it.each(['mini', 'car'] as const)('%s brightens its lamps under the brake', (type) => {
+  it.each(['mini', 'car', 'bus'] as const)('%s brightens its lamps under the brake', (type) => {
     const rolling = getTrafficSpriteColors('same', type, false)
     const braking = getTrafficSpriteColors('same', type, true)
     expect(rolling.R).toBe(C.RED)
     expect(braking.R).toBe(C.B_RED)
   })
 
-  it.each(['mini', 'car'] as const)('%s changes nothing but the lamps', (type) => {
+  it.each(['mini', 'car', 'bus'] as const)('%s changes nothing but the lamps', (type) => {
     const rolling = getTrafficSpriteColors('same', type, false)
     const braking = getTrafficSpriteColors('same', type, true)
     for (const char of Object.keys(rolling)) {
@@ -185,11 +185,18 @@ describe('brake lights are a colour, not only a glow', () => {
     }
   })
 
-  it('leaves the bus alone, because red on red would be a brake light that lies', () => {
-    // Its bodywork IS B_RED. Owner's call: the bus waits for the repaint that
-    // #42 recorded as the real fix, rather than getting a lamp nobody can see.
-    expect(getTrafficSpriteColors('same', 'bus', true))
-      .toBe(getTrafficSpriteColors('same', 'bus', false))
+  it('the bus can brake now, because its bodywork is no longer red', () => {
+    // It could not, and the reason was the palette rather than the model: `B_RED`
+    // lamps on `B_RED` bodywork are a brake light nobody can see, so the bus was
+    // given no brake state rather than a lying one. Fox called the repaint on
+    // 2026-08-19 and the body went `B_YELLOW`, which frees red entirely.
+    //
+    // Pinned as a property of the *body*, not of the decision: the day anyone
+    // paints a same-direction vehicle red again, this says what it costs.
+    const colors = getTrafficSpriteColors('same', 'bus', false)
+    expect(colors.X, 'a red body would swallow the lamps again').not.toBe(C.B_RED)
+    expect(getTrafficSpriteColors('same', 'bus', true).R).toBe(C.B_RED)
+    expect(colors.R).toBe(C.RED)
   })
 
   it.each(['mini', 'car', 'bus'] as const)('oncoming %s has no brake state at all', (type) => {

@@ -78,6 +78,28 @@ const SHEETS = [
     name: 'brake-off',
     params: { surface: 'asphalt', curve: 0, zoom: 4, types: 'car', dirs: 'same', dist: '220', scanlines: 1 },
   },
+  // Traffic braking, the same problem one vehicle further out. It only happens
+  // when the road ahead gives a vehicle a reason, so no driving frame can be
+  // relied on to contain it — `?trafficBrake=1` is the only way to put the two
+  // states side by side.
+  //
+  // The bus is in these on purpose: its bodywork is `B_RED`, so it has no raster
+  // brake at all and the halo is its entire signal. If a change ever makes the
+  // bus's two states look alike again, it shows here first.
+  {
+    name: 'traffic-brake-on',
+    params: {
+      surface: 'asphalt', curve: 0, zoom: 2, types: 'car,bus', dirs: 'same',
+      dist: '220,100,50,25', scanlines: 1, truck: 0, trafficBrake: 1,
+    },
+  },
+  {
+    name: 'traffic-brake-off',
+    params: {
+      surface: 'asphalt', curve: 0, zoom: 2, types: 'car,bus', dirs: 'same',
+      dist: '220,100,50,25', scanlines: 1, truck: 0,
+    },
+  },
 ]
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
