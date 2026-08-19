@@ -38,9 +38,9 @@ export const START_ASPHALT_M = 1000
 export const SURFACE_LENGTH_RANGE: Record<Surface, readonly [number, number]> = {
   asphalt: [200, 800],
   snow: [100, 800],
-  ice: [200, 800],
-  sand: [100, 400],
-  mud: [100, 600],
+  ice: [100, 300],
+  sand: [100, 800],
+  mud: [100, 800],
 }
 
 /**
