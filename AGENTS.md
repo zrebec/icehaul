@@ -1241,6 +1241,52 @@ too small to read. Worth watching in a playtest anyway.
 - **`brakeSignal.test.ts`** — counts the cells that change when the brake comes on, per type, across
   the whole approach. It is what turned "is it LOD?" into a table in five minutes.
 
+#### The second redraw: structure, not shape — 2026-08-19
+
+The first redraw (#42) fixed what the six vehicles *were*: symmetry, lamps at the corners, wheels
+with road under them. It deliberately left them as flat slabs of colour. Fox, after the
+traffic-braking playtest: *"hre chýbajú detaily (hlavne vozidiel). Také čierne outlines, ktoré sa
+všeobecne robili."*
+
+The aesthetic reason is his. The hard one is that **brightness is exhausted as a carrier** — `RED`
+and `B_RED` are 50 units apart on one channel and the halo saturates them into each other, which is
+why traffic braking had to be moved into the glow. Anything a vehicle still needs to say has to be
+said with shape.
+
+So each of the six gained **interior keylines**, in the language the player's own truck already
+speaks: a mass of colour described by dark structural lines rather than a slab with a window in it.
+A waist line under the glass, a dark inboard edge on each lamp cluster, a bumper band, a shut line
+across the boot or bonnet, wheel arches over the tyres, and — on the buses — window pillars that
+split one long band into three windows. The outer contour (#35) was already there and lives outside
+the raster; these are the interior lines it never had.
+
+**Bodies stopped sharing colours.** The mini and the car were both `B_GREEN`, so at the distance
+where their silhouettes stop differing there was nothing left to tell them apart. The mini is
+`B_MAGENTA` now — no vehicle, surface, kerb or marker uses it.
+
+**Two things the drawing gave up, both to measurement rather than taste.**
+
+- *The oncoming mini has no wheel arches.* Its front is a full-width dark grille and an arch row
+  under one merges into a single dark mass at 4 px: **1.05 s → 1.83 s** of freeze against a 2.0 s
+  budget, for that one row. A narrower grille (1.47 s) and arches pushed to the edges (1.83 s) were
+  both tried and neither recovered it.
+- *Number plates are `WHITE`, not `B_YELLOW`.* Yellow is the **oncoming lamp colour**, and at 14 px
+  a bright yellow bar across a same-direction car's rear outshone the red lamps that carry direction
+  and the brake. Plain `WHITE` was the one unused entry left in the palette. Removing the plate
+  entirely was also tried and costs the same mini **1.17 s → 1.83 s** — the plate is what stops the
+  bumper and the arches reading as one dark band.
+
+Longest hold of one drawing, against the 2.0 s budget:
+
+    first redraw    with keylines
+    same mini  1.28 s -> 1.17 s      oncoming mini  0.95 s -> 1.05 s
+    same car   0.83 s -> 0.83 s      oncoming car   0.83 s -> 0.83 s
+    same bus   0.57 s -> 0.55 s      oncoming bus   0.82 s -> 0.83 s
+
+The count of *changes* per approach rose where it mattered — car 168 → 177, bus 182 → 195 — so the
+structure is not only visible up close, it does work in the far field too. Dimensions, silhouettes,
+the collision raster and every LOD threshold are untouched: this is a repaint inside the same boxes.
+
 ### Night mode — open, both paths costed
 
 | Path | Contents | Effort |
