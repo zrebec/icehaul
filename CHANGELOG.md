@@ -1,3 +1,10 @@
+# [0.15.0](https://github.com/zrebec/icehaul/compare/v0.14.0...v0.15.0) (2026-08-19)
+
+
+### Features
+
+* **render:** six vehicles that have something inside their silhouette ([#51](https://github.com/zrebec/icehaul/issues/51)) ([2f1a1a5](https://github.com/zrebec/icehaul/commit/2f1a1a531a1b0602f65526c68973fce230319717)), closes [#35](https://github.com/zrebec/icehaul/issues/35)
+
 # [0.14.0](https://github.com/zrebec/icehaul/compare/v0.13.0...v0.14.0) (2026-08-19)
 
 
