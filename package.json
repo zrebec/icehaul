@@ -18,7 +18,7 @@
     "@semantic-release/git": "^11.0.1",
     "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "^30.0.1",
-    "puppeteer": "^25.7.0",
+    "puppeteer": "^25.8.0",
     "semantic-release": "^25.0.9",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
