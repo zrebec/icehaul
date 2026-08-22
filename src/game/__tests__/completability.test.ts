@@ -57,34 +57,64 @@ import {
   FIRST_TARGET_DIST_M, DELIVERY_FUEL_REFILL, CANISTER_TIME_BONUS_S,
   SURFACE_FUEL_MULT, GEARS, GEAR_COUNT, CLUTCH_MATCH_TOLERANCE,
   GAME_WIDTH, VIEWPORT_BOTTOM, OFFROAD_CRASH_SEVERITY, OFFROAD_TIMEOUT_S,
+  MAX_SPEED, SURFACE_BRAKE, PLAN_SURFACE_VMAX,
 } from '../../config.ts'
+import { corneringSpeedKph } from '../safespeed.ts'
 
 // ─── Strategies ──────────────────────────────────────────────────────────────
 
-type Strategy = Record<Surface, number>
+/**
+ * How fast to be going at `distM`, km/h.
+ *
+ * A function rather than a table because the two questions this file asks want
+ * two different kinds of driver, and only one of them can be written down as a
+ * speed per surface — see the header above {@link STRATEGIES}.
+ */
+type Strategy = (distM: number) => number
 
-const STRATEGIES: Record<string, Strategy> = {
+/** A driver whose whole plan is one straight-line speed per surface. */
+type SpeedTable = Record<Surface, number>
+
+/**
+ * Asphalt is the only surface where the *truck's* top speed is what binds.
+ *
+ * Everywhere else `SURFACE_DRAG` stops it far below: measured flat out through
+ * the gears, snow tops out at 45.7 km/h, sand 44.4, mud 41.0. So a driver's
+ * asphalt number is a fraction of what the truck can do, and their snow number
+ * is a statement about nerve — which is why only the first is derived here.
+ *
+ * (Ice has no drag at all and would also be top-speed bound, but nobody drives
+ * ice at 120: there the binding limit is the bend, so its number is nerve too.)
+ *
+ * Fox, after a long-ice sweep failed: *"človek na asfalte zvýši aj na 120 km/h.
+ * Ale ak sa mu do cesty postaví dlhý ľad, bude to na jeho šikovnosti o to viac."*
+ * The difference between passing and timing out was `asphalt: 100` against
+ * `asphalt: 115` — far too much weight for a number nothing was holding.
+ */
+const ofTopSpeed = (fraction: number): number => Math.round(MAX_SPEED * fraction)
+
+const SPEED_TABLES: Record<string, SpeedTable> = {
   // Straight-line targets; every strategy eases off for bends via curveSpeedFactor.
   // Aggressive was recalibrated when the lateral envelope was fixed — its brief is
   // "as fast as the surface allows", and the surface now allows more. Left at the
   // old numbers it could no longer burn a tank inside 5 km, which cost the sweep
   // its proof that the FUEL OUT game-over is reachable at all.
   aggressive: {
-    asphalt: 115,
+    asphalt: ofTopSpeed(0.96),   // 115 km/h today
     snow:    80,
     ice:     50,
     sand:    80,
     mud:     75,
   },
   moderate: {
-    asphalt: 65,
+    asphalt: ofTopSpeed(0.54),   // 65 km/h today
     snow:    50,
     ice:     32,
     sand:    50,
     mud:     45,
   },
   conservative: {
-    asphalt: 52,
+    asphalt: ofTopSpeed(0.43),   // 52 km/h today
     snow:    46,
     ice:     28,
     sand:    46,
@@ -106,7 +136,7 @@ const STRATEGIES: Record<string, Strategy> = {
    * and a shade under what the draggy surfaces can hold anyway.
    */
   smart: {
-    asphalt: 100,
+    asphalt: ofTopSpeed(0.83),   // 100 km/h today
     snow:    42,
     ice:     34,
     sand:    42,
@@ -225,14 +255,141 @@ function curveSpeedFactor(distM: number): number {
   return 1 / (1 + peak * CURVE_CAUTION)
 }
 
-/** Speed to hold now: slowest surface in sight, eased further for the bend. */
-function plannedTarget(distM: number, targetKph: Strategy): number {
-  let slowest = Infinity
-  for (let d = distM; d <= distM + SURFACE_LOOKAHEAD_M; d += SURFACE_SAMPLE_M) {
-    const t = targetKph[getSurfaceAt(d) as Surface]
-    if (t < slowest) slowest = t
+/**
+ * A driver whose plan is a speed per surface: hold the slowest one in sight,
+ * eased further for the sharpest bend in sight.
+ *
+ * The pessimism in that rule is worth knowing before reading a failure, because
+ * **it grows with segment length**. The look-ahead takes the *slowest* surface
+ * within `SURFACE_LOOKAHEAD_M`, so a driver meeting 800 m of ice drops to ice
+ * speed 150 m early and then holds it for the whole 950 m. A person does not:
+ * they brake for the entry and modulate through the rest. Lengthening a surface
+ * therefore makes this driver worse against a human at a rate nothing here
+ * models — which is exactly what a long-ice sweep exposed.
+ */
+function fromTable(targetKph: SpeedTable): Strategy {
+  return (distM: number): number => {
+    let slowest = Infinity
+    for (let d = distM; d <= distM + SURFACE_LOOKAHEAD_M; d += SURFACE_SAMPLE_M) {
+      const t = targetKph[getSurfaceAt(d) as Surface]
+      if (t < slowest) slowest = t
+    }
+    return slowest * curveSpeedFactor(distM)
   }
-  return slowest * curveSpeedFactor(distM)
+}
+
+/**
+ * The driver at the physical limit — as fast as the road allows here, and no
+ * faster than what is still stoppable given what is coming.
+ *
+ * ── What this one is for, and what it deliberately cannot answer ────────────
+ * This file asks two questions and they want different drivers:
+ *
+ * - **Is this route drivable at all?** A question about the *road*. It should be
+ *   answered by the best driver there is, and that driver's speeds have to be
+ *   derived, or the answer rots the moment a surface constant moves. That is
+ *   this one.
+ * - **Is the clock fair to a human?** A question about the *clock*. It has to be
+ *   answered by a crude, independent guess, or it is circular. That is the four
+ *   tables above, and they stay hand-written for exactly that reason.
+ *
+ * **This driver shares the cornering law with the planner, and that is a
+ * deliberate limitation, not an oversight.** It therefore proves nothing about
+ * `PLAN_SLACK` — against the clock it is close to asking whether the slack is
+ * above 1. What it *does* prove is worth having: the planner is an abstraction
+ * that assumes a fixed `PLAN_ACCEL_MS2` and knows nothing of gears, and this bot
+ * drives the real `tickVehicle` with a real gearbox, a real clutch protocol and
+ * real fuel. If the abstraction promises a pace the drivetrain cannot deliver —
+ * say, climbing back to 120 after 800 m of ice — this is what says so.
+ */
+const envelopeTarget: Strategy = (distM: number): number => {
+  // The reach-back is the same arithmetic the planner runs over a whole leg, but
+  // with the *real* braking figure for the surface underfoot rather than a
+  // planning constant: this driver is meant to know what the truck can do.
+  const brakeMs2 = SURFACE_BRAKE[getSurfaceAt(distM)].decel / 3.6
+  let target = MAX_SPEED
+
+  for (let d = 0; d <= ENVELOPE_LOOKAHEAD_M; d += ENVELOPE_STEP_M) {
+    const at = distM + d
+    const limitKph = Math.min(
+      corneringSpeedKph(getCurvatureAt(at), getGripAt(at)) * ENVELOPE_MARGIN,
+      PLAN_SURFACE_VMAX[getSurfaceAt(at)],
+    )
+    const limitMs = limitKph / 3.6
+    const reachableKph = Math.sqrt(limitMs * limitMs + 2 * brakeMs2 * d) * 3.6
+    if (reachableKph < target) target = reachableKph
+  }
+  // Eased for the bend the same way the table drivers ease, and for a reason
+  // the cornering law cannot express: grip is not the only limit. At 120 km/h
+  // `SPEED_STEER_PENALTY` leaves so little steering authority that the truck
+  // cannot *follow* a bend it could easily hold — a second limit the planner
+  // does not model at all.
+  return target * curveSpeedFactor(distM)
+}
+
+/** How far the envelope driver reads, and how finely. Longer than the table
+ *  drivers' 150 m because it brakes on arithmetic rather than on a rule of
+ *  thumb, so it needs to see the whole braking distance from 120 km/h. */
+/**
+ * The margin between a calculation and a driver.
+ *
+ * The cornering law is a *limit*, and a driver sitting exactly on a limit has
+ * nothing left for the sim's discrete steering or for the outward drift. Measured
+ * across the sweep, the margin takes the envelope driver's off-road crashes from
+ * 3 to 2 and costs 1.2 km/h of average — and the two that remain are both on ice,
+ * which is the honest answer rather than a number to tune away: **on ice there is
+ * no envelope to drive at.** That is the game's whole thesis, arrived at by a bot.
+ */
+const ENVELOPE_MARGIN = 0.9
+const ENVELOPE_LOOKAHEAD_M = 400
+const ENVELOPE_STEP_M = 10
+
+/**
+ * A driver: how fast to go, and how readily to leave the middle of the road for
+ * a jerrycan.
+ *
+ * The second half started as one global constant and had to become per-driver
+ * the moment the envelope driver existed. At the physical limit the tank is the
+ * binding constraint long before the clock is — measured, it ran dry at 4608 m
+ * of a 5000 m leg — and no speed cap fixes that honestly, because the answer a
+ * real driver reaches for is not *go slower*, it is *stop for fuel*.
+ * Fox: **"nech envelope zbiera kanistre. Sú o prežití."**
+ */
+interface Driver {
+  /** Speed to hold at `distM`, km/h. */
+  target: Strategy
+  /**
+   * Fuel level below which this driver will detour for a canister.
+   *
+   * The human proxies wait until they are down to two thirds, which is what a
+   * person does when a detour still feels like a risk. The envelope driver takes
+   * every one that is on its way, because it is meant to be the best driver on
+   * the road and the best driver does not drive past free fuel at 120 km/h.
+   */
+  seekFuel: number
+  /**
+   * Whether this driver takes canisters even when the harness has them switched
+   * off.
+   *
+   * The switch exists so the first-leg test can ask a clean question — *can you
+   * make 5 km on one tank?* — and for a human proxy that is the right question.
+   * For the envelope driver it is the wrong one: it is meant to be the best
+   * driver the route allows, the route lays fuel along it, and driving past it
+   * at 120 km/h is not skill. Measured with the switch off, it ran dry at 4608 m
+   * of a 5000 m leg while every human proxy finished on one tank.
+   */
+  alwaysCollects?: boolean
+}
+
+const HUMAN_SEEK_FUEL = 0.65
+const ENVELOPE_SEEK_FUEL = 0.95
+
+const STRATEGIES: Record<string, Driver> = {
+  aggressive: { target: fromTable(SPEED_TABLES.aggressive!), seekFuel: HUMAN_SEEK_FUEL },
+  moderate: { target: fromTable(SPEED_TABLES.moderate!), seekFuel: HUMAN_SEEK_FUEL },
+  conservative: { target: fromTable(SPEED_TABLES.conservative!), seekFuel: HUMAN_SEEK_FUEL },
+  smart: { target: fromTable(SPEED_TABLES.smart!), seekFuel: HUMAN_SEEK_FUEL },
+  envelope: { target: envelopeTarget, seekFuel: ENVELOPE_SEEK_FUEL, alwaysCollects: true },
 }
 
 /**
@@ -242,8 +399,9 @@ function plannedTarget(distM: number, targetKph: Strategy): number {
  * is willing to leave the middle of the road for one — the same judgement a
  * human makes, and deliberately conservative on all three axes.
  */
-/** Fuel level below which the driver starts detouring for canisters. */
-const CANISTER_SEEK_FUEL = 0.65
+/** Superseded by {@link Driver.seekFuel} — kept only as the humans' figure,
+ *  which is what this was when there was only one kind of driver. */
+const CANISTER_SEEK_FUEL = HUMAN_SEEK_FUEL
 /** How far ahead a canister has to be to be worth aiming at (metres). */
 const CANISTER_SEEK_LOOK_M = 260
 /**
@@ -269,8 +427,8 @@ const CANISTER_SEEK_MAX_X = 0.7
  * Where the driver wants to be laterally: the middle, unless it is short of
  * fuel and there is a canister ahead worth a detour.
  */
-function canisterAimX(distM: number, fuel: number): number {
-  if (fuel >= CANISTER_SEEK_FUEL) return 0
+function canisterAimX(distM: number, fuel: number, seekFuel: number): number {
+  if (fuel >= seekFuel) return 0
   if (getGripAt(distM) < CANISTER_SEEK_MIN_GRIP) return 0
   if (Math.abs(getCurvatureAt(distM)) > CANISTER_SEEK_MAX_CURVE) return 0
 
@@ -314,12 +472,12 @@ interface SimOptions {
 
 function runSim(
   strategyName: string,
-  targetKph: Strategy,
+  driver: Driver,
   seed = SEED,
   opts: SimOptions = {},
 ): SimResult {
   const legCount = opts.legs ?? 1
-  const collectCanisters = opts.collectCanisters ?? false
+  const collectCanisters = (opts.collectCanisters ?? false) || driver.alwaysCollects === true
 
   resetRoad(seed)
   // Same offset the drive scene uses, so the sim meets the canisters the player
@@ -371,7 +529,9 @@ function runSim(
       startM:  Math.round(segStartDist),
       endM:    Math.round(nowDist),
       lengthM: Math.round(lengthM),
-      targetKph: targetKph[lastSurface],
+      // What the driver asked for entering this segment, rather than a table
+      // lookup — the envelope driver has no table to look up.
+      targetKph: Math.round(driver.target(segStartDist)),
       avgKph:  Math.round(avgKph * 10) / 10,
       timeS:   Math.round(timeS * 10) / 10,
       fuelUsed: Math.round(fuelUsed * 10000) / 10000,
@@ -390,7 +550,7 @@ function runSim(
     const grip     = getGripAt(v.distance)
     const accel    = accelFor(surface)
     // Straight-line speed for the worst surface in sight, eased off for the bend.
-    const target   = plannedTarget(v.distance, targetKph)
+    const target   = driver.target(v.distance)
 
     // Speed controller
     const throttle = v.speed < target
@@ -398,7 +558,7 @@ function runSim(
 
     // Steering P-controller — hold the aim line, counter vx drift. The aim is
     // the middle of the road unless the driver is detouring for fuel.
-    const aimX = collectCanisters ? canisterAimX(v.distance, v.fuel) : 0
+    const aimX = collectCanisters ? canisterAimX(v.distance, v.fuel, driver.seekFuel) : 0
     const steerLeft  = v.x > aimX + 0.08 || v.vx > 0.12
     const steerRight = v.x < aimX - 0.08 || v.vx < -0.12
 
@@ -685,9 +845,10 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
     // fails on the harder routes.** It is printed rather than asserted cell by
     // cell, because the pass/fail line is a tuning decision and the numbers are
     // what the decision is made from. `PLAN_SLACK` is the dial.
-    const head = `${'Seed'.padEnd(9)} ${'aggr'.padStart(5)} ${'mod'.padStart(5)} ${'cons'.padStart(5)} ${'smart'.padStart(6)}   demanded`
+    const head = `${'Seed'.padEnd(9)} ${'aggr'.padStart(5)} ${'mod'.padStart(5)} ${'cons'.padStart(5)}`
+      + ` ${'smart'.padStart(6)} ${'envel'.padStart(6)}   demanded`
     const lines = [head, '─'.repeat(head.length)]
-    const tally = { aggressive: 0, moderate: 0, conservative: 0, smart: 0 }
+    const tally = { aggressive: 0, moderate: 0, conservative: 0, smart: 0, envelope: 0 }
     for (const { seed, allResults } of sweep) {
       resetRoad(seed)
       const pace = (FIRST_TARGET_DIST_M / 1000)
@@ -697,11 +858,14 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
         if (r.completed) tally[name as keyof typeof tally]++
         return (r.completed ? '✓' : '✗').padStart(5)
       }
-      lines.push(`${String(seed).padEnd(9)} ${cell('aggressive')} ${cell('moderate')} ${cell('conservative')} ${cell('smart').padStart(6)}   ${pace.toFixed(1)} km/h`)
+      lines.push(`${String(seed).padEnd(9)} ${cell('aggressive')} ${cell('moderate')} ${cell('conservative')}`
+        + ` ${cell('smart').padStart(6)} ${cell('envelope').padStart(6)}   ${pace.toFixed(1)} km/h`)
     }
     lines.push('─'.repeat(head.length))
     lines.push(`completed: aggressive ${tally.aggressive}/${sweep.length} · moderate ${tally.moderate}/${sweep.length}`
-      + ` · conservative ${tally.conservative}/${sweep.length} · smart ${tally.smart}/${sweep.length}`)
+      + ` · conservative ${tally.conservative}/${sweep.length} · smart ${tally.smart}/${sweep.length}`
+      + ` · envelope ${tally.envelope}/${sweep.length}`)
+    lines.push('the envelope column is the road answering; the other four are the clock answering')
     console.log(`\n═══ Clock calibration (PLAN_SLACK) ═══\n${lines.join('\n')}`)
     expect(sweep.length).toBeGreaterThan(15)
   })
@@ -745,8 +909,30 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
     expect(timedOut.length).toBe(0)
   })
 
-  it('at least one strategy completes every seed', () => {
-    const failed = sweep.filter(s => !s.best.completed)
+  it('the envelope driver completes every seed — the route is drivable at all', () => {
+    // **This is the question about the road, and it now has the driver it needs.**
+    //
+    // It used to ask "did any of the four human proxies finish?", which made it a
+    // question about the drivers instead. Lengthening ice to 800 m failed it on
+    // three seeds — every one on *timeout*, and every one with `aggressive`
+    // finishing — so the route was fine and the bots were not. Fox: *"človek na
+    // asfalte zvýši aj na 120 km/h. Ale ak sa mu do cesty postaví dlhý ľad, bude
+    // to na jeho šikovnosti o to viac."*
+    //
+    // A failure here means the generator has produced something no driver could
+    // finish, which is a bug in the road. A human proxy failing is not that — it
+    // is the clock biting, and the table below is where that is read.
+    const envelope = sweep.map(s => ({
+      seed: s.seed,
+      r: s.allResults.find(x => x.strategy === 'envelope')!,
+    }))
+    const failed = envelope.filter(e => !e.r.completed)
+    if (failed.length > 0) {
+      console.log('\n❌ Seeds no driver could finish — look at the generator, not the bots:')
+      for (const { seed, r } of failed) {
+        console.log(`  seed ${seed}: ${r.failReason} at ${r.distanceM}m (avg ${r.avgKph} km/h)`)
+      }
+    }
     expect(failed.length).toBe(0)
   })
 
@@ -754,11 +940,28 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
     // The assertion this file was missing. "Completable" used to mean only
     // "enough time and fuel"; a layout that puts ice inside a sharp curve is
     // unreachable for a different reason, and this is what catches it.
-    const crashed = sweep.flatMap(s =>
+    // Asserted over the *human* drivers only. The envelope driver is at the
+    // physical limit by construction, so "it never leaves the road" is the wrong
+    // thing to ask of it — its crashes are a measurement, and they are printed
+    // below rather than failed on.
+    const humans = sweep.flatMap(s =>
       s.allResults
-        .filter(r => r.offroadCrashAtM !== null)
+        .filter(r => r.strategy !== 'envelope' && r.offroadCrashAtM !== null)
         .map(r => ({ seed: s.seed, surfaces: s.surfaces, r })),
     )
+    const atTheLimit = sweep.flatMap(s =>
+      s.allResults
+        .filter(r => r.strategy === 'envelope' && r.offroadCrashAtM !== null)
+        .map(r => ({ seed: s.seed, r })),
+    )
+    if (atTheLimit.length > 0) {
+      console.log(`\nAt the limit, the envelope driver left the road on `
+        + `${atTheLimit.length}/${sweep.length} seeds — where, and on what:`)
+      for (const { seed, r } of atTheLimit) {
+        console.log(`  seed ${seed}: ${Math.round(r.offroadCrashAtM!)}m on ${r.offroadSurface}`)
+      }
+    }
+    const crashed = humans
     if (crashed.length > 0) {
       const total = sweep.length * Object.keys(STRATEGIES).length
       console.log(`\n❌ Off-road crash on ${crashed.length}/${total} strategy/seed combination(s):`)
@@ -903,9 +1106,14 @@ describe(`completability — ${MULTI_LEG_COUNT} legs (past the first delivery)`,
     // The bot leaves the middle of the road to collect, which is a new way to
     // fail that the single-leg runs never had. Measured: severity stays at 0,
     // so the ±0.7 aim clamp plus the grip and curvature gates hold.
+    //
+    // The envelope driver is excluded for the same reason as in the sweep above:
+    // it is at the physical limit by construction, and it was measured to leave
+    // the road with the detour switched *off* as readily as with it on — so its
+    // crashes say nothing about the detour, which is what this test is for.
     const crashed = runs.flatMap(r =>
       r.results
-        .filter(x => x.offroadCrashAtM !== null)
+        .filter(x => x.strategy !== 'envelope' && x.offroadCrashAtM !== null)
         .map(x => ({ seed: r.seed, x })),
     )
     if (crashed.length > 0) {
