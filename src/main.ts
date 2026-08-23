@@ -17,6 +17,7 @@ import {
 import { CANVAS_SCALE, GAME_HEIGHT, GAME_WIDTH, SCANLINE_ALPHA, CRT_CURVE_INTENSITY } from './config.ts'
 import { createDriveScene } from './scenes/drive.ts'
 import { createGameOverScene } from './scenes/gameover.ts'
+import { createIntroScene } from './scenes/intro.ts'
 import { roadSeedFromSearch } from './game/seed.ts'
 import {
   contourEnabledFromSearch, glowSettingsFromSearch,
@@ -75,14 +76,17 @@ function bootGame(): void {
   // Read once at boot: the route must not change under the player at midnight.
   const gameSeed = roadSeedFromSearch(window.location.search)
 
-  function startDrive() {
+  function startDrive(): void {
     const drive = createDriveScene((stats) => {
       replaceScene(scenes, createGameOverScene(stats))
     }, gameSeed)
-    pushScene(scenes, drive)
+    replaceScene(scenes, drive)
   }
 
-  startDrive()
+  const loadingScreen = new Image(GAME_WIDTH, GAME_HEIGHT)
+  loadingScreen.decoding = 'sync'
+  loadingScreen.src = new URL('./assets/icehaul-loading.png', import.meta.url).href
+  pushScene(scenes, createIntroScene(startDrive, loadingScreen))
 
   let last = performance.now()
   function frame(now: number) {
