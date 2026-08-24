@@ -19,6 +19,7 @@ import { createDriveScene } from './scenes/drive.ts'
 import { createGameOverScene } from './scenes/gameover.ts'
 import { createIntroScene } from './scenes/intro.ts'
 import { roadSeedFromSearch } from './game/seed.ts'
+import { loadPrefs } from './game/prefs.ts'
 import {
   contourEnabledFromSearch, glowSettingsFromSearch,
   drawTrafficMatrix, isMatrixRequested, matrixLayoutFor, matrixOptionsFromSearch,
@@ -28,14 +29,15 @@ import { renderPendingLampGlow, setGlowSettings } from './render/vehicleGlow.ts'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 
-// ?outline=0 — draw traffic without its dark outline and contact shadow, so the
-// two can be compared on identical frames. Read before anything renders, and it
-// applies to the contact sheet as well as to the game.
+// ?outline=0 and ?glow=0 — the two render switches, settled before anything
+// reaches the glass.
+//
+// The contact sheet reads them straight from the URL and never from storage. It
+// exists to be compared against another run of itself, so an absent switch has to
+// mean *the default*, not "whatever this machine last saved". The game takes the
+// same two switches through `loadPrefs()` instead, where the player's choice is
+// remembered and the URL still overrides it for an A/B run.
 setContourEnabled(contourEnabledFromSearch(window.location.search))
-
-// ?glow=0 / ?glow=0.35 — the lamp bloom, off or at a chosen strength. Same
-// reason and the same place: both switches exist to be compared, and both have
-// to be settled before the first frame reaches the glass.
 setGlowSettings(glowSettingsFromSearch(window.location.search))
 
 // ?matrix=1 — the traffic contact sheet, not the game. Renders one static image
@@ -64,8 +66,15 @@ function bootGame(): void {
 
   initInput()
 
+  // Stored choices first, URL last — see the note at the top of this file.
+  const prefs = loadPrefs(window.location.search)
+
+  // Browsers refuse an AudioContext before a gesture, so the master volume cannot
+  // be set until the player touches something. `setMasterVolume` is a no-op until
+  // then, which is why the saved value has to be handed to `initAudio` here rather
+  // than applied earlier and hoped for.
   window.addEventListener('keydown', () => {
-    initAudio(0.3)
+    initAudio(prefs.volume)
     resumeAudio()
   }, { once: true })
 
@@ -83,10 +92,7 @@ function bootGame(): void {
     replaceScene(scenes, drive)
   }
 
-  const loadingScreen = new Image(GAME_WIDTH, GAME_HEIGHT)
-  loadingScreen.decoding = 'sync'
-  loadingScreen.src = new URL('./assets/icehaul-loading.png', import.meta.url).href
-  pushScene(scenes, createIntroScene(startDrive, loadingScreen))
+  pushScene(scenes, createIntroScene(startDrive))
 
   let last = performance.now()
   function frame(now: number) {
