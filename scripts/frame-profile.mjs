@@ -46,7 +46,10 @@ try {
   await page.goto(BASE, { waitUntil: 'networkidle0' })
   await page.evaluate(() => new Promise(r => setTimeout(r, 800)))
 
-  // Crank the engine (hold ENTER), then hold the throttle so the road moves.
+  // Dismiss the loading screen, then crank with a separate held ENTER so the
+  // profile starts in the same state as a real run.
+  await page.keyboard.press('Enter')
+  await page.evaluate(() => new Promise(r => setTimeout(r, 150)))
   await page.keyboard.down('Enter')
   await page.evaluate(() => new Promise(r => setTimeout(r, 2200)))
   await page.keyboard.up('Enter')

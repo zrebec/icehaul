@@ -9,13 +9,9 @@
  * first non-asphalt segment at START_ASPHALT_M = 1000 m. Capturing ice or a
  * surface transition would need clutch + upshift automation.
  *
- * ── Why the ignition is not a keypress ──────────────────────────────────────
- * This script used to send `keyboard.press('Enter')`, a tap. Starting the engine
- * needs ENTER *held* for CRANK_NEEDED_MS, so the capture was always of a stalled
- * truck parked at the start line — and it looked plausible, which is what made it
- * a trap rather than a bug. Hence the hold below, and the movement assertion at
- * the end: a screenshot of a stationary truck is now a hard failure, not a
- * quietly wrong PNG.
+ * The first Enter tap dismisses the loading screen. Ignition is deliberately a
+ * separate held Enter: starting the engine needs CRANK_NEEDED_MS, and combining
+ * the two inputs would make the harness depend on scene-transition timing.
  *
  * Usage: node scripts/drive-shot.mjs [out.png] [holdSeconds]
  */
@@ -78,6 +74,10 @@ try {
   await page.goto(URL, { waitUntil: 'networkidle0' })
   await page.click('canvas#game') // unlocks the audio context
   await sleep(500)
+
+  // Loading screen: one edge-triggered Enter press.
+  await page.keyboard.press('Enter')
+  await sleep(150)
 
   // Ignition: hold, do not tap. drive.ts needs both the keydown edge and a
   // sustained isHeld('Enter') from zx-kit's input map, which a real key gives.
