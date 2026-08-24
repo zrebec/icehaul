@@ -1,3 +1,10 @@
+# [0.16.0](https://github.com/zrebec/icehaul/compare/v0.15.0...v0.16.0) (2026-08-24)
+
+
+### Features
+
+* **scene:** title menu on a native .scr loading screen ([#58](https://github.com/zrebec/icehaul/issues/58)) ([5f57a60](https://github.com/zrebec/icehaul/commit/5f57a6041a1d98f9a1207e48c1d38f5af989c22e))
+
 # [0.15.0](https://github.com/zrebec/icehaul/compare/v0.14.0...v0.15.0) (2026-08-19)
 
 
