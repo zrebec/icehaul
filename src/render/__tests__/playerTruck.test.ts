@@ -254,3 +254,112 @@ describe('player road-train collision and anchors', () => {
     expect(PLAYER_TRUCK_W - left[1]!.dx).toBeCloseTo(right[0]!.dx)
   })
 })
+
+// ── Articulation driven by lateral velocity ──────────────────────────────────
+
+/**
+ * The steering target is now `v.vx / MAX_LATERAL_V`, so these tests speak in the
+ * same units the game does. Lateral velocity is undamped while a steering key is
+ * held, integrating at `STEER_ACCEL * speedSteerFactor` until it saturates.
+ */
+const MAX_LATERAL_V = 2.5
+const STEER_ACCEL = 3.2
+const SPEED_STEER_PENALTY = 0.6
+const MAX_SPEED = 120
+
+/** Holds a steering key at `kmh` and returns the pose after `ms`. */
+function holdSteer(kmh: number, ms: number, stepMs = 1000 / 60) {
+  const state = createPlayerTruckArticulation()
+  const rate = STEER_ACCEL * (1 - (kmh / MAX_SPEED) * SPEED_STEER_PENALTY)
+  let vx = 0
+  for (let t = 0; t < ms; t += stepMs) {
+    vx = Math.min(MAX_LATERAL_V, vx + rate * (stepMs / 1000))
+    updatePlayerTruckArticulation(state, vx / MAX_LATERAL_V, stepMs)
+  }
+  return state
+}
+
+describe('articulation — onset', () => {
+  it('no longer reveals the cab within two frames of the input', () => {
+    // The old key-driven yaw crossed the first threshold in 29 ms; lateral
+    // velocity has barely moved by then.
+    expect(holdSteer(90, 33).cabAngle).toBe(0)
+  })
+
+  it('reaches the first pose in a few hundred milliseconds instead', () => {
+    expect(holdSteer(90, 250).cabAngle).toBe(0)
+    expect(holdSteer(90, 500).cabAngle).toBeGreaterThanOrEqual(1)
+  })
+
+  it('reaches full lock only after about a second of steering', () => {
+    expect(holdSteer(90, 700).cabAngle).toBeLessThan(2)
+    expect(holdSteer(90, 1600).cabAngle).toBe(2)
+  })
+
+  it('articulates less at speed, because the steering penalty allows less', () => {
+    // Same time held, different speeds: the fast truck cannot turn as hard.
+    // At 40 km/h lateral velocity has saturated by now; at 120 it is still short
+    // of the second threshold, because the speed penalty halves the steering rate.
+    const slow = holdSteer(40, 1200).cabAngle
+    const fast = holdSteer(120, 1200).cabAngle
+    expect(slow).toBeGreaterThan(fast)
+  })
+})
+
+describe('articulation — the middle poses are actually used', () => {
+  it('rests in every pose on the way to full lock', () => {
+    const seen = new Set<number>()
+    const state = createPlayerTruckArticulation()
+    const rate = STEER_ACCEL * (1 - (90 / MAX_SPEED) * SPEED_STEER_PENALTY)
+    let vx = 0
+    for (let t = 0; t < 2000; t += 1000 / 60) {
+      vx = Math.min(MAX_LATERAL_V, vx + rate / 60)
+      updatePlayerTruckArticulation(state, vx / MAX_LATERAL_V, 1000 / 60)
+      seen.add(state.cabAngle)
+    }
+    // Straight, both intermediate steps, and full lock.
+    expect([...seen].sort()).toEqual([0, 1, 2])
+  })
+
+  it('the trailer lags the cab rather than matching it', () => {
+    const state = holdSteer(90, 600)
+    expect(state.trailerAngle).toBeLessThanOrEqual(state.cabAngle)
+  })
+
+  it('shows a slide the player did not steer into', () => {
+    // Curve drift adds lateral velocity with no input at all; the cab reports it.
+    const state = createPlayerTruckArticulation()
+    for (let i = 0; i < 90; i++) updatePlayerTruckArticulation(state, -1.9 / MAX_LATERAL_V, 1000 / 60)
+    expect(state.cabAngle).toBeLessThan(0)
+  })
+})
+
+describe('quantizeTruckAngle — hysteresis', () => {
+  it('matches the raw quantisation when no previous pose is given', () => {
+    expect(quantizeTruckAngle(0)).toBe(0)
+    expect(quantizeTruckAngle(0.3)).toBe(1)
+    expect(quantizeTruckAngle(-0.9)).toBe(-2)
+  })
+
+  it('holds the current pose while the yaw sits on a boundary', () => {
+    // 0.25 is the 0 -> 1 threshold; neither side may win from a hair either way.
+    expect(quantizeTruckAngle(0.26, 0)).toBe(0)
+    expect(quantizeTruckAngle(0.24, 1)).toBe(1)
+  })
+
+  it('changes pose once the yaw is clear of the boundary', () => {
+    expect(quantizeTruckAngle(0.32, 0)).toBe(1)
+    expect(quantizeTruckAngle(0.18, 1)).toBe(0)
+  })
+
+  it('does not flicker when the yaw oscillates across a threshold', () => {
+    let pose = quantizeTruckAngle(0.26, 0)
+    for (const yaw of [0.26, 0.24, 0.27, 0.23, 0.26]) pose = quantizeTruckAngle(yaw, pose)
+    expect(pose).toBe(0)
+  })
+
+  it('still allows a jump of two poses when the yaw really moves', () => {
+    expect(quantizeTruckAngle(1, -2)).toBe(2)
+    expect(quantizeTruckAngle(-1, 2)).toBe(-2)
+  })
+})

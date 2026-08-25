@@ -16,6 +16,7 @@ import {
   TRAFFIC_COLLISION_DEPTH_M,
   CRANK_NEEDED_MS, CANISTER_TIME_BONUS_S,
   TRUCK_WEIGHT_T, TRUCK_WEIGHTS_T,
+  MAX_LATERAL_V,
 } from '../config.ts'
 import {
   createVehicle, tickVehicle, massAccelMult,
@@ -298,7 +299,14 @@ export function createDriveScene(
 
       // The tractor reacts first and the trailer follows. The quantised pose is
       // shared by drawing, particles and both collision paths this frame.
-      const steeringTarget = (isHeld('ArrowRight') ? 1 : 0) - (isHeld('ArrowLeft') ? 1 : 0)
+      //
+      // Driven by lateral velocity, not by the arrow key. The key says what was
+      // asked for; `v.vx` says what the truck is doing about it — which is what a
+      // cab angle means. It also comes free of charge with everything the physics
+      // already knows: a gentle correction at speed reads as a small angle, a hard
+      // turn at forty as a full one, and a slide on ice shows on the cab because
+      // the truck really is going sideways.
+      const steeringTarget = v.vx / MAX_LATERAL_V
       updatePlayerTruckArticulation(truckArticulation, steeringTarget, dt)
       const truckCollisionMask = getPlayerTruckCollisionMask(truckArticulation)
       const truckRoadMask = getPlayerTruckRoadMask(truckArticulation)
