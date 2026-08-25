@@ -590,6 +590,7 @@ export function createDriveScene(
           canisters: canistersCollected,
           score: score.points,
           reason,
+          seed: gameSeed,
         })
       }
     },
