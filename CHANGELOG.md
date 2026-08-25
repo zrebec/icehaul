@@ -1,3 +1,10 @@
+# [0.17.0](https://github.com/zrebec/icehaul/compare/v0.16.0...v0.17.0) (2026-08-25)
+
+
+### Features
+
+* **player:** add articulated road-train sprite ([#59](https://github.com/zrebec/icehaul/issues/59)) ([fa31f92](https://github.com/zrebec/icehaul/commit/fa31f92873e0368f45dbbd05a2f43df0e23b15b3))
+
 # [0.16.0](https://github.com/zrebec/icehaul/compare/v0.15.0...v0.16.0) (2026-08-24)
 
 
