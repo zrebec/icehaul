@@ -1,3 +1,10 @@
+# [0.20.0](https://github.com/zrebec/icehaul/compare/v0.19.0...v0.20.0) (2026-08-25)
+
+
+### Features
+
+* **vehicle:** let gross weight reach the steering ([#64](https://github.com/zrebec/icehaul/issues/64)) ([1d3356a](https://github.com/zrebec/icehaul/commit/1d3356af111d3409b4d3e345c1e8364b62b9aa84))
+
 # [0.19.0](https://github.com/zrebec/icehaul/compare/v0.18.0...v0.19.0) (2026-08-25)
 
 
