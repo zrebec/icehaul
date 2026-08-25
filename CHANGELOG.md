@@ -1,3 +1,10 @@
+# [0.19.0](https://github.com/zrebec/icehaul/compare/v0.18.0...v0.19.0) (2026-08-25)
+
+
+### Features
+
+* **player:** drive cab articulation from lateral velocity ([#63](https://github.com/zrebec/icehaul/issues/63)) ([061b895](https://github.com/zrebec/icehaul/commit/061b895353f1a9d759bcd835a413f39c67dab34a))
+
 # [0.18.0](https://github.com/zrebec/icehaul/compare/v0.17.1...v0.18.0) (2026-08-25)
 
 
