@@ -1,5 +1,5 @@
-import { bitmapPixelMask } from 'zx-kit'
-import { TRUCK_COLLISION_BMP } from '../render/truck.ts'
+import { bitmapPixelMask, type PixelMask } from 'zx-kit'
+import { TRUCK_COLLISION_BMP, TRUCK_ROAD_MASK } from '../render/truck.ts'
 import type { ScanlineEdges } from './roadgeometry.ts'
 
 export interface OffroadResult {
@@ -12,24 +12,26 @@ export interface OffroadResult {
   marginRight: number
 }
 
-const TRUCK_PIXEL_MASK = bitmapPixelMask(TRUCK_COLLISION_BMP)
+const DEFAULT_TRUCK_PIXEL_MASK = TRUCK_ROAD_MASK
+const DEFAULT_TRAFFIC_PIXEL_MASK = bitmapPixelMask(TRUCK_COLLISION_BMP)
 
 export function checkTruckOffroad(
   truckDrawX: number,
   truckDrawY: number,
   getEdges: (screenY: number) => ScanlineEdges | undefined,
+  truckPixelMask: PixelMask = DEFAULT_TRUCK_PIXEL_MASK,
 ): OffroadResult {
   let leftOff = 0
   let rightOff = 0
   let minMarginLeft = Infinity
   let minMarginRight = Infinity
 
-  for (let row = 0; row < TRUCK_PIXEL_MASK.height; row++) {
+  for (let row = 0; row < truckPixelMask.height; row++) {
     const screenY = truckDrawY + row
     const edges = getEdges(screenY)
     if (!edges) continue
 
-    const maskRow = TRUCK_PIXEL_MASK.rows[row]!
+    const maskRow = truckPixelMask.rows[row]!
     if (maskRow.length === 0) continue
 
     const outerLeft = edges.leftRoad - edges.kerbW
@@ -55,8 +57,8 @@ export function checkTruckOffroad(
   const offRoadPixels = leftOff + rightOff
   return {
     offRoadPixels,
-    totalPixels: TRUCK_PIXEL_MASK.totalPixels,
-    severity: offRoadPixels > 0 ? offRoadPixels / TRUCK_PIXEL_MASK.totalPixels : 0,
+    totalPixels: truckPixelMask.totalPixels,
+    severity: offRoadPixels > 0 ? offRoadPixels / truckPixelMask.totalPixels : 0,
     leftOff,
     rightOff,
     marginLeft: minMarginLeft,
@@ -84,6 +86,7 @@ export function checkTruckTrafficCollision(
   trafficLeft: number, trafficTop: number,
   trafficW: number, trafficH: number,
   trafficRaster?: readonly string[],
+  truckPixelMask: PixelMask = DEFAULT_TRAFFIC_PIXEL_MASK,
 ): boolean {
   if (trafficW <= 0 || trafficH <= 0) return false
 
@@ -91,11 +94,11 @@ export function checkTruckTrafficCollision(
   const trafficBottom = trafficTop  + trafficH
   const useTrafficMask = (trafficRaster?.length ?? 0) > 0
 
-  for (let row = 0; row < TRUCK_PIXEL_MASK.height; row++) {
+  for (let row = 0; row < truckPixelMask.height; row++) {
     const screenY = truckDrawY + row
     if (screenY < trafficTop || screenY >= trafficBottom) continue
 
-    const maskRow = TRUCK_PIXEL_MASK.rows[row]!
+    const maskRow = truckPixelMask.rows[row]!
     if (maskRow.length === 0) continue
 
     // Quick horizontal reject before per-pixel scan

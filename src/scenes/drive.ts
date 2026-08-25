@@ -26,7 +26,17 @@ import {
   drawRoad, drawStarField, drawCanisters, drawRoadsideObjects, drawTraffic,
   projectTrafficVehicle,
 } from '../render/road3d.ts'
-import { drawTruck, pushTruckLampSpots, TRUCK_BMP_H, TRUCK_BMP_W } from '../render/truck.ts'
+import {
+  createPlayerTruckArticulation,
+  drawPlayerTruck,
+  getPlayerTruckCollisionMask,
+  getPlayerTruckRoadMask,
+  getPlayerTruckWheelPositions,
+  playerTruckOrigin,
+  pushPlayerTruckLampSpots,
+  updatePlayerTruckArticulation,
+  type PlayerTruckPoint,
+} from '../render/sprites/playerTruck.ts'
 import { clearPendingGlow, pendingGlow } from '../render/vehicleGlow.ts'
 import { drawHUD } from '../render/hud.ts'
 import { drawTopBar } from '../render/topbar.ts'
@@ -54,6 +64,7 @@ function emitWheelSpray(
   particles: ParticleSystem,
   truckDrawX: number,
   truckDrawY: number,
+  wheelPositions: readonly PlayerTruckPoint[],
   lateralV: number,
   count: number,
   color: readonly SpectrumColor[],
@@ -64,23 +75,17 @@ function emitWheelSpray(
   if (count <= 0) return
 
   const sideBias = Math.max(-0.45, Math.min(0.45, lateralV * 0.22))
-  const leftCount = Math.ceil(count / 2)
-  const rightCount = count - leftCount
-  const wheels = [
-    { x: truckDrawX + Math.round(TRUCK_BMP_W * 0.18), count: leftCount, angle: -Math.PI * 0.78 + sideBias },
-    { x: truckDrawX + Math.round(TRUCK_BMP_W * 0.82), count: rightCount, angle: -Math.PI * 0.22 + sideBias },
-  ] as const
-
-  for (const wheel of wheels) {
-    const wheelCount = wheel.count
+  for (let index = 0; index < wheelPositions.length; index++) {
+    const wheel = wheelPositions[index]!
+    const wheelCount = index === 0 ? Math.ceil(count / 2) : Math.floor(count / 2)
     if (wheelCount <= 0) continue
     emitParticles(particles, {
-      x: wheel.x,
-      y: truckDrawY + Math.round(TRUCK_BMP_H * 0.85),
+      x: truckDrawX + wheel.dx,
+      y: truckDrawY + wheel.dy,
       count: wheelCount,
       color,
       speed,
-      angle: wheel.angle,
+      angle: (index === 0 ? -Math.PI * 0.78 : -Math.PI * 0.22) + sideBias,
       spread: Math.PI * 0.7,
       life,
       size,
@@ -95,6 +100,7 @@ export function createDriveScene(
   gameSeed: number,
 ): Scene {
   const v: Vehicle = createVehicle()
+  const truckArticulation = createPlayerTruckArticulation()
   let elapsedMs = 0
   const score = createScore()
   let blinkPhase = true
@@ -289,12 +295,21 @@ export function createDriveScene(
         else { crankMs = 0; lastCrankBeepMs = 0 }
       }
 
+      // The tractor reacts first and the trailer follows. The quantised pose is
+      // shared by drawing, particles and both collision paths this frame.
+      const steeringTarget = (isHeld('ArrowRight') ? 1 : 0) - (isHeld('ArrowLeft') ? 1 : 0)
+      updatePlayerTruckArticulation(truckArticulation, steeringTarget, dt)
+      const truckCollisionMask = getPlayerTruckCollisionMask(truckArticulation)
+      const truckRoadMask = getPlayerTruckRoadMask(truckArticulation)
+      const truckWheelPositions = getPlayerTruckWheelPositions(truckArticulation)
+
       // ── Pixel-perfect off-road detection (before physics tick) ──
       const truckScreenX = GAME_WIDTH / 2 + v.x * 50
-      const truckDrawX = Math.round(truckScreenX - TRUCK_BMP_W / 2 + (-v.vx * 1.5))
-      const truckDrawY = Math.round(VIEWPORT_BOTTOM - 2 - TRUCK_BMP_H)
+      const truckOrigin = playerTruckOrigin(truckScreenX, VIEWPORT_BOTTOM - 2, -v.vx * 1.5)
+      const truckDrawX = truckOrigin.x
+      const truckDrawY = truckOrigin.y
       const edgesLookup = computeRoadEdges(v.distance, v.x, (d) => getCurvatureAt(d))
-      lastOffroad = checkTruckOffroad(truckDrawX, truckDrawY, edgesLookup)
+      lastOffroad = checkTruckOffroad(truckDrawX, truckDrawY, edgesLookup, truckRoadMask)
 
       let offroadReturnDir = 0
       if (lastOffroad.severity > 0) {
@@ -388,6 +403,7 @@ export function createDriveScene(
           truckDrawX, truckDrawY,
           projected.left, projected.top, projected.w, projected.h,
           projected.raster,
+          truckCollisionMask,
         )) {
           startCrash('crash')
           return
@@ -409,7 +425,7 @@ export function createDriveScene(
         const count = Math.floor(snowSprayAccum)
         snowSprayAccum -= count
         emitWheelSpray(
-          surfaceParticles, truckDrawX, truckDrawY, v.vx, count,
+          surfaceParticles, truckDrawX, truckDrawY, truckWheelPositions, v.vx, count,
           [C.CYAN, C.B_CYAN, C.B_WHITE],
           [0.07, 0.2],
           [360, 850],
@@ -421,7 +437,7 @@ export function createDriveScene(
         const count = Math.floor(skidSprayAccum)
         skidSprayAccum -= count
         emitWheelSpray(
-          surfaceParticles, truckDrawX, truckDrawY, v.vx, count,
+          surfaceParticles, truckDrawX, truckDrawY, truckWheelPositions, v.vx, count,
           surface === 'ice' ? [C.B_CYAN, C.B_WHITE, C.B_YELLOW] : [C.B_WHITE, C.B_YELLOW],
           [0.13, 0.34],
           [180, 420],
@@ -434,7 +450,7 @@ export function createDriveScene(
         const count = Math.floor(snowSprayAccum)
         snowSprayAccum -= count
         emitWheelSpray(
-          surfaceParticles, truckDrawX, truckDrawY, v.vx, count,
+          surfaceParticles, truckDrawX, truckDrawY, truckWheelPositions, v.vx, count,
           surface === 'sand' ? [C.YELLOW, C.B_YELLOW, C.WHITE] : [C.RED, C.B_RED, C.YELLOW],
           [0.045, 0.16],
           [300, 700],
@@ -603,20 +619,23 @@ export function createDriveScene(
         shakeX = ((hash(tick) * 8) | 0) - 4
         shakeY = ((hash(tick + 7) * 4) | 0) - 2
       }
-      const steerDir: -1 | 0 | 1 = v.vx < -0.1 ? -1 : v.vx > 0.1 ? 1 : 0
       // The brake reaches the sprite as well as the glow: the lamps go BRIGHT in
       // the framebuffer, so it reads with `?glow=0` too. Only while actually
       // driving — a paused or crashing frame is not the player standing on the
       // pedal. The stalled engine is deliberately not a condition: pressing the
       // brake lights the lamps whether or not the engine is running.
       const brakeLightsOn = driveState === 'playing' && braking
-      drawTruck(ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5, steerDir, brakeLightsOn)
+      drawPlayerTruck(
+        ctx, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY,
+        truckArticulation, brakeLightsOn, -v.vx * 1.5,
+      )
 
       // The truck's own lamps are dead metal while the engine is out — a stalled
       // truck on the ice is exactly the moment the game should stop reassuring.
       if (driveState === 'playing' && !v.stalled) {
-        pushTruckLampSpots(
-          glowSpots, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY, -v.vx * 1.5, steerDir, braking,
+        pushPlayerTruckLampSpots(
+          glowSpots, truckX + shakeX, VIEWPORT_BOTTOM - 2 + shakeY,
+          truckArticulation, braking, -v.vx * 1.5,
         )
       }
       // Nothing is blitted here. The lights are handed to `main.ts`, which lays
