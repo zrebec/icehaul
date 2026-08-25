@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { createVehicle, tickVehicle, massAccelMult, massBrakeMult, massStallMult, MAX_SPEED, type Vehicle, type VehicleInput } from '../vehicle.ts'
+import {
+  createVehicle, tickVehicle,
+  massAccelMult, massBrakeMult, massStallMult, massSteerMult,
+  MAX_SPEED,
+  type Vehicle, type VehicleInput,
+} from '../vehicle.ts'
 import {
   STALL_GRACE_MS, REDLINE_BURN_MS, REDLINE_WARN_DELAY_MS, REDLINE_RPM,
   GEAR_COUNT, REFERENCE_MASS_T, CLUTCH_IDLE_RPM, CLUTCH_GOVERNOR_RPM,
   CLUTCH_REV_RESPONSE, GEARS,
+  STEER_ACCEL, SPEED_STEER_PENALTY,
 } from '../../config.ts'
 
 const noInput: VehicleInput = { throttle: false, brake: false, steerLeft: false, steerRight: false }
@@ -671,5 +677,101 @@ describe('tickVehicle — clutch', () => {
     tickVehicle(v, clutchIn(), 'asphalt', 1.0, 1.0, STALL_GRACE_MS * 3)
     expect(v.stalled).toBe(false)
     expect(v.stallWarnMs).toBe(0)
+  })
+})
+
+// ── massSteerMult ────────────────────────────────────────────────────────────
+
+describe('massSteerMult', () => {
+  it('leaves the reference truck exactly as it was', () => {
+    expect(massSteerMult(REFERENCE_MASS_T)).toBe(1)
+  })
+
+  it('is softer than the acceleration and brake multipliers, on purpose', () => {
+    // Those are reference/mass; cornering is grip-limited in the steady state, so
+    // the honest answer sits between 1 and that. Anything as harsh would be wrong.
+    for (const massT of [10, 30, 40]) {
+      const steer = massSteerMult(massT)
+      const accel = massAccelMult(massT)
+      expect(Math.abs(steer - 1)).toBeLessThan(Math.abs(accel - 1))
+    }
+  })
+
+  it('slows a heavy truck and quickens a light one', () => {
+    expect(massSteerMult(10)).toBeCloseTo(1.414, 3)
+    expect(massSteerMult(30)).toBeCloseTo(0.816, 3)
+    expect(massSteerMult(40)).toBeCloseTo(0.707, 3)
+  })
+
+  it('is monotonic across the whole plausible range', () => {
+    let previous = Infinity
+    for (let massT = 5; massT <= 60; massT += 5) {
+      const m = massSteerMult(massT)
+      expect(m).toBeLessThan(previous)
+      previous = m
+    }
+  })
+
+  it('is the geometric mean of no effect and full inverse mass', () => {
+    for (const massT of [10, 15, 30, 40]) {
+      expect(massSteerMult(massT)).toBeCloseTo(Math.sqrt(1 * massAccelMult(massT)), 10)
+    }
+  })
+})
+
+describe('mass in the lateral tick', () => {
+  /** Holds a steer for `ms` at the given weight and returns the lateral velocity. */
+  function steerFor(massT: number, ms: number) {
+    const v = createVehicle()
+    v.speed = 90
+    v.gear = 5
+    const step = 1000 / 60
+    for (let t = 0; t < ms; t += step) {
+      tickVehicle(v, { throttle: false, brake: false, steerLeft: false, steerRight: true },
+        'asphalt', 1.0, 1.0, step, 0, 0, 0, massT)
+    }
+    return Math.abs(v.vx)
+  }
+
+  it('builds lateral velocity more slowly under load', () => {
+    const light = steerFor(10, 600)
+    const reference = steerFor(20, 600)
+    const heavy = steerFor(30, 600)
+    expect(light).toBeGreaterThan(reference)
+    expect(reference).toBeGreaterThan(heavy)
+  })
+
+  it('leaves the 20 t reference truck unchanged', () => {
+    // The whole point of a reference mass: today's feel must survive the change.
+    const v = createVehicle()
+    v.speed = 90
+    v.gear = 5
+    const step = 1000 / 60
+    tickVehicle(v, { throttle: false, brake: false, steerLeft: false, steerRight: true },
+      'asphalt', 1.0, 1.0, step, 0, 0, 0, REFERENCE_MASS_T)
+    const expected = STEER_ACCEL * (1 - (90 / MAX_SPEED) * SPEED_STEER_PENALTY) * (step / 1000)
+    expect(v.vx).toBeCloseTo(expected, 6)
+  })
+
+  it('still lets a heavy truck reach the same lateral speed, only later', () => {
+    // Mass slows the build-up; it does not lower the grip-limited ceiling.
+    expect(steerFor(40, 4000)).toBeCloseTo(steerFor(20, 4000), 6)
+  })
+
+  it('straightens more slowly under load as well', () => {
+    function settleFrom(massT: number) {
+      const v = createVehicle()
+      v.speed = 90
+      v.gear = 5
+      v.vx = 2
+      for (let t = 0; t < 300; t += 1000 / 60) {
+        tickVehicle(v, { throttle: false, brake: false, steerLeft: false, steerRight: false },
+          'asphalt', 1.0, 1.0, 1000 / 60, 0, 0, 0, massT)
+      }
+      return v.vx
+    }
+    // A loaded truck is as slow to come back as it was to go out.
+    expect(settleFrom(40)).toBeGreaterThan(settleFrom(20))
+    expect(settleFrom(20)).toBeGreaterThan(settleFrom(10))
   })
 })

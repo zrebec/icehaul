@@ -99,6 +99,47 @@ export function massStallMult(massT: number, referenceMassT = REFERENCE_MASS_T):
   return referenceMassT / massT
 }
 
+/**
+ * Mass-based steering multiplier — deliberately **softer** than the other three.
+ *
+ * The others are a straight `reference / mass`, because engine pull and brake
+ * force are what they are and a heavier truck simply gets less acceleration out
+ * of them. Cornering does not work that way, and copying the same formula here
+ * would have been the wrong physics twice over.
+ *
+ * In steady cornering the tyre force available is roughly `mu * m * g`, so the
+ * lateral acceleration is `mu * g` — **the mass cancels**. A loaded truck does not
+ * corner slower for being loaded; it corners slower because its centre of gravity
+ * would tip it first. In the transient, mass does matter: yaw inertia rises with
+ * load, so the truck takes longer to *rotate into* the turn and longer to settle
+ * out of it.
+ *
+ * This game has one lateral term doing both jobs at once, so the honest multiplier
+ * sits between the two answers — 1.0 for the grip-limited part, `reference / mass`
+ * for the inertia-limited part. Their geometric mean is the square root, which is
+ * what this returns:
+ *
+ * | Gross weight | Multiplier | What it feels like |
+ * |-------------:|-----------:|--------------------|
+ * | 10 t | 1.41 | An empty cab turns in noticeably quicker |
+ * | 20 t | 1.00 | The reference — today's feel, unchanged |
+ * | 30 t | 0.82 | Takes about a fifth longer to load up a corner |
+ * | 40 t | 0.71 | Has to be aimed a corner early |
+ *
+ * Applied to **both** the steering rate and the damping, so a heavy truck is slow
+ * to start turning *and* slow to straighten. One function rather than two because
+ * the same argument covers both terms; splitting them later is trivial if a
+ * playtest ever wants them apart.
+ *
+ * Deliberately **not** applied to `MAX_LATERAL_V`: how fast a truck can slide
+ * sideways once it is sliding is a grip limit, and mass genuinely cancels there.
+ *
+ * Pure → unit-testable. Threaded into {@link tickVehicle} via the `massT` param.
+ */
+export function massSteerMult(massT: number, referenceMassT = REFERENCE_MASS_T): number {
+  return Math.sqrt(referenceMassT / massT)
+}
+
 export interface Vehicle {
   x: number
   vx: number
@@ -465,14 +506,21 @@ export function tickVehicle(
 
   // Steering input — uses steeringGrip so the player always has agency
   // proportional to base surface grip. On ice it is weak (grip=0.25) but present.
+  //
+  // The mass term is what stops a 40 t load cornering like a 10 t one. It scales
+  // how quickly lateral velocity builds, not how much of it is available: see
+  // massSteerMult for why that is the right half of the physics to slow down.
   const speedSteerFactor = 1 - speedRatio * SPEED_STEER_PENALTY
-  if (input.steerLeft)  v.vx -= STEER_ACCEL * steeringGrip * speedSteerFactor * dt
-  if (input.steerRight) v.vx += STEER_ACCEL * steeringGrip * speedSteerFactor * dt
+  const steerMass = massSteerMult(massT)
+  if (input.steerLeft)  v.vx -= STEER_ACCEL * steeringGrip * speedSteerFactor * steerMass * dt
+  if (input.steerRight) v.vx += STEER_ACCEL * steeringGrip * speedSteerFactor * steerMass * dt
 
-  // Damping — uses effectiveGrip: past the slip peak, drift persists (ice doesn't forgive)
+  // Damping — uses effectiveGrip: past the slip peak, drift persists (ice doesn't forgive).
+  // The same mass term applies: a loaded truck is as slow to straighten as it was
+  // to turn, which is the half of the feel a pure acceleration penalty would miss.
   if (!input.steerLeft && !input.steerRight) {
     const dampMult = SURFACE_STEER_DAMP_MULT[surface]
-    v.vx *= 1 - Math.min(1, STEER_DAMP * effectiveGrip * dampMult * dt)
+    v.vx *= 1 - Math.min(1, STEER_DAMP * effectiveGrip * dampMult * steerMass * dt)
   }
 
   v.vx = Math.max(-MAX_LATERAL_V, Math.min(MAX_LATERAL_V, v.vx))
