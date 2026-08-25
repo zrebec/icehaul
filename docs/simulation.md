@@ -5,7 +5,7 @@ Ako sa správa kamión a ako sa stretáva so svetom. Zlúčené z pôvodných
 rozdelená do dvoch súborov: pohon rozhoduje, ako rýchlo do niečoho vojdeš, a
 kolízie rozhodujú, čo sa vtedy stane.
 
-**Stav k 25. augusta 2026** (verzia 0.18.0). Konštanty overené proti kódu.
+**Stav k 25. augusta 2026** (verzia 0.20.0). Konštanty overené proti kódu.
 
 Sesterské dokumenty: [manual](manual.md) pre hráča · [grafika](graphics.md) ·
 [seedy](seeds.md) · [známe problémy](known-issues.md)
@@ -15,7 +15,7 @@ Sesterské dokumenty: [manual](manual.md) pre hráča · [grafika](graphics.md) 
 ## Obsah
 
 1. [Pohon: prevodovka, spojka, hmotnosť](#1-pohon)
-2. [Bočná dynamika a čo v nej chýba](#2-bočná-dynamika)
+2. [Bočná dynamika](#2-bočná-dynamika)
 3. [Kolízny model](#3-kolízny-model)
 4. [Konštanty](#konštanty)
 5. [Roadmap](#roadmap)
@@ -121,6 +121,13 @@ cargo/damage below.
 - **(a) Stall-ease (I2b):** `massStallMult(massT) = ref/massT` scales `STALL_GRACE_MS`. A 30 t
   load lugs to a stall in ~2.3 s vs the 20 t ~3.5 s; 10 t gets a forgiving ~7 s. 20 t unchanged,
   so the 20-seed completability sim is untouched.
+
+- **(c) Steering (0.20.0):** `massSteerMult(massT) = sqrt(ref/massT)` scales the steering rate
+  and the damping alike, inside `tickVehicle`. Deliberately **softer** than the three above:
+  they are `ref/mass` because engine and brake force are fixed and a heavier truck gets less
+  out of them, whereas steady cornering is grip-limited and the mass cancels there. One lateral
+  term does both the grip-limited and the inertia-limited job, so the honest multiplier is the
+  geometric mean. 20 t bit-identical, pinned by a test. See [Hmotnosť v riadení](#hmotnosť-v-riadení).
 
 **◻ DEFERRED — (a′) lug-zone widening (I2c):** make a heavier truck *lug at a higher rpm* (raise
 the effective `LUG_RPM` with mass), so the lug zone widens for heavy loads, not just the grace
@@ -326,20 +333,35 @@ každej zákrute.
 
 ## Model
 
-Bočný pohyb je systém prvého rádu:
-
 ```ts
-if (input.steerLeft)  v.vx -= STEER_ACCEL * steeringGrip * speedSteerFactor * dt
-if (input.steerRight) v.vx += STEER_ACCEL * steeringGrip * speedSteerFactor * dt
-v.vx *= 1 - Math.min(1, STEER_DAMP * effectiveGrip * dampMult * dt)
-v.vx  = clamp(v.vx, -MAX_LATERAL_V, MAX_LATERAL_V)
-v.x  += v.vx * (0.35 + v.speed / 220) * dt
+// Zatacanie — tlmenie sa NEuplatnuje, kym je klavesa drzana
+const speedSteerFactor = 1 - speedRatio * SPEED_STEER_PENALTY
+const steerMass = massSteerMult(massT)
+if (input.steerLeft)  v.vx -= STEER_ACCEL * steeringGrip * speedSteerFactor * steerMass * dt
+if (input.steerRight) v.vx += STEER_ACCEL * steeringGrip * speedSteerFactor * steerMass * dt
+
+// Tlmenie — az ked hrac pusti
+if (!input.steerLeft && !input.steerRight) {
+  v.vx *= 1 - Math.min(1, STEER_DAMP * effectiveGrip * dampMult * steerMass * dt)
+}
+
+v.vx = clamp(v.vx, -MAX_LATERAL_V, MAX_LATERAL_V)
+v.x += v.vx * (0.35 + v.speed / 220) * dt
 ```
 
-Z toho priamo vyplýva:
+**Detail, ktorý sa ľahko prehliadne a mení celý výpočet:** tlmenie je vnútri
+`if (!input.steerLeft && !input.steerRight)`. Kým držíš šípku, **netlmí sa nič**
+a `v.vx` sa integruje priamo až po `MAX_LATERAL_V`. Tlmenie je návrat do rovnováhy
+po pustení, nie protisila počas zatáčania.
 
-- časová konštanta **τ = 1 / STEER_DAMP = 200 ms**
-- ustálená bočná rýchlosť **v.vx = STEER_ACCEL / STEER_DAMP = 0,64** jednotky/s
+Z toho vyplýva:
+
+- počas zatáčania rastie `v.vx` **lineárne** rýchlosťou
+  `STEER_ACCEL · steeringGrip · speedSteerFactor · massSteerMult`
+- po pustení klesá s časovou konštantou `1 / (STEER_DAMP · grip · massSteerMult)`,
+  čo je 200 ms na suchom asfalte pri referenčných 20 t
+- `speedSteerFactor = 1 − speedRatio · SPEED_STEER_PENALTY`, takže pri 120 km/h
+  zatáčaš **40 %** silou oproti státiu
 
 ## Mierka
 
@@ -348,50 +370,88 @@ Jedna jednotka `v.x` je 50 px, teda **3,19 m** — zhruba jeden jazdný pruh.
 
 ## Čo z toho vychádza
 
-| Rýchlosť | Ustálená bočná rýchlosť | Počiatočné bočné zrýchlenie | Prejazd jedného pruhu |
-|---|---:|---:|---:|
-| 50 km/h | 1,18 m/s | 5,89 m/s² = **0,60 g** | 2,7 s |
-| 70 km/h | 1,36 m/s | 6,82 m/s² = **0,69 g** | 2,3 s |
-| 90 km/h | 1,55 m/s | 7,74 m/s² = **0,79 g** | 2,1 s |
+Pri 20 t na suchom asfalte:
+
+| Rýchlosť | speedSteerFactor | Rast `v.vx` | Čas do stropu | Bočné zrýchlenie |
+|---|---:|---:|---:|---:|
+| 40 km/h | 0,80 | 2,56 /s | 0,98 s | 4,34 m/s² = **0,44 g** |
+| 60 km/h | 0,70 | 2,24 /s | 1,12 s | 4,45 m/s² = **0,45 g** |
+| 90 km/h | 0,55 | 1,76 /s | 1,42 s | 4,26 m/s² = **0,43 g** |
+| 120 km/h | 0,40 | 1,28 /s | 1,95 s | 3,65 m/s² = **0,37 g** |
 
 ## Porovnanie so skutočným 20 t návesom
 
 | Veličina | Ice Haul | Skutočnosť |
 |---|---:|---|
-| Odozva riadenia (τ) | **200 ms** | 500–1000 ms |
-| Špičkové bočné zrýchlenie | **0,60–0,79 g** | **0,30–0,40 g** = prevrátenie |
+| Špičkové bočné zrýchlenie | **0,37–0,45 g** | **0,30–0,40 g** = prevrátenie |
 | Bežná zmena pruhu na diaľnici | — | 0,10–0,15 g |
-| Zmena pruhu pri 90 km/h | **2,1 s** | 3–5 s |
+| Čas na plné vytočenie | 1,0–2,0 s | rovnaký rád |
 
-Stroj je teda asi **2–2,5× hbitejší** než skutočný ložený náves a jeho špičkové
-bočné zrýchlenie je nad hranicou prevrátenia. Voči pretekárskym hrám to ťažké je;
-voči kamiónu nie.
+**Je to bližšie k pravde, než sa čakalo.** Špičkové bočné zrýchlenie sedí tesne
+nad hranicou, za ktorou by sa skutočný ložený náves prevrátil — čo je pre hru
+dobrá poloha: dosť rýchle, aby sa dalo hrať, dosť pomalé, aby ťažoba bola cítiť.
 
-**To nie je automaticky chyba.** Simulátor by bol na 256×192 s klávesnicou
-nehrateľný. Je to údaj o tom, kde stojíme, keď sa raz rozhodneme to posunúť.
+Zároveň to znamená, že **prevrátenie ako spôsob prehry by nastávalo prirodzene**,
+bez naťahovania konštánt: prah je `(rozchod / 2) / výška_ťažiska · g`, teda okolo
+0,30 g pri plnom náklade — a tam sa hra už dnes dostáva.
 
-## Diera, ktorá za to stojí: hmotnosť nie je v riadení
+> **Oprava.** Skoršia verzia tohto dokumentu uvádzala 0,60–0,79 g a záver, že
+> stroj je „2–2,5× hbitejší než skutočný náves". Bolo to zle a stálo to na dvoch
+> chybách naraz: výpočet vynechal `speedSteerFactor` a predpokladal, že tlmenie
+> beží aj počas zatáčania. Čísla vyššie sú prepočítané proti kódu.
 
-`TRUCK_WEIGHT_T` a `REFERENCE_MASS_T` existujú a fungujú tri násobiče —
-`massAccelMult`, `massBrakeMult`, `massStallMult`. **Všetky sú pozdĺžne.**
+## Hmotnosť v riadení
 
-V bočnej rovnici hmotnosť nefiguruje ani raz.
+Do 0.20.0 boli všetky tri hmotnostné násobiče — `massAccelMult`, `massBrakeMult`,
+`massStallMult` — **pozdĺžne**, takže 40 t kamión zatáčal presne ako 10 t. Presne
+tam, kde hráč hmotnosť čaká najviac.
 
-Dôsledok: keď príde vyberanie nákladu (presety pod klávesou `W` sú už pripravené
-v `settings/drivetrain.ts`), **40 t kamión bude zatáčať presne ako 10 t**. Rozdiel
-bude cítiť pri rozjazde a brzdení, ale nie v zákrute — teda presne tam, kde hráč
-hmotnosť čaká najviac.
+`massSteerMult` (0.20.0) to zatvára, a je **zámerne mäkší** než ostatné tri. Tie
+sú `referencia / hmotnosť`, lebo ťah motora a brzdná sila sú dané a ťažší stroj
+z nich dostane menej. **Zatáčanie tak nefunguje.**
 
-Náprava je jeden násobič navyše na každej strane rovnice:
+V ustálenej zákrute je dostupná sila pneumatiky zhruba `μ · m · g`, takže bočné
+zrýchlenie je `μ · g` — **hmotnosť sa vykráti**. Ložený kamión nezatáča pomalšie
+preto, že je ťažký; zatáča pomalšie preto, že by sa prevrátil skôr. V prechodovom
+deji hmotnosť naopak platí naplno: stúpne moment zotrvačnosti, takže sa dlhšie
+natáča do zákruty aj z nej.
+
+Hra má **jeden bočný člen na obe úlohy**, takže poctivý násobič leží medzi
+odpoveďami — 1,0 pre časť limitovanú prilnavosťou, `ref / m` pre časť limitovanú
+zotrvačnosťou. Ich geometrický priemer je odmocnina:
 
 ```ts
-STEER_ACCEL * massSteerMult(massT)   // ťažší sa pomalšie rozhýbe do strany
-STEER_DAMP  * massDampMult(massT)    // ťažší sa dlhšie vracia
+massSteerMult(massT) = Math.sqrt(REFERENCE_MASS_T / massT)
 ```
 
-Ten istý násobič otvára **prevrátenie** ako nový spôsob prehry: keď bočné
-zrýchlenie prekročí prah závislý od hmotnosti a výšky ťažiska, súprava ide na bok.
-Autentické, čitateľné, a nevyžaduje si to nový engine.
+| Hmotnosť | Násobič | Čas do stropu pri 90 km/h |
+|---|---:|---:|
+| 10 t | 1,41 | 1,00 s |
+| **20 t** | **1,00** | 1,42 s |
+| 30 t | 0,82 | 1,74 s |
+| 40 t | 0,71 | 2,01 s |
+
+Aplikovaný je na **rast aj na tlmenie**, takže ťažký kamión je rovnako pomalý do
+zákruty ako z nej. Samotný postih rastu by tú druhú polovicu pocitu minul.
+
+**Zámerne nie na `MAX_LATERAL_V`.** Ako rýchlo sa dá šmýkať do strany je limit
+prilnavosti a tam sa hmotnosť naozaj vykráti — 40 t dosiahne rovnakú bočnú
+rýchlosť ako 20 t, len neskôr. Test to stráži.
+
+## Kĺb visí na tejto rovnici
+
+Od 0.19.0 sa artikulácia kabíny neriadi klávesou, ale `v.vx / MAX_LATERAL_V`.
+Dôsledky patria sem, lebo sú to dôsledky bočnej dynamiky, nie kresby:
+
+- prvá póza príde po **244 ms** pri 40 km/h a **488 ms** pri 120, namiesto 29 ms
+- rýchlostná citlivosť je zadarmo — `speedSteerFactor` nedovolí rýchlemu kamiónu
+  zatočiť tak tvrdo, takže sa menej artikuluje
+- hmotnosť sa prejaví aj vizuálne, bez jediného riadku navyše
+- šmyk, do ktorého hráč nezatáčal, sa **ukáže na kabíne**, lebo kamión sa naozaj
+  hýbe do strany
+
+Kvantizácia má hysterézu 0,05, lebo `v.vx` sa cez prah plazí tam, kde ho klávesa
+preskakovala, a póza by inak blikala každý snímok.
 
 ---
 
@@ -583,13 +643,15 @@ MAX_LATERAL_V = 2.5
 SPEED_STEER_PENALTY = 0.6
 CURVE_DRIFT = 0.035
 TRUCK_WEIGHT_T = 20               // settings/drivetrain.ts
-REFERENCE_MASS_T = 20             // pri tejto hmotnosti su nasobice 1.0
+REFERENCE_MASS_T = 20             // pri tejto hmotnosti su vsetky nasobice 1.0
+TRUCK_WEIGHTS_T                   // presety pod klavesou W: 10 / 20 / 30 t
 CRANK_NEEDED_MS = 1800            // ako dlho drzat Enter pri stare
 ```
 
-**Pozor:** hmotnostné násobiče vstupujú len do zrýchlenia, brzdenia a zadusenia
-motora. Do `STEER_ACCEL` ani `STEER_DAMP` nevstupuje nič — viď [Bočná
-dynamika](#2-bočná-dynamika).
+**Pozor:** hmotnosť vstupuje do každého z týchto členov inak. Zrýchlenie, brzdenie
+a zadusenie motora dostávajú `referencia / hmotnosť`; riadenie dostáva jej odmocninu,
+lebo v ustálenej zákrute sa hmotnosť vykráti. `MAX_LATERAL_V` nedostáva nič — viď
+[Hmotnosť v riadení](#hmotnosť-v-riadení).
 
 Varovanie pred povrchom:
 
