@@ -633,11 +633,43 @@ function clampSteering(value: number): number {
   return Math.max(-1, Math.min(1, value))
 }
 
-export function quantizeTruckAngle(yaw: number): TruckAngle {
-  const scaled = clampSteering(yaw) * 2
+/**
+ * How far past a pose boundary the yaw must travel before the pose changes.
+ *
+ * Without it a yaw resting on a threshold flips between two poses every frame,
+ * and the yaw now comes from lateral velocity, which drifts across a boundary
+ * far more slowly than a key press did. At 90 km/h the yaw moves about 0.012 per
+ * frame, so this is roughly four frames of clearance — enough to stop a flicker,
+ * small enough not to feel sticky. `vehicleLod.ts` chose hysteresis over the same
+ * problem for the same reason.
+ */
+const ANGLE_HYSTERESIS = 0.05
+
+function quantizeRaw(clamped: number): TruckAngle {
+  const scaled = clamped * 2
   const rounded = scaled < 0 ? -Math.round(-scaled) : Math.round(scaled)
   if (Object.is(rounded, -0)) return 0
   return Math.max(-2, Math.min(2, rounded)) as TruckAngle
+}
+
+/**
+ * Yaw to one of the five drawn poses.
+ *
+ * Pass `previous` to get hysteresis; omit it for the raw nearest pose.
+ */
+export function quantizeTruckAngle(yaw: number, previous?: TruckAngle): TruckAngle {
+  const clamped = clampSteering(yaw)
+  const next = quantizeRaw(clamped)
+  if (previous === undefined || next === previous) return next
+
+  // Boundary between the pose held now and the neighbour we would move to. Poses
+  // sit every 0.5 in scaled space, so their midpoints are every 0.25 in yaw.
+  const step = next > previous ? 1 : -1
+  const boundary = (previous + step * 0.5) / 2
+  const cleared = step > 0
+    ? clamped >= boundary + ANGLE_HYSTERESIS
+    : clamped <= boundary - ANGLE_HYSTERESIS
+  return cleared ? next : previous
 }
 
 export function createPlayerTruckArticulation(steering = 0): PlayerTruckArticulation {
@@ -647,6 +679,23 @@ export function createPlayerTruckArticulation(steering = 0): PlayerTruckArticula
 }
 
 /** Mutates and returns the same object; dt is clamped to 50 ms. */
+/**
+ * Advances the articulation towards what the truck is actually doing.
+ *
+ * `steering` is **not** the key: it is lateral velocity as a fraction of the most
+ * the truck can carry, so the cab reports the manoeuvre rather than the button.
+ * Driving it from the key meant the first pose appeared 29 ms after the press —
+ * under two frames — and a held key saturated the yaw, so only *straight* and
+ * *full lock* were ever really seen. The three poses in between existed but were
+ * passed through, never rested in.
+ *
+ * Lateral velocity already carries the truck's own inertia, so the cab needs only
+ * a short smoothing of its own; the 280 ms on the trailer is the articulation
+ * itself, a trailer swinging behind a tractor rather than with it.
+ *
+ * This changes nothing about how fast the player's input reaches the road. The
+ * physics is untouched: only what the drawing is derived *from* has moved.
+ */
 export function updatePlayerTruckArticulation(
   state: PlayerTruckArticulation,
   steering: number,
@@ -654,10 +703,10 @@ export function updatePlayerTruckArticulation(
 ): PlayerTruckArticulation {
   const target = clampSteering(steering)
   const dt = Math.max(0, Math.min(50, dtMs))
-  state.cabYaw += (target - state.cabYaw) * (1 - Math.exp(-dt / 100))
+  state.cabYaw += (target - state.cabYaw) * (1 - Math.exp(-dt / 60))
   state.trailerYaw += (state.cabYaw - state.trailerYaw) * (1 - Math.exp(-dt / 280))
-  state.cabAngle = quantizeTruckAngle(state.cabYaw)
-  state.trailerAngle = quantizeTruckAngle(state.trailerYaw)
+  state.cabAngle = quantizeTruckAngle(state.cabYaw, state.cabAngle)
+  state.trailerAngle = quantizeTruckAngle(state.trailerYaw, state.trailerAngle)
   return state
 }
 
