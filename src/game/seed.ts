@@ -62,3 +62,48 @@ export function roadSeedFromSearch(search: string, date: Date = new Date()): num
     ? parsed
     : dailyRoadSeed(date)
 }
+
+/** ROM-font-safe month names: the font is ASCII 32-127 and has no glyph above it. */
+const MONTHS = [
+  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+] as const
+
+/**
+ * Decodes a daily seed back into its calendar date, or `null` if it is not one.
+ *
+ * A daily seed *is* the date — {@link dailyRoadSeed} builds `YYYYMMDD` and nothing
+ * else — so a route from any day is recoverable from the calendar alone. That makes
+ * the decode worth doing rather than storing a date alongside: there is only ever
+ * one number, and it cannot fall out of step with itself.
+ *
+ * The round trip through `Date` is what rejects `20260231`: constructing 31 February
+ * rolls forward to 3 March, and the components then no longer match what went in.
+ */
+export function seedToDate(seed: number): { year: number; month: number; day: number } | null {
+  if (!Number.isInteger(seed) || seed < 1_000_00_00 || seed > 9999_12_31) return null
+  const year = Math.floor(seed / 10_000)
+  const month = Math.floor(seed / 100) % 100
+  const day = seed % 100
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+
+  const probe = new Date(year, month - 1, day)
+  if (probe.getFullYear() !== year || probe.getMonth() !== month - 1 || probe.getDate() !== day) {
+    return null
+  }
+  return { year, month, day }
+}
+
+/**
+ * The route's human name: `25 AUG 2026` for a daily seed, `CUSTOM` for anything else.
+ *
+ * Paired with the raw number on the results screen rather than replacing it. The
+ * date is what a player says out loud; the number is what they type into `?seed=`.
+ * Both are shown because only one of them is actionable and only one of them is
+ * memorable.
+ */
+export function formatSeedRoute(seed: number): string {
+  const date = seedToDate(seed)
+  if (!date) return 'CUSTOM'
+  return `${date.day} ${MONTHS[date.month - 1]} ${date.year}`
+}

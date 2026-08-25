@@ -24,6 +24,12 @@ export interface RunSummary {
   canisters: number
   score: number
   reason: 'fuel' | 'offroad' | 'timeout' | 'crash'
+  /**
+   * Which route this was. Carried here rather than read from the URL on the
+   * results screen: the URL is not guaranteed to exist — it will not at all if
+   * this ever ships as an app — and a run has to be able to name itself.
+   */
+  seed: number
 }
 
 /**

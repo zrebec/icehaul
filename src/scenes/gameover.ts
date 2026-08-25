@@ -7,6 +7,7 @@ import {
 } from 'zx-kit'
 import { COLS, GAME_HEIGHT, GAME_WIDTH } from '../config.ts'
 import { averageSpeedKph, formatClock, type RunSummary } from '../game/runStats.ts'
+import { formatSeedRoute } from '../game/seed.ts'
 
 /**
  * The results screen.
@@ -59,8 +60,18 @@ export function createGameOverScene(stats: RunSummary): Scene {
       // about the run, and a line that comes and goes moves everything under it.
       drawTextCentered(ctx, `SCORE: ${stats.score}`, 128, COLS, C.B_YELLOW)
 
+      // Which road this was, set apart from how it went by a wider gap. Both
+      // halves earn their place: the date is what a player repeats to someone
+      // else, the number is what they type into `?seed=`. Only one of them is
+      // memorable and only one of them is actionable.
+      //
+      // Not left to the URL, which may be absent and will not exist at all if
+      // this becomes an app. A run has to be able to name itself.
+      drawTextCentered(ctx, `ROUTE: ${formatSeedRoute(stats.seed)}`, 148, COLS, C.CYAN)
+      drawTextCentered(ctx, `SEED: ${stats.seed}`, 160, COLS, C.CYAN)
+
       if (ready) {
-        drawTextCentered(ctx, 'PRESS ANY KEY', 152, COLS, C.B_CYAN)
+        drawTextCentered(ctx, 'PRESS ANY KEY', 176, COLS, C.B_CYAN)
       }
     },
   }
