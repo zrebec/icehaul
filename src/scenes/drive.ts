@@ -52,6 +52,7 @@ import type { RoadSampler } from '../game/routeplan.ts'
 import { createScore, accrueScore, addScoreBonus } from '../game/score.ts'
 import type { RunSummary } from '../game/runStats.ts'
 import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../game/offroad.ts'
+import { trafficClosingPerFrame, trafficSweepDepths } from '../game/collisionSweep.ts'
 
 function hash(n: number): number {
   let x = (n + 0x9E3779B9) | 0
@@ -393,18 +394,35 @@ export function createDriveScene(
       tickTraffic(v.distance, v.x, v.speed, dt, road)
 
       for (const tv of getVisibleTraffic(v.distance, TRAFFIC_COLLISION_DEPTH_M)) {
-        const projected = projectTrafficVehicle(
-          VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, tv,
-          (d) => getCurvatureAt(d),
-        )
-        if (!projected) continue
+        // Close up the sprite crosses far more of the screen per frame than it
+        // does of the road, so one test at its new position is not enough: an
+        // oncoming car covers 18 scanlines between two frames at three metres.
+        // Sweep the gap it just closed instead. Far away, and for anything not
+        // approaching, this yields exactly one depth — today's cost.
+        const closing = trafficClosingPerFrame(v.speed, tv.speed, tv.dir === 'oncoming', dt)
+        let hit = false
 
-        if (checkTruckTrafficCollision(
-          truckDrawX, truckDrawY,
-          projected.left, projected.top, projected.w, projected.h,
-          projected.raster,
-          truckCollisionMask,
-        )) {
+        for (const worldZ of trafficSweepDepths(tv.distM - v.distance, closing)) {
+          // projectTrafficVehicle derives worldZ as `distM - cameraDistance`, so
+          // asking for a depth means handing it the camera distance that produces one.
+          const projected = projectTrafficVehicle(
+            VIEWPORT_TOP, VIEWPORT_BOTTOM, tv.distM - worldZ, v.x, tv,
+            (d) => getCurvatureAt(d),
+          )
+          if (!projected) continue
+
+          if (checkTruckTrafficCollision(
+            truckDrawX, truckDrawY,
+            projected.left, projected.top, projected.w, projected.h,
+            projected.raster,
+            truckCollisionMask,
+          )) {
+            hit = true
+            break
+          }
+        }
+
+        if (hit) {
           startCrash('crash')
           return
         }
