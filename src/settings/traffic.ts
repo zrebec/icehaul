@@ -140,6 +140,59 @@ export const TRAFFIC_FOLLOW_BRAKE_KMH_S = 45
 export const TRAFFIC_COLLISION_DEPTH_M = 6
 
 /**
+ * Below this depth the collision test is swept across the frame instead of
+ * sampled once at the vehicle's new position.
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * Odkiaľ sa kolízia počíta viackrát za snímok.
+ *
+ * Projekcia je `scanline = round(PERSPECTIVE_K / worldZ) - 1`, takže v posledných
+ * metroch sa sprite hýbe po obrazovke oveľa rýchlejšie než vo svete. Namerané pri
+ * 60 fps a protiidúcom aute (90 + 80 km/h): zbližovanie 47,2 m/s je 0,787 m na
+ * snímok, čo pri worldZ = 3 m znamená **skok o 18 scanline riadkov naraz** — 28 %
+ * výšky kamióna. Na celé 6 m kolízne okno pritom zostáva iba 7,6 snímku.
+ *
+ * Kolízia sa tým nerozhodovala geometriou, ale tým, kam tých pár vzoriek náhodou
+ * padlo: raz nespravodlivá havária, inokedy „tomu som sa sotva vyhol". Oboje bola
+ * tá istá chyba. Doprava v rovnakom smere ju nikdy nemala — tam je 64,8 snímku na
+ * okno a najväčší skok sú 4 riadky.
+ *
+ * **↓ nižšie:** lacnejšie, ale skoky sa vrátia práve tam, kde najviac bolia.
+ * **↑ vyššie:** hustejšie vzorkovanie aj tam, kde sa sprite sotva hýbe — platíš
+ * za nič.
+ */
+export const TRAFFIC_SWEEP_NEAR_M = 8
+
+/**
+ * Largest depth a vehicle may advance between two collision samples.
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * Najväčší krok v hĺbke medzi dvoma kolíznymi vzorkami.
+ *
+ * Toto je vlastné ladidlo hustoty. Počet vzoriek sa z neho odvodí podľa toho, ako
+ * rýchlo sa vozidlo blíži, takže **cena rastie len tam, kde rastie riziko**:
+ * protiidúce auto pri 0,787 m/snímok dostane 4 vzorky, auto v rovnakom smere pri
+ * 0,093 m/snímok jednu jedinú — teda presne dnešnú cenu.
+ *
+ * Pri 0,2 m klesne najhorší skok z 18 riadkov na ~5.
+ *
+ * **↓ nižšie:** presnejšie, viac projekcií na snímok.
+ * **↑ vyššie:** lacnejšie, ale vraciaš sa k lotérii.
+ */
+export const TRAFFIC_SWEEP_MAX_STEP_M = 0.2
+
+/**
+ * Hard ceiling on collision samples per vehicle per frame.
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * Poistka proti tomu, aby jeden dlhý snímok (debugger, prepnutá záložka, slabý
+ * stroj) nevyrobil stovky projekcií. `dt` je v hre už zhora obmedzené na 50 ms,
+ * takže sa to nemá ako stať — ale strop stojí jeden riadok a odstraňuje celú
+ * triedu prekvapení.
+ */
+export const TRAFFIC_SWEEP_MAX_SAMPLES = 8
+
+/**
  * First traffic vehicle appears after this many metres (safe start).
  *
  * ── SK ────────────────────────────────────────────────────────────────────
