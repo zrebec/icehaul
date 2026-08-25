@@ -1390,7 +1390,7 @@ deferred: it existed to soften a handover that no longer costs anything.
   would help more than pixel count up close; no continuous 3D yaw needed.
 - **Performance:** horizontal spans rather than per-pixel `fillRect`, rasterise only on a cache-key
   change, allocate the glow layer once, never `getImageData` in the game loop.
-- **Collisions stay pixel-perfect and screen-space** — `ROADMAP.md` and `docs/collision-study.md`.
+- **Collisions stay pixel-perfect and screen-space** — `ROADMAP.md` and `docs/simulation.md`.
   World-space may filter, never decide.
 - No bilinear filtering, no full-screen antialiasing. If distant sprites shimmer, the answer is a
   deterministic dither and a stable raster.
