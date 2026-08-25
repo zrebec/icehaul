@@ -1,3 +1,10 @@
+# [0.18.0](https://github.com/zrebec/icehaul/compare/v0.17.1...v0.18.0) (2026-08-25)
+
+
+### Features
+
+* **gameover:** name the route the run was driven on ([#61](https://github.com/zrebec/icehaul/issues/61)) ([438c68f](https://github.com/zrebec/icehaul/commit/438c68f96517aa71fa323390ee7d362f81f59c74))
+
 ## [0.17.1](https://github.com/zrebec/icehaul/compare/v0.17.0...v0.17.1) (2026-08-25)
 
 
