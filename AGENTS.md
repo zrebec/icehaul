@@ -54,6 +54,11 @@ without needing a measurement to argue for it. Worth remembering when the next i
 > rather than days. So: redraw the six that exist, do not add a seventh. This is a scope gate, not a
 > lack of interest.
 
+> **Open, and Fox's, since 2026-08-27:** *Mathematics and geometry — the open questions* near the
+> end of this file. Six questions (Q-G1..Q-G6) about the four different projection laws the game
+> uses today, written down because they outlive a session. **Q-G4 is the cheap one and the one
+> that gates the rest** — it is paper, not code. None of them is scheduled; the queue below rules.
+
 **Next, in order:**
 
 0. **Vehicle detail — interior keylines.** New, and it comes straight out of the traffic-braking
@@ -1434,6 +1439,120 @@ downshift. Whether the game should teach that or offer input assistance is open,
 deferred until it has been played more.
 
 Do not retune clutch or throttle behaviour without an explicit decision from Fox.
+
+---
+
+## Mathematics and geometry — the open questions
+
+Fox's, 2026-08-27, and written down because they outlive any one session. He wants to head for
+"infinite resolution" — a world described by numbers rather than by pixels — and asked what the
+right questions are. These are them, each anchored to something measured in the code today.
+
+### The one thing to know first
+
+**The sprite is not what stands in the way.** A perfect vector truck would still be drawn through
+a camera that does not exist, because Ice Haul does not have one projection. It has four laws,
+and only one of them is a projection:
+
+| What | Law today | Where |
+|---|---|---|
+| depth to scanline | `dy = PERSPECTIVE_K / z` | `render/projection.ts` |
+| road half-width | `half(dy) = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * dy/roadHeight` | `roadgeometry.ts`, `road3d.ts` |
+| vehicle size | `scale(z) = A / (z + B)` | `road3d.ts:428`, anchors in `settings/vehicleView.ts` |
+| lateral position | `centerX = W/2 - playerX * LATERAL_SHIFT` | four places in `road3d.ts` |
+
+The first is a true pinhole. The second is linear in `dy` with a **non-zero intercept at the
+horizon**, deliberately: `settings/view.ts` says "true perspective would converge to zero and the
+road would vanish into a point three scanlines up". The third is `1/z` with its own softening
+offset. The fourth does not depend on depth at all.
+
+A real camera has one law — `f * X / z` for everything — and three numbers behind it: focal
+length, camera height, road width in metres. Ice Haul has `ROAD_HALF_TOP = 24` **pixels**,
+`TRAFFIC_SCALE_NEAR = 1.43` at 1.2 m, and `PERSPECTIVE_K = 150`, each tuned by eye against the
+others. That is the real reason a resolution change is a re-tune of the driving rather than a
+graphics change: **three of the four laws are written in pixels, so changing the pixel grid
+changes the geometry.**
+
+So the order is: **one camera first, geometry-native objects second.** The questions below are
+about the camera.
+
+### Q-G1 — should the road converge to a point?
+
+`ROAD_HALF_TOP` is an explicit anti-perspective floor, and it is also the term that makes the
+lane-share hump structural (`z* = sqrt(TRAFFIC_SCALE_B * 178.652 / ROAD_HALF_TOP)`; a bus once
+covered 1.21 lanes because of it).
+
+The question is what that floor is *for*. If a readable ribbon at the horizon is a **gameplay
+need** — the player must see where the road goes — then it is not geometry at all, it is a
+legibility device wearing geometry's clothes, and it might be honest to draw it as one. If it is
+only there because a vanishing point looks bad, distance fog can take that job (already queued)
+and the geometry can be true.
+
+Nobody has asked which it is. The answer decides whether the floor survives a camera.
+
+### Q-G2 — what is `B` compensating for?
+
+`scale(z) = A / (z + B)`. `A` and `B` are solved from two hand-picked anchors, not derived. Under
+a pinhole camera the size law is `f * H / z` — no offset. So `B` is buying something.
+
+Hypothesis worth testing on paper: **the camera has no height.** A pseudo-3D racer's camera sits
+`h` metres above the road, so a vehicle of height `H` at depth `z` projects to `f*H/z` while its
+*base* sits at `f*h/z` — the two are coupled, and `h` is exactly the kind of parameter whose
+absence gets papered over by a `+B` in the denominator. There is no `h` anywhere in Ice Haul.
+
+If that is right, one physical number replaces both `B` and possibly Q-G1's floor.
+
+### Q-G3 — should sliding sideways move the vanishing point?
+
+`centerX = W/2 - playerX * LATERAL_SHIFT` shifts **every** scanline by the same amount, so the
+whole road slides rigidly. In a camera, moving sideways shifts near rows a lot and far rows barely
+(`f*X/z`), so the road *rotates about the horizon* instead of sliding.
+
+Is the rigid slide part of the arcade feel and deliberately kept, or is it why a slide on ice
+reads as "the road moved" rather than "the truck moved"? Cheap to A/B: make `LATERAL_SHIFT`
+depth-scaled and drive one ice seed.
+
+### Q-G4 — how many of today's constants are outputs?
+
+The paper exercise, and the cheapest real step in this whole direction. Give the camera three
+honest numbers — focal length, height above the road, road width in metres — and work out which
+of `PERSPECTIVE_K`, `ROAD_HALF_TOP`, `ROAD_HALF_BOTTOM`, `TRAFFIC_SCALE_A`, `TRAFFIC_SCALE_B`,
+`LATERAL_SHIFT` fall out as **derived** rather than tuned.
+
+No code, no risk, and it answers the only question that matters before any rewrite: *can the
+current look be produced by a real camera at all, or does the game look the way it does precisely
+because the laws disagree?* If it is the latter, that is a finding, not a failure — and it ends
+the "infinite resolution" idea honestly instead of after a month of work.
+
+### Q-G5 — is the truck's articulation geometry, or is it drawing?
+
+`render/sprites/playerTruck.ts` is **52 hand-drawn bitmap layers**: three cab poses and three
+trailer poses, each split by colour, plus two more by mirroring. `CAB_X_BY_ANGLE` only says where
+to paste the cab. Nothing is computed. (The header says "Generated workbench output; copy byte
+data into Ice Haul" — it came from zx-art as bytes, one way.)
+
+A geometric cab would be a body rotated about the fifth wheel and projected, at any angle rather
+than five. The question is what the sprite gives that geometry could not — **the silhouette**, or
+**the drawing**? If it is the drawing (the hand-placed dither, the ZX hatching), then the split is
+available: let geometry decide the outline and the placement, and let hand-drawn fill live inside
+it. That is a road to resolution independence that does not cost the look.
+
+### Q-G6 — should collision live in the world instead of on the screen?
+
+`game/roadgeometry.ts` repeats `computeCurveOffsets`'s loop verbatim, and its comment says the two
+must stay bit-identical because "render and collision disagreeing about where the road is has
+already cost this project three debugging rounds".
+
+That duplication is a symptom of a screen-space world: two things independently computing pixels
+and being policed for agreement. In a metre-space world, collision is the truth and the render is
+derived, so the class of bug cannot exist. Is that worth the move on its own, independent of
+everything above?
+
+### What is *not* being asked
+
+Whether to make the truck a vector model. That is downstream of Q-G1 to Q-G4 and cannot be
+answered before them — see also "Parametric, vector, and what each would actually buy" above,
+which remains the record of the rendering side of the question.
 
 ---
 
