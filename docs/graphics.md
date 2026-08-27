@@ -1,7 +1,7 @@
 # Ice Haul: grafika
 
 Ako sa obrázok dostane z nápadu do hry. Zlúčené z pôvodných `sprites.md` a
-`sprite-prompts.md`, doplnené o obrazovkovú linku cez zxart.
+`sprite-prompts.md`, doplnené o obrazovkovú linku cez zx-art.
 
 Sesterské dokumenty: [simulácia](simulation.md) · [manuál](manual.md)
 
@@ -15,7 +15,7 @@ nemiešať ich:
 | | Sprity | Celé obrazovky |
 |---|---|---|
 | Čo | Vozidlá, stromy, značky | Titulka, neskôr aj pozadie po havárii |
-| Zdroj | AI kontaktný hárok (PNG) | zxart → **`.scr`** |
+| Zdroj | AI kontaktný hárok (PNG) | zx-art → **`.scr`** |
 | Nástroj | `scripts/sprite-import.mjs` | `scripts/screen-import.mjs` |
 | Výstup | `src/render/sprites/<meno>.ts` | `src/assets/<meno>.ts` (base64) |
 | Presnosť zdroja | nepresná, treba segmentáciu a doskakovanie na paletu | pixel-presná, netreba nič |

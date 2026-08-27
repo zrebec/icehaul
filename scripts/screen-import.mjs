@@ -4,7 +4,7 @@
  * the bundler can inline, so a full-screen picture costs no network request.
  *
  * STANDARD (Ice Haul screen import):
- *   - Source = a 6912-byte `.scr` written by zxart (`engine/zxart/output/`), which
+ *   - Source = a 6912-byte `.scr` written by zx-art (`engine/zx-art/art/<project>/screens/`), which
  *     is the *authoring* format. A PNG may only ever be an input reference for the
  *     generator or an output preview — never the asset the game ships.
  *   - `.scr` is 6144 bytes of bitmap followed by 768 attribute bytes. Its three-bit

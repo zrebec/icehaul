@@ -92,7 +92,7 @@ On ice: **tap** the steering keys for controlled corrections. **Holding** the ke
 |----------|---------------|
 | [docs/manual.md](docs/manual.md) | Survival guide and driver's manual — surfaces, fuel, skid, curves, scoring, HUD |
 | [docs/simulation.md](docs/simulation.md) | How the truck and the world behave: drivetrain, lateral dynamics, collision |
-| [docs/graphics.md](docs/graphics.md) | Sprite pipeline, AI prompts, and the zxart screen route |
+| [docs/graphics.md](docs/graphics.md) | Sprite pipeline, AI prompts, and the zx-art screen route |
 | [docs/seeds.md](docs/seeds.md) | Routes worth keeping, and why a daily seed can never be lost |
 | [docs/known-issues.md](docs/known-issues.md) | Standing problems, and what has already been tried |
 | [ROADMAP.md](ROADMAP.md) | What is next |

@@ -28,7 +28,7 @@ remembers its choices, and a results screen that names the route the run was dri
 
 ## Next
 
-- **Roadside decoration through zxart** — trees, signs and snow banks redrawn with the
+- **Roadside decoration through zx-art** — trees, signs and snow banks redrawn with the
   screen pipeline that now exists, at the sizes the LOD tiers actually ask for.
 - **Cab articulation driven by lateral velocity** rather than by the arrow key. The five
   poses exist but only two are ever seen, because a held key saturates the yaw in 139 ms
