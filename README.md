@@ -93,7 +93,7 @@ On ice: **tap** the steering keys for controlled corrections. **Holding** the ke
 |----------|---------------|
 | [docs/manual.md](docs/manual.md) | Survival guide and driver's manual — surfaces, fuel, skid, curves, scoring, HUD |
 | [docs/simulation.md](docs/simulation.md) | How the truck and the world behave: drivetrain, lateral dynamics, collision |
-| [docs/graphics.md](docs/graphics.md) | Sprite pipeline, AI prompts, and the zx-art screen route |
+| [docs/graphics.md](docs/graphics.md) | Validated JSON sprite pipeline, renderer contact sheets, and the zx-art screen route |
 | [docs/seeds.md](docs/seeds.md) | Routes worth keeping, and why a daily seed can never be lost |
 | [docs/known-issues.md](docs/known-issues.md) | Standing problems, and what has already been tried |
 | [ROADMAP.md](ROADMAP.md) | What is next |
@@ -103,9 +103,11 @@ On ice: **tap** the steering keys for controlled corrections. **Holding** the ke
 
 - **256 × 192** game pixels (ZX Spectrum native), integer-scaled ×4
 - **15-colour ZX palette** in the framebuffer. 8×8 attribute colour clash is intentional
+- **33 validated software sprites** — 18 traffic and 15 roadside `far / mid / near` JSON grids;
+  source art resolution is independent of projected size and collision
 - **TypeScript + Vite** — no runtime dependencies besides zx-kit
 - **AY-3-8912** chip emulation for 3-channel engine sound
-- Tunable constants live in `src/settings/`, twelve files grouped by what gets tuned in
+- Tunable constants live in `src/settings/`, thirteen files grouped by what gets tuned in
   one sitting, and are re-exported from `src/config.ts` so every existing import still resolves
 - CRT scanlines (alpha 0.7) + barrel distortion (intensity 0.6)
 - **Lamp bloom** composited over the finished frame — the one place off-palette colour appears, and
@@ -124,8 +126,8 @@ On ice: **tap** the steering keys for controlled corrections. **Holding** the ke
 src/
   main.ts              entry: canvas, scene loop, CRT, audio, URL switches
   config.ts            re-exports every constant from settings/ — nothing imports settings directly
-  settings/            twelve files of tunable constants, grouped by what is tuned together:
-                       screen, view, vehicleView, drivetrain, surfaces, offroad,
+  settings/            thirteen files of tunable constants, grouped by what is tuned together:
+                       screen, view, vehicleView, sceneryView, drivetrain, surfaces, offroad,
                        traffic, route, mission, scoring, glow, audio
   assets/
     icehaul-loading.*  the .scr title screen and its generated module
@@ -142,7 +144,7 @@ src/
     traffic.ts         traffic spawner, car-following, brake state
     trafficDriver.ts   how a traffic vehicle decides to brake
     canisters.ts       fuel canister spawner + pickup
-    roadside.ts        decorative objects (trees, lamps, signs)
+    roadside.ts        pure seeded decoration bands/clusters, paired lamps and signs
     mission.ts         delivery targets, the clock and its carry-over
     routeplan.ts       the legs a route is made of
     score.ts           continuous scoring, paid by the block
@@ -153,7 +155,8 @@ src/
     road3d.ts          pseudo-3D road + kerbs + canisters + roadside + traffic
     projection.ts      the shared curve-offset maths
     vehicleRaster.ts   one raster per drawn vehicle: draw, collide, glow
-    vehicleLod.ts      far/detail tiers — meaning in the distance
+    vehicleLod.ts      projected-height far/mid/near selection with hysteresis
+    roadsideRaster.ts  fractional scenery growth, LOD and cache
     vehicleContour.ts  the dark outline and contact shadow
     vehicleGlow.ts     lamp bloom through zx-kit's glow layer
     truck.ts           the player truck's masks, shared by drawing and collision
@@ -161,7 +164,8 @@ src/
     topbar.ts          score/dist/time/warnings
     sprites/
       playerTruck.ts   40×64 articulated road train, five cab and trailer poses
-      vehicles.ts      the six hand-drawn traffic vehicles
+      catalog.ts       strict manifest + validated JSON asset loader
+      assets/          33 row grids, runtime JSON and native/4× PNG previews
     debug/             traffic and scenery contact sheets (?matrix=1 / ?sceneryMatrix=1)
   audio/
     engine.ts          AY chip engine drone (3 channels)
@@ -171,6 +175,7 @@ scripts/
   frame-profile.mjs    where a frame actually goes
   traffic-matrix.mjs   contact sheets — the renderer comparison harness
   scenery-matrix.mjs   roadside LOD sheets + real seeded placement captures
+  author-lod-sprites.py deterministic 33-asset authoring + official ZX validation
   sprite-import.mjs    AI contact sheet → zx-kit row-string sprites
   screen-import.mjs    .scr screen dump → an inlined TypeScript module
   clash-check.mjs      reads the rendered frame back and proves it is hardware-valid
@@ -183,11 +188,12 @@ mechanic, a manual clutched gearbox with stall and burn-out, fuel, traffic with 
 collision, proportional delivery targets, continuous scoring, a results screen, AY sound and
 roadside decoration.
 
-Since then the graphics thread has been through one shared raster, an LOD tier, a hyperbolic
-growth curve, a hand redraw of all six traffic vehicles, the lamp bloom, and an articulated
-40×64 player road train whose five poses share their exact masks with collision. The title
-screen arrived as a native `.scr` with a settings menu, the results screen now names the route
-the run was driven on, and near-field collision is swept rather than sampled once per frame.
+Since then the graphics thread has reached three authored LOD tiers for all traffic and roadside
+objects. The 33 validated JSON assets are sampled into canonical physical boxes, so the same final
+traffic raster still feeds drawing, collision and lamp extraction; changing source resolution does
+not move a vehicle. Roadside placement is now seeded into verge/field/far clusters, and two real
+renderer contact-sheet modes keep handovers and placement reproducible. The player remains an
+articulated 40×64 road train whose five poses share their exact masks with collision.
 
 See [ROADMAP.md](ROADMAP.md) for what is next, and `AGENTS.md` for what is being worked on now.
 

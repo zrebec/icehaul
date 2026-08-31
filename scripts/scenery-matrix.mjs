@@ -14,7 +14,7 @@ import puppeteer from 'puppeteer'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const BASE = process.env.ICEROADS_URL ?? 'http://localhost:5173/'
+const BASE = process.env.ICEROADS_URL ?? 'http://localhost:5174/'
 const OUT_DIR = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : 'matrix'
 const onlyIndex = process.argv.indexOf('--only')
 const ONLY = onlyIndex >= 0 ? process.argv[onlyIndex + 1] : null

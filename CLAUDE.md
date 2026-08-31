@@ -14,8 +14,8 @@ Guidance for Claude Code when working in this repository.
 
 ## Route seeds
 
-The road, traffic and canisters are all deterministic functions of one seed, so a seed *is* the
-route. `src/game/seed.ts` picks it: one route per **local** calendar day (`YYYYMMDD`), overridable
+The road, traffic, canisters and roadside placement are deterministic functions of one seed, so a
+seed *is* the route. `src/game/seed.ts` picks it: one route per **local** calendar day (`YYYYMMDD`), overridable
 with **`?seed=<decimal>`** for repeatable playtests and physics A/B tests. Invalid overrides fall
 back to the daily seed. Read once at boot — the route never changes under the player.
 
@@ -32,17 +32,31 @@ others. Full numbers in `AGENTS.md` → "Playtest findings, 0.8.1" §4.
 
 **Ice Haul** is a ZX-Spectrum-flavoured micro-simulator of ice-road trucking. Not ETS2 — its ZX hallucination. The fantasy is *risk management*, not speed: tyre pressure, cargo balance, ice patches, wind, fuel, driver fatigue. Every metre is a small decision.
 
-GitHub repo: `zrebec/icehaul`. Built on **[zx-kit](https://github.com/zrebec/zx-kit)** (npm `zx-kit@^0.42.0`).
+GitHub repo: `zrebec/icehaul`. Built on **[zx-kit](https://github.com/zrebec/zx-kit)** (npm `zx-kit@^0.46.0`).
 
 ## Canvas & resolution
 
 - **Game pixels: 256 × 192** (32 × 24 cells at `CELL=8`). Pure ZX Spectrum native.
 - Initialise with `setupCanvas(canvas, 4, 256, 192)` → 1024 × 768 CSS px.
 - Integer scaling only. Never alter `CELL` or the palette in `zx-kit/src/palette.ts`.
-- **Colour clash is a feature, not a bug.** Use `drawBitmapAttrs` with `AttrMap` (per 8×8 cell ink/paper) so two adjacent palette colours visibly bleed across a sprite — that's the look.
+- **Colour clash is a feature on hardware-authentic full screens.** `.scr` artwork and attribute
+  bitmaps obey two colours per 8×8 cell. Software-composited traffic/roadside sprites are the
+  explicit exception: they may use several exact ZX colours in one cell, because flattening the
+  authored `mid`/`near` art was rejected in the 2026-08-31 visual review.
 - Palette is the 15 hex values in `C` from `zx-kit/src/palette.ts`. No other colours **in the
   framebuffer**, ever. The one thing composited over it — the lamp bloom — is covered under
   "What NOT to do" and is Fox's explicit exception, not a precedent.
+
+### Sprite asset contract
+
+- `src/render/sprites/assets/manifest.json` lists exactly 18 traffic and 15 roadside assets.
+- `.rows.txt` is the inspectable exact pixel grid; validated JSON is the runtime source of truth; native and
+  4× PNG are nearest-neighbour previews, never runtime textures.
+- `sprites/catalog.ts` validates dimensions, symbols and palette names at load time.
+- Authored grid resolution never determines projection. Canonical physical size × world-depth scale
+  is computed first, then the chosen `far`/`mid`/`near` JSON grid is resampled into that box.
+- Traffic drawing, collision and lamp extraction read the same final raster. The contrast contour is
+  separate so it cannot become an invisible hitbox.
 
 ## HUD layout target (matches `first_impression.png`)
 
@@ -88,69 +102,60 @@ HUD has **3 equal-width panels** (256/3). Left ("drivetrain") panel, top→botto
   - **Real-time in-drive** — small switches: heater, wipers, headlight high-beam, CB radio. Bound to number keys / gamepad shoulders. The risk is taking eyes off the road.
 - **Audio**: AY engine drone modulated by RPM during drive + beeper SFX (warning beep, gear shift, ice crack, low-fuel chirp). AY tracker music for menus/intro/pit-stop only.
 
-## Module layout (target)
+## Module layout (current)
 
 ```
 src/
-  main.ts            entry: setupCanvas, scene manager bootstrap, audio init on first input
-  config.ts          LANGUAGE_CODE, debug flags, constants
-  strings.ts         English UI strings (default locale)
-  strings.sk.ts      Slovak (gitignored if needed; pickLocale via zx-kit i18n)
-  save.ts            wires zx-kit save profile — campaign state, unlocks, highscores
+  main.ts                 canvas bootstrap, debug modes, scene loop, audio-on-gesture
+  config.ts               re-exports grouped settings from settings/
   scenes/
-    drive.ts         the main driving scene ✓ (phase 1)
-    intro.ts         title + press-key                (phase ≥6)
-    menu.ts          new game / continue / options    (phase ≥11)
-    pitstop.ts       between-segment decisions        (phase 6)
-    pause.ts         pushed on top of drive           (phase ≥6)
-    gameover.ts                                       (phase 5)
+    intro.ts              native .scr title + remembered options
+    drive.ts              simulation and production render composition
+    gameover.ts           results and route identity
   game/
-    vehicle.ts       ✓ throttle/brake/steer + grip-scaled lateral physics
-    road.ts          ✓ deterministic surface lookup (asphalt/ice)
-    safespeed.ts     ✓ the cornering law + RoadSampler, shared by the planner and traffic
-    routeplan.ts     ✓ a leg's time budget read off the road it crosses (pure, tested)
-    trafficDriver.ts ✓ what a traffic driver wants to do — brake for bends, ice, the queue
-    runStats.ts      ✓ average speed + clock for the results screen (pure, tested)
+    road.ts               deterministic surfaces and curvature
+    roadside.ts           pure seeded bands/clusters, lamps and signs
+    traffic.ts            spawner and car-following state
+    trafficDriver.ts      desired traffic speed and braking
+    mission.ts            tested mission state machine
+    routeplan.ts          road-derived time budget
+    score.ts              frame-rate-independent distance scoring
   render/
-    road3d.ts        ✓ scrolling pseudo-3D road with per-scanline surface
-    truck.ts         ✓ rear-view player truck sprite (tail lamps RED / B_RED on the brake)
-    vehicleGlow.ts   ✓ lamp bloom through zx-kit's glow layer (?glow=)
-    hud.ts           ✓ bottom instrument cluster (SPEED wired, rest cosmetic)
-    topbar.ts        ✓ score/title/dist/time/ice-ahead-blink
-  audio/
-    engine.ts        ✓ continuous square-wave drone pitch-modulated by speed
-  game/              game-specific systems (do NOT push to zx-kit)
-    vehicle.ts       traction, inertia, steering lag, brake distance
-    road.ts          segment generator: curvature, slope, surface type
-    weather.ts       wind vector, visibility, snow/rain emitter, ice patch placer
-    cargo.ts         weight, centre of gravity, "shifting load" event
-    driver.ts        fatigue curve, reaction time, day/night cycle
-    risk.ts          random events (tyre blowout, frozen lock, blizzard window)
-  render/            game-specific rendering on top of zx-kit primitives
-    horizon.ts       sky gradient stripes + star field
-    road3d.ts        pseudo-3D road: vanishing-point lines, side rails, dithered ice texture
-    truck.ts         player sprite (low-poly silhouette ahead)
-    hud.ts           composes dial/compass/bars/status from zx-kit ui.ts
-    weatherFx.ts     snow particles, headlight cones (game-local — NOT zx-kit)
+    road3d.ts             road, traffic and roadside projection/drawing
+    vehicleRaster.ts      fractional physical-span raster shared by draw/collision/glow
+    vehicleLod.ts         projected-height far/mid/near selection + hysteresis
+    roadsideRaster.ts     fractional scenery scale/cache and LOD selection
+    vehicleContour.ts     non-colliding outline/contact shadow
+    vehicleGlow.ts        post-scanline lamp bloom
+    truck.ts              articulated player truck and collision masks
+    sprites/
+      catalog.ts          strict manifest/JSON loader
+      assets/             33 validated row grids, JSON and PNG previews
+    debug/
+      trafficMatrix.ts    real traffic renderer contact sheet
+      sceneryMatrix.ts    isolated LOD and real seeded placement sheets
+scripts/
+  author-lod-sprites.py   deterministic authoring + official validation/export
+  traffic-matrix.mjs      traffic capture set, including real LOD boundaries
+  scenery-matrix.mjs      scenery capture set and benchmark placements
+  clash-check.mjs         rendered .scr/menu attribute validation
 ```
 
 ## What stays in IceRoads vs goes to zx-kit
 
 **Stays here (game-specific):**
-`vehicle.ts`, `weather.ts`, `road.ts`, `cargo.ts`, `driver.ts`, `risk.ts`, `weatherFx.ts`, `road3d.ts`, `truck.ts`, `horizon.ts`.
-
-`weatherFx.ts` in particular: zx-kit's CLAUDE.md explicitly forbids a `particle.ts` module ("Spectrum philosophy: less is more"). We respect that — snow/rain stays game-local.
+the complete `game/` simulation, route-seeded roadside generator, `road3d.ts`, vehicle/scenery
+projection and resampling, all authored sprite assets, the articulated player truck and HUD.
 
 **Candidates to upstream to zx-kit later (only when a *second* zx-kit game would also benefit):**
-- `drawHorizon` — sky-band gradient helper (generic for racing/space sims).
 - `drawStarField` — twinkling random dot field with seed.
-- `drawDashboardPanel` — wrapper around `drawBox` + `drawPanelTitle` in the recurring "title strip over framed box" pattern.
+- fractional area-weighted sprite resampling — only after a second game needs the same semantics.
 
 Do not preemptively upstream. One game is not a pattern.
 
 ## Engineering conventions
 
-- **No new runtime deps.** Match zx-kit's `dependencies: {}` discipline. Vitest + TS + ESLint dev-only.
+- **No new runtime deps beyond `zx-kit`.** Validation/capture dependencies remain development-only.
 - **Singleton state in zx-kit modules** (`audio`, `ay`, `input`, `ui` bar registry) is fine for a single-canvas game. Don't try to multi-instance them.
 - **TypeScript strict.** No `any`. All ink/paper params typed as `SpectrumColor`.
 - **Game-pixel coords everywhere.** `setupCanvas` applies `ctx.scale(4, 4)` — never call `ctx.scale` again.
@@ -163,12 +168,14 @@ Do not preemptively upstream. One game is not a pattern.
 
 ```bash
 npm install
-npm run dev                                # vite dev server on localhost:5173
+npm run dev                                # vite dev server on localhost:5174
 npm test                                   # vitest
 npm run build                              # production bundle (tsc + vite)
 node scripts/screenshot.mjs out.png        # headless capture of canvas bitmap (dev server must be running)
 node scripts/drive-shot.mjs out.png 8      # starts the engine, drives, asserts the truck actually moved
 node scripts/traffic-matrix.mjs matrix     # traffic contact sheets — the renderer comparison harness
+node scripts/scenery-matrix.mjs matrix     # scenery LOD + real seeded placement sheets
+python3 scripts/author-lod-sprites.py       # regenerate + officially validate all 33 sprite assets
 node scripts/frame-delta.mjs "<query>" "<extra>"   # what actually changed between two frames:
                                           # share of pixels, mean delta, peak. Answers "can you
                                           # see it?" with a number. Judge only with scanlines=1
@@ -179,6 +186,9 @@ node scripts/frame-delta.mjs "<query>" "<extra>"   # what actually changed betwe
 ```
 ?seed=1443866        a specific route; no parameter means today's daily route
 ?matrix=1            the traffic contact sheet instead of the game
+?matrix=1&lod=1      real far/mid and mid/near handover frames, tier labelled in each cell
+?sceneryMatrix=1     five scenery types at 220,120,80,50,25,20,10,3 m
+?sceneryMatrix=1&placement=42   four real generator windows for route seed 42
 ?outline=0           traffic without its dark outline and contact shadow (A/B)
 ?glow=0              no bloom on the lamps (A/B). ?glow=0.5 sets its strength,
                      ?glow=0.8,1.5 also its radius (defaults 0.8 and 1)
@@ -191,8 +201,8 @@ node scripts/frame-delta.mjs "<query>" "<extra>"   # what actually changed betwe
 
 **Judge brightness only on a sheet with `scanlines=1`.** The game lays a 70 %-black line over every
 odd device row, which takes the whole picture to 0.65; a bare sheet over-reads by 1.54x and the first
-glow pass was tuned on one. `?brake=1` exists for the same reason — the brake lights are carried
-entirely by the glow, so no cruising frame can show them.
+glow pass was tuned on one. Rear braking also changes `R` from normal to bright red in the authored
+raster, so the state remains present with `?glow=0`; the halo makes it legible at driving distance.
 
 **CI / Pages rule (2026-07-03):** the deploy workflow must use `actions/upload-pages-artifact@v5+`
 and `actions/deploy-pages@v5+` — the Pages backend rejects v3-era artifacts since 2026-07-03 with a
@@ -227,6 +237,14 @@ that. Slowing down always works, which was not true before 0.4.0 — see `AGENTS
 
 Each phase is self-contained, ends with a runnable build, and leaves the previous scene playable. Time estimates assume part-time work with AI assistance.
 
+> **Recent (2026-09-01, 811 tests):** traffic and roadside scenery now use 33 validated authored
+> JSON sprites across `far / mid / near`. Projection computes the physical box before choosing an
+> asset, so authored resolution cannot alter lane fit, anchor or collision. Roadside placement is a
+> pure seeded band/cluster generator and scenery grows through the full 220 m view. The traffic and
+> scenery contact sheets label the tier returned by the real projector; benchmark placement sheets
+> cover seeds 42 and 1443866. The decision/measurement record lives in `AGENTS.md`; the reproducible
+> asset and capture pipeline lives in `docs/graphics.md`.
+>
 > **Mission timing lives in `src/game/mission.ts`, not in the drive scene.** A leg's time budget is
 > `length / MISSION_PACE_KMH`, so every leg asks the same average speed and the first leg still gets
 > exactly 8 minutes; unused time carries over rather than resetting the clock. It was three locals

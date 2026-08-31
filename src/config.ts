@@ -1,5 +1,5 @@
 /**
- * Every tunable constant in the game — as one import, from twelve files.
+ * Every tunable constant in the game — as one import, from thirteen files.
  *
  * This was a single 1612-line file with 192 exports, and the reason it had to be
  * broken up is not its length but that its own headings had stopped being true:
@@ -13,7 +13,7 @@
  * which is what makes a move of this size reviewable: the diff is a move, and
  * `tsc` plus 626 tests are enough to prove it.
  *
- * ── How the twelve are divided ──────────────────────────────────────────────
+ * ── How the thirteen are divided ───────────────────────────────────────────
  * By **what gets tuned in one sitting**, not by subject. A gear ratio that feels
  * wrong is usually a torque curve that is wrong, so gearbox, clutch and engine
  * are one file. What the road *is* and what it *looks like* are almost never
@@ -25,6 +25,7 @@
  *   route        how a seed becomes a road: segments, bends, warnings
  *   view         how that road is drawn: perspective, kerbs, markers
  *   vehicleView  how a vehicle's depth becomes pixels: growth, LOD, contour
+ *   sceneryView  how roadside depth becomes pixels: growth, LOD, physical boxes
  *   glow         the lamp bloom, on the glass and never in the framebuffer
  *   traffic      where the other vehicles are, and how they drive
  *   mission      the clock read off the road, the drop-offs, the canisters

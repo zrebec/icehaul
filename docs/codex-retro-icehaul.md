@@ -1,10 +1,9 @@
 # Ice Haul: trojstupňový sprite LOD
 
-> **Handoff pre čistý agentický kontext:** pred implementáciou prečítaj celý tento dokument,
-> koreňové `AGENTS.md`, `CLAUDE.md` a skill
-> `/Users/zrebec/.codex/skills/zx-spectrum-screen/SKILL.md`. Implementáciu vykonávaj po úlohách
-> pomocou TDD. Sprity uvedené v tomto dokumente sú samostatný, používateľom vopred povolený
-> prípravný výstup; zvyšok implementácie sa nezačne bez ďalšieho výslovného súhlasu používateľa.
+> **Dokončený handoff:** implementácia bola používateľom schválená a dokončená po úlohách cez TDD.
+> Tento dokument teraz uchováva pôvodné rozhodnutia, vykonané checklisty a reprodukovateľné
+> výsledky. Pre ďalšiu prácu čítaj aj koreňové `AGENTS.md`, `CLAUDE.md` a
+> `/Users/zrebec/.codex/skills/zx-spectrum-screen/SKILL.md`.
 
 **Cieľ:** nahradiť dnešný významový dvojstupňový LOD dopravy a jednostupňové dekorácie pravými,
 ručne navrhnutými ZX sprite sadami `far / mid / near`, bez zmeny fyzickej veľkosti vozidiel,
@@ -24,6 +23,9 @@ a export spriteov. Bez novej runtime závislosti.
 
 **Pracovná branch:** `feat/three-tier-sprite-lod`, odvodená priamo z `main` na commite
 `1f4a03a373165cff57acbf3988aee24e4ea1b173`.
+
+**Stav 2026-09-01:** Úlohy 1–7 sú dokončené. Implementačné commity sú `1a817fb`, `f6067bd`,
+`c3df343`, `6f0e88c`, `a9031a0` a `69ff332`; posledný dokumentačný commit uzatvára vetvu.
 
 ## Globálne obmedzenia
 
@@ -278,15 +280,15 @@ export function getRoadsideObjects(
 **Výsledok:** repo vie bez externého pluginu overiť schému, rozmery, znaky a paletu každého
 z 33 JSON súborov. Runtime loader poskytuje `rows` a `SpectrumColor` mapu.
 
-- [ ] Napísať failing test, ktorý importuje kompletný manifest 33 assetov a kontroluje počet,
+- [x] Napísať failing test, ktorý importuje kompletný manifest 33 assetov a kontroluje počet,
   deklarované rozmery, presný počet/šírku riadkov, povolené ASCII symboly a definovanú legendu.
-- [ ] V tom istom teste vyžadovať iba presnú ZX paletu; pri `mid/near` zároveň kontrolovať, že
+- [x] V tom istom teste vyžadovať iba presnú ZX paletu; pri `mid/near` zároveň kontrolovať, že
   katalóg obsahuje viacfarebné lokálne bunky a nevrátil sa k plochému dvojfarebnému exportu.
-- [ ] Spustiť `npm test -- src/render/__tests__/spriteCatalog.test.ts` a potvrdiť očakávaný fail.
-- [ ] Implementovať `ZxColorName`, uzavretú mapu názov → `C.*`, `loadZxSprite` a katalógy
+- [x] Spustiť `npm test -- src/render/__tests__/spriteCatalog.test.ts` a potvrdiť očakávaný fail.
+- [x] Implementovať `ZxColorName`, uzavretú mapu názov → `C.*`, `loadZxSprite` a katalógy
   `TRAFFIC_SPRITES`/`ROADSIDE_SPRITES`.
-- [ ] Spustiť cielený test a celý `npm test`.
-- [ ] Commit: `feat(render): load validated zx sprite assets`.
+- [x] Spustiť cielený test a celý `npm test`.
+- [x] Commit: `feat(render): load validated zx sprite assets`.
 
 ### Úloha 2: Oddeliť fyzické rozpätie od rozlíšenia zdroja
 
@@ -299,15 +301,15 @@ z 33 JSON súborov. Runtime loader poskytuje `rows` a `SpectrumColor` mapu.
 **Výsledok:** ľubovoľne veľký LOD asset sa vykreslí do rovnakého fyzického boxu ako dnešný
 14×11/22×15/28×18 zdroj, bez návratu celočíselného scale kroku.
 
-- [ ] Pred zmenou doplniť charakterizačné testy pre `w/h/left/top` vozidiel na vzdialenostiach
+- [x] Pred zmenou doplniť charakterizačné testy pre `w/h/left/top` vozidiel na vzdialenostiach
   220, 100, 50, 25, 10, 5 a 2 m.
-- [ ] Napísať failing test: dve mriežky s rovnakou normalizovanou kresbou, ale 1× a 2× zdrojovým
+- [x] Napísať failing test: dve mriežky s rovnakou normalizovanou kresbou, ale 1× a 2× zdrojovým
   rozlíšením musia pri rovnakom `spanW/spanH` dať rovnaký box a ekvivalentnú siluetu.
-- [ ] Implementovať `resampleSpriteAtSpan`; zachovať area weighting, coverage threshold a
+- [x] Implementovať `resampleSpriteAtSpan`; zachovať area weighting, coverage threshold a
   zlomkový inset.
-- [ ] Zmeniť vehicle cache key na `asset-id + quantized physical scale + lod`.
-- [ ] Spustiť scaling, raster, cadence, churn a stability testy.
-- [ ] Commit: `refactor(render): decouple sprite art from projected size`.
+- [x] Zmeniť vehicle cache key na `asset-id + quantized physical scale + lod`.
+- [x] Spustiť scaling, raster, cadence, churn a stability testy.
+- [x] Commit: `refactor(render): decouple sprite art from projected size`.
 
 ### Úloha 3: Zaviesť pravý `far / mid / near` LOD vozidiel
 
@@ -328,14 +330,14 @@ z 33 JSON súborov. Runtime loader poskytuje `rows` a `SpectrumColor` mapu.
 Pri predchádzajúcom tiere ponechať jednotkový dead-band. Veľký skok výšky smie preskočiť priamo
 cez susedný tier.
 
-- [ ] Najprv rozšíriť failing testy na tri monotónne stupne, oba smery pohybu a preskoky.
-- [ ] Doplniť test, že všetky tri LOD majú správne front/rear lampy a iba rear mení `R` pri brzde.
-- [ ] Doplniť normalizovaný handover test: IoU susedných siluet ≥ 0.85, ground line sa nepohne
+- [x] Najprv rozšíriť failing testy na tri monotónne stupne, oba smery pohybu a preskoky.
+- [x] Doplniť test, že všetky tri LOD majú správne front/rear lampy a iba rear mení `R` pri brzde.
+- [x] Doplniť normalizovaný handover test: IoU susedných siluet ≥ 0.85, ground line sa nepohne
   a fyzický box neskočí o viac než 1 px.
-- [ ] Implementovať výber assetu pred resamplingom a odstrániť `applyFarLamps`.
-- [ ] Zachovať jeden finálny raster pre draw/collision/glow a paralelný contour mask.
-- [ ] Potvrdiť lane peak ≤ 0.90 a cadence longest freeze ≤ 2.0 s.
-- [ ] Commit: `feat(render): add three authored traffic lod tiers`.
+- [x] Implementovať výber assetu pred resamplingom a odstrániť `applyFarLamps`.
+- [x] Zachovať jeden finálny raster pre draw/collision/glow a paralelný contour mask.
+- [x] Potvrdiť lane peak ≤ 0.90 a cadence longest freeze ≤ 2.0 s.
+- [x] Commit: `feat(render): add three authored traffic lod tiers`.
 
 ### Úloha 4: Zaviesť seedované pásma a zhluky dekorácií
 
@@ -357,14 +359,14 @@ cez susedný tier.
 - lampy zostanú po oboch stranách každých 180 m v `verge`;
 - značky zostanú približne každých 400 m v `verge`, ale ich jitter a strana sa miešajú so seedom.
 
-- [ ] Napísať failing testy pre deterministický rovnaký seed, odlišné seedy, stabilné
+- [x] Napísať failing testy pre deterministický rovnaký seed, odlišné seedy, stabilné
   prekrývajúce sa okná a nulové duplicity.
-- [ ] Testovať, že prvých 5 km obsahuje obe strany a všetky tri pásma; lampa/značka sú iba verge.
-- [ ] Testovať prirodzenú hustotu v pásme 20–32 objektov/km, aby nový layout nezvyšoval náklady
+- [x] Testovať, že prvých 5 km obsahuje obe strany a všetky tri pásma; lampa/značka sú iba verge.
+- [x] Testovať prirodzenú hustotu v pásme 20–32 objektov/km, aby nový layout nezvyšoval náklady
   bez kontroly.
-- [ ] Implementovať čistý generátor bez per-frame uloženého stavu.
-- [ ] Odovzdať seed z `drive.ts` cez novú signatúru.
-- [ ] Commit: `feat(scene): seed roadside scenery in bands and clusters`.
+- [x] Implementovať čistý generátor bez per-frame uloženého stavu.
+- [x] Odovzdať seed z `drive.ts` cez novú signatúru.
+- [x] Commit: `feat(scene): seed roadside scenery in bands and clusters`.
 
 ### Úloha 5: Perspektívny LOD renderer dekorácií
 
@@ -383,14 +385,14 @@ cez susedný tier.
 - kanonické rozmery: deciduous 22×31, conifer 18×31, rocks 22×13,
   sign 18×22, lamp 6×28.
 
-- [ ] Napísať failing testy pre obe kotvy, monotónny rast a poradie troch tierov.
-- [ ] Testovať, že scale pri vzdialenostiach 220, 120, 80, 50, 25, 20, 10 a 3 m nemá dnešnú
+- [x] Napísať failing testy pre obe kotvy, monotónny rast a poradie troch tierov.
+- [x] Testovať, že scale pri vzdialenostiach 220, 120, 80, 50, 25, 20, 10 a 3 m nemá dnešnú
   dlhú konštantnú plošinu.
-- [ ] Implementovať zlomkový resampling z katalógu a cache podľa assetu/mierky.
-- [ ] Nahradiť per-pixel fill horizontálnymi spanmi.
-- [ ] Pred kreslením zoradiť všetky typy spoločne od najvzdialenejšieho po najbližší.
-- [ ] Odstrániť procedurálny `drawLamp`; lampa používa tri validované sprity.
-- [ ] Commit: `feat(render): add perspective lod to roadside scenery`.
+- [x] Implementovať zlomkový resampling z katalógu a cache podľa assetu/mierky.
+- [x] Nahradiť per-pixel fill horizontálnymi spanmi.
+- [x] Pred kreslením zoradiť všetky typy spoločne od najvzdialenejšieho po najbližší.
+- [x] Odstrániť procedurálny `drawLamp`; lampa používa tri validované sprity.
+- [x] Commit: `feat(render): add perspective lod to roadside scenery`.
 
 ### Úloha 6: Kontaktné hárky a vizuálna akceptácia
 
@@ -408,13 +410,13 @@ tieru. Neimplementovať v harnessi vlastnú projekciu.
 pre zoom, surface, curve, offset a scanlines. Pridať reálne placement snímky pre seedy 42
 a 1443866.
 
-- [ ] Napísať failing layout/parser testy pred debug rendererom.
-- [ ] Implementovať `?sceneryMatrix=1` a capture skript.
-- [ ] Vygenerovať traffic aj scenery hárky na asfalte, snehu, ľade a v najostrejšej zákrute.
-- [ ] Pri hodnotení jasu zapnúť `scanlines=1`.
-- [ ] Skontrolovať front/rear smer vo far, rozdiel mini/car/bus v mid, keylines v near,
+- [x] Napísať failing layout/parser testy pred debug rendererom.
+- [x] Implementovať `?sceneryMatrix=1` a capture skript.
+- [x] Vygenerovať traffic aj scenery hárky na asfalte, snehu, ľade a v najostrejšej zákrute.
+- [x] Pri hodnotení jasu zapnúť `scanlines=1`.
+- [x] Skontrolovať front/rear smer vo far, rozdiel mini/car/bus v mid, keylines v near,
   lane-fit, prechody tierov a rozmiestnenie prírody mimo krajnice.
-- [ ] Commit: `test(render): add lod contact sheets`.
+- [x] Commit: `test(render): add lod contact sheets`.
 
 ### Úloha 7: Dokumentácia a úplná verifikácia
 
@@ -423,14 +425,26 @@ a 1443866.
 - aktualizovať `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/graphics.md`;
 - ponechať tento dokument ako trvalý handoff a aktualizovať výsledné benchmarky.
 
-- [ ] V `AGENTS.md` nahradiť rozhodnutie „middle LOD closed“ novým rozhodnutím z 2026-08-31.
-- [ ] Zdokumentovať JSON/PNG pipeline a nový scenery matrix.
-- [ ] Spustiť `npm test`.
-- [ ] Spustiť `npm run build`.
-- [ ] Spustiť `node scripts/clash-check.mjs` nad hotovou scénou.
-- [ ] Znovu spustiť oficiálnu validáciu všetkých 33 JSON/PNG spriteov.
-- [ ] Vizuálne skontrolovať natívne aj 4× preview a reálne kontaktné hárky.
-- [ ] Commit: `docs(graphics): record three-tier sprite lod`.
+- [x] V `AGENTS.md` nahradiť rozhodnutie „middle LOD closed“ novým rozhodnutím z 2026-08-31.
+- [x] Zdokumentovať JSON/PNG pipeline a nový scenery matrix.
+- [x] Spustiť `npm test`.
+- [x] Spustiť `npm run build`.
+- [x] Spustiť `node scripts/clash-check.mjs` nad hotovou scénou.
+- [x] Znovu spustiť oficiálnu validáciu všetkých 33 JSON/PNG spriteov.
+- [x] Vizuálne skontrolovať natívne aj 4× preview a reálne kontaktné hárky.
+- [x] Commit: `docs(graphics): record three-tier sprite lod`.
+
+### Výsledné benchmarky
+
+- `npm test`: **39 súborov, 811 testov, všetko PASS**.
+- `npm run build`: **136.18 kB**, 42.69 kB gzip; 119 modulov.
+- Oficiálny sprite export: **33/33 PASS**; 18×4 traffic a 15×4 roadside súborov;
+  opakovaný export nechal asset strom bez diffu.
+- Clash-check titulky, kurzor viditeľný aj skrytý: **0** off-palette pixelov, **0** buniek nad
+  dve farby, **0** buniek miešajúcich jasové banky.
+- Vizuálna sada: **15 traffic + 7 scenery PNG**, vrátane reálnych placementov seedov 42 a
+  1443866; jas kontrolovaný so `scanlines=1`.
+- Najhorší nový traffic cadence prípad je far oncoming mini **1.83 s**, pod stropom 2.0 s.
 
 ---
 
@@ -461,7 +475,8 @@ a 1443866.
    ```
 
 2. Prečítaj tento dokument, `AGENTS.md`, `CLAUDE.md` a skill `zx-spectrum-screen`.
-3. Skontroluj `src/render/sprites/assets/` a validačný súhrn v sekcii 3.4.
-4. Bez ďalšieho povolenia nevykonávaj Úlohy 1–7. Používateľ najskôr číta tento dokument
-   a vizuálne PNG.
-5. Po výslovnom schválení implementácie začni Úlohou 1 a dodržuj TDD aj uvedené commit hranice.
+3. Úlohy 1–7 neopakuj; ich commity a benchmarky sú vyššie. Pri podozrení na regresiu spusti
+   rovnaké validácie a porovnaj kontaktné hárky.
+4. Najbližšia schválená položka poradia v `AGENTS.md` je traffic density scaling. Fleet gate stále
+   platí: nepridávaj siedmy typ vozidla bez nového rozhodnutia Foxa.
+5. JSON je runtime zdroj pravdy; PNG je iba náhľad. Fyzickú veľkosť nikdy neodvodzuj z LOD mriežky.
