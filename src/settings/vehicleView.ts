@@ -97,6 +97,16 @@ export const TRAFFIC_SCALE_B =
 export const TRAFFIC_SCALE_A = TRAFFIC_SCALE_NEAR * (TRAFFIC_SCALE_NEAR_Z_M + TRAFFIC_SCALE_B)
 
 /**
+ * Physical sprite boxes before projection. Authored LOD grids may be smaller or
+ * larger, but lane fit, growth and collision continue to use these dimensions.
+ */
+export const TRAFFIC_CANONICAL_SIZE = {
+  mini: { w: 14, h: 11 },
+  car: { w: 22, h: 15 },
+  bus: { w: 28, h: 18 },
+} as const
+
+/**
  * Tallest projected height still drawn by the far tier, in pixels.
  *
  * Raised from 9 to 10 when the sprite started being sampled at a fractional

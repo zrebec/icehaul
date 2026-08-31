@@ -191,6 +191,41 @@ describe('the drawn pixels are the colliding pixels', () => {
 })
 
 describe('projected size is stable and monotonic', () => {
+  it('pins the physical box throughout the approach', () => {
+    // Characterisation before authored LOD assets gain 0.5x / 1x / 2x source
+    // resolutions. These boxes are the gameplay geometry: changing the source
+    // grid must not move an anchor, widen a lane share or grow the hitbox.
+    const expected = {
+      mini: [
+        [220, 126, 29, 3, 3], [100, 125, 28, 6, 5], [50, 123, 27, 9, 7],
+        [25, 122, 27, 12, 10], [10, 119, 33, 17, 13], [5, 118, 46, 19, 15],
+        [2, 118, 90, 20, 16],
+      ],
+      car: [
+        [220, 125, 29, 5, 3], [100, 123, 27, 9, 6], [50, 121, 24, 14, 10],
+        [25, 118, 24, 19, 13], [10, 115, 28, 26, 18], [5, 113, 41, 29, 20],
+        [2, 112, 85, 31, 21],
+      ],
+      bus: [
+        [220, 125, 28, 6, 4], [100, 122, 26, 11, 7], [50, 119, 23, 17, 11],
+        [25, 116, 21, 24, 16], [10, 111, 25, 33, 21], [5, 109, 37, 37, 24],
+        [2, 108, 80, 40, 26],
+      ],
+    } as const
+
+    for (const type of ['mini', 'car', 'bus'] as const) {
+      for (const [dist, left, top, w, h] of expected[type]) {
+        const p = projectTrafficVehicle(
+          VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, veh(dist, 'same', type), noCurve,
+        )!
+        expect(
+          { left: p.left, top: p.top, w: p.w, h: p.h },
+          `${type} at ${dist}m`,
+        ).toEqual({ left, top, w, h })
+      }
+    }
+  })
+
   it('never shrinks as a vehicle gets closer', () => {
     for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
       for (const type of ['mini', 'car', 'bus'] as VehicleType[]) {
