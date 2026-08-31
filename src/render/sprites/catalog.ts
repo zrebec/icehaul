@@ -2,6 +2,7 @@ import { C } from 'zx-kit'
 import type { SpectrumColor } from 'zx-kit'
 import manifest from './assets/manifest.json'
 import type { TrafficDir, VehicleType } from '../../game/traffic.ts'
+import type { RoadsideType } from '../../game/roadside.ts'
 import type { LodTier } from '../vehicleLod.ts'
 
 export const ZX_COLOR_BY_NAME = {
@@ -181,4 +182,16 @@ export function getTrafficSprite(
     brakingSprites.set(name, hit)
   }
   return hit
+}
+
+/** Stable manifest key and validated asset lookup for roadside scenery. */
+export function roadsideSpriteName(type: RoadsideType, lod: LodTier): string {
+  return `${type}-${lod}`
+}
+
+export function getRoadsideSprite(type: RoadsideType, lod: LodTier): LoadedZxSpriteAsset {
+  const name = roadsideSpriteName(type, lod)
+  const asset = ROADSIDE_SPRITES[name]
+  if (!asset) fail(name, 'missing roadside asset')
+  return asset
 }

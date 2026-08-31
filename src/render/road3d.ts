@@ -6,6 +6,7 @@ import {
   TRAFFIC_SCALE_A, TRAFFIC_SCALE_B,
   TRAFFIC_CANONICAL_SIZE,
   TRAFFIC_VIEW_DISTANCE_M,
+  SCENERY_CANONICAL_SIZE, SCENERY_SCALE_NEAR_Z_M, SCENERY_VIEW_DISTANCE_M,
   ROAD_HALF_TOP, ROAD_HALF_BOTTOM,
   KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
 } from '../config.ts'
@@ -15,7 +16,12 @@ import { scaleRoadsideRows } from './spriteRaster.ts'
 export { scaleRoadsideRows, resampleSpriteAtScale } from './spriteRaster.ts'
 import { chooseLodTier, type LodTier } from './vehicleLod.ts'
 import { CONTOUR_CHAR, type VehicleContour } from './vehicleContour.ts'
-import { getTrafficSprite, trafficSpriteName } from './sprites/catalog.ts'
+import {
+  getRoadsideSprite, getTrafficSprite, roadsideSpriteName, trafficSpriteName,
+} from './sprites/catalog.ts'
+import {
+  chooseSceneryLod, rasteriseRoadsideAtScale, roadsideScaleForDepth,
+} from './roadsideRaster.ts'
 import { isGlowEnabled, pushTrafficLampSpots } from './vehicleGlow.ts'
 import {
   visibleMarkers, visibleKerbStripes, visibleCentreDashes,
@@ -226,10 +232,6 @@ function drawSurfaceScanline(
 import type { Canister } from '../game/canisters.ts'
 import type { RoadsideObject, RoadsideType } from '../game/roadside.ts'
 import type { TrafficVehicle, VehicleType } from '../game/traffic.ts'
-import { DECIDUOUS_ROWS, DECIDUOUS_COLORS, DECIDUOUS_W, DECIDUOUS_H } from './sprites/deciduous.ts'
-import { CONIFER_ROWS, CONIFER_COLORS, CONIFER_W, CONIFER_H } from './sprites/conifer.ts'
-import { ROCKS_ROWS, ROCKS_COLORS, ROCKS_W, ROCKS_H } from './sprites/rocks.ts'
-import { SIGNPOST_ROWS, SIGNPOST_COLORS, SIGNPOST_W, SIGNPOST_H } from './sprites/signpost.ts'
 
 type RowColors = Readonly<Record<string, SpectrumColor>>
 
@@ -469,12 +471,12 @@ function drawSameDirVehicle(
   braking = false,
 ): void {
   drawVehicleContour(ctx, p)
-  drawTrafficRows(ctx, p.raster, getTrafficSprite('same', p.type, p.lod, braking).colors, p)
+  drawRasterRows(ctx, p.raster, getTrafficSprite('same', p.type, p.lod, braking).colors, p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
   drawVehicleContour(ctx, p)
-  drawTrafficRows(ctx, p.raster, getTrafficSprite('oncoming', p.type, p.lod).colors, p)
+  drawRasterRows(ctx, p.raster, getTrafficSprite('oncoming', p.type, p.lod).colors, p)
 }
 
 /**
@@ -549,16 +551,14 @@ export function getTrafficSpriteColors(
 /** Minimal placement box for scaled row-string sprites (TrafficProjection fits). */
 interface SpriteBox { left: number; top: number; w: number; h: number }
 
-function drawTrafficRows(
+function drawRasterRows(
   ctx: CanvasRenderingContext2D,
   raster: readonly string[],
   colors: RowColors,
   p: SpriteBox,
 ): void {
-  // `raster` is already the projected size: one raster pixel is one screen pixel.
-  // There is no scaling arithmetic left here, and therefore none left to disagree
-  // with the collision check, which reads the very same raster. The measurements
-  // behind that change are in vehicleRaster.ts.
+  // The raster is already projected: one raster pixel is one screen pixel.
+  // Equal-mark runs reduce canvas calls without changing any ZX cell.
   for (let y = 0; y < raster.length; y++) {
     const row = raster[y]!
     let x = 0
@@ -576,40 +576,76 @@ function drawTrafficRows(
   }
 }
 
-function drawRoadsideRows(
-  ctx: CanvasRenderingContext2D,
-  rows: readonly string[],
-  colors: RowColors,
-  p: SpriteBox,
-): void {
-  const scaled = scaleRoadsideRows(rows, p.w, p.h)
-  for (let y = 0; y < scaled.length; y++) {
-    const row = scaled[y]!
-    for (let x = 0; x < row.length; x++) {
-      const color = colors[row[x]!]
-      if (!color) continue
-      ctx.fillStyle = color
-      ctx.fillRect(p.left + x, p.top + y, 1, 1)
-    }
-  }
-}
-
 // ── Roadside objects rendering ───────────────────────────────────────────────
 
-interface RoadsideSprite { rows: readonly string[]; colors: RowColors; w: number; h: number }
-
-// Imported sprite per scenery kind (`lamp` stays procedural — no sprite). On-screen
-// size derives from each sprite's own W/H, so relative sizes come from the art itself
-// (see docs/sprites.md), scaled by ROADSIDE_WORLD_UNIT × perspective depth.
-const ROADSIDE_SPRITES: Record<Exclude<RoadsideType, 'lamp'>, RoadsideSprite> = {
-  deciduous: { rows: DECIDUOUS_ROWS, colors: DECIDUOUS_COLORS, w: DECIDUOUS_W, h: DECIDUOUS_H },
-  conifer:   { rows: CONIFER_ROWS,   colors: CONIFER_COLORS,   w: CONIFER_W,   h: CONIFER_H },
-  rocks:     { rows: ROCKS_ROWS,     colors: ROCKS_COLORS,     w: ROCKS_W,     h: ROCKS_H },
-  sign:      { rows: SIGNPOST_ROWS,  colors: SIGNPOST_COLORS,  w: SIGNPOST_W,  h: SIGNPOST_H },
+export interface RoadsideProjection {
+  readonly x: number
+  readonly y: number
+  readonly left: number
+  readonly top: number
+  readonly w: number
+  readonly h: number
+  readonly worldZ: number
+  readonly scale: number
+  readonly type: RoadsideType
+  readonly lod: LodTier
+  readonly raster: readonly string[]
+  readonly colors: RowColors
 }
 
-/** Sprite-pixel → screen-pixel size at full perspective depth (scale = 1). Tune for legibility. */
-const ROADSIDE_WORLD_UNIT = 0.55
+/**
+ * Project all visible scenery once, in painter's order. Source grids are chosen
+ * after physical scale, so the three authored resolutions cannot move an object.
+ */
+export function projectRoadsideObjects(
+  viewportTop: number,
+  viewportBottom: number,
+  cameraDistance: number,
+  playerX: number,
+  objects: readonly RoadsideObject[],
+  getCurvature: (distM: number) => number,
+): RoadsideProjection[] {
+  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
+  const roadHeight = viewportBottom - horizonY
+  const scanlines = roadHeight - 1
+  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
+  const curveOffset = computeCurveOffsets(cameraDistance, scanlines, getCurvature)
+  const projected: RoadsideProjection[] = []
+
+  for (const object of [...objects].sort((a, b) => b.distM - a.distM)) {
+    const worldZ = object.distM - cameraDistance
+    if (worldZ < SCENERY_SCALE_NEAR_Z_M || worldZ > SCENERY_VIEW_DISTANCE_M) continue
+
+    const i = Math.max(0, Math.min(scanlines - 1, Math.round(PERSPECTIVE_K / worldZ) - 1))
+    const y = horizonY + i + 1
+    const t = (i + 1) / roadHeight
+    const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
+    const centerX = baseVanX + (curveOffset[i] ?? 0)
+    const edgeX = object.side === -1
+      ? centerX - half - object.offsetRoadWidths * half
+      : centerX + half + object.offsetRoadWidths * half
+    const x = Math.round(edgeX)
+
+    const scale = roadsideScaleForDepth(worldZ)
+    const lod = chooseSceneryLod(scale)
+    const sprite = getRoadsideSprite(object.type, lod)
+    const raster = rasteriseRoadsideAtScale(
+      roadsideSpriteName(object.type, lod),
+      sprite.rows,
+      scale,
+      x,
+      y,
+      SCENERY_CANONICAL_SIZE[object.type],
+      object.type === 'lamp' ? ['Y'] : [],
+    )
+    if (!raster) continue
+    projected.push({
+      x, y, worldZ, scale, type: object.type, lod, colors: sprite.colors,
+      ...raster,
+    })
+  }
+  return projected
+}
 
 /**
  * Draw roadside decorations (trees, rocks, signs, lampposts) in perspective.
@@ -624,62 +660,11 @@ export function drawRoadsideObjects(
   objects: readonly RoadsideObject[],
   getCurvature: (distM: number) => number,
 ): void {
-  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
-  const roadHeight = viewportBottom - horizonY
-  const scanlines = roadHeight - 1
-  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
-
-  const curveOffset = computeCurveOffsets(cameraDistance, scanlines, getCurvature)
-
-  for (const obj of objects) {
-    const worldZ = obj.distM - cameraDistance
-    if (worldZ < 3 || worldZ > PERSPECTIVE_K) continue
-
-    const dy = PERSPECTIVE_K / worldZ
-    const i = Math.round(dy) - 1
-    if (i < 0 || i >= scanlines) continue
-
-    const y = horizonY + i + 1
-    const t = (i + 1) / roadHeight
-    const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
-    const centerX = baseVanX + (curveOffset[i] ?? 0)
-
-    // Position outside the road edge
-    const edgeX = obj.side === -1
-      ? centerX - half - obj.offsetRoadWidths * half
-      : centerX + half + obj.offsetRoadWidths * half
-    const screenX = Math.round(edgeX)
-
-    if (screenX < -90 || screenX > GAME_WIDTH + 90) continue
-
-    // Perspective depth scale: small far at the horizon → large up close.
-    const scale = Math.max(0.15, t)
-
-    if (obj.type === 'lamp') {
-      drawLamp(ctx, screenX, y, scale)
-      continue
-    }
-    // Size from the sprite's own dimensions × world unit × depth — keeps aspect and
-    // relative sizes (a 56-tall tree is naturally bigger than 24-tall rocks).
-    const spr = ROADSIDE_SPRITES[obj.type]
-    const w = Math.max(2, Math.round(spr.w * ROADSIDE_WORLD_UNIT * scale))
-    const h = Math.max(2, Math.round(spr.h * ROADSIDE_WORLD_UNIT * scale))
-    drawRoadsideRows(ctx, spr.rows, spr.colors, { left: screenX - (w >> 1), top: y - h, w, h })
-  }
-}
-
-function drawLamp(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number): void {
-  const h = Math.round(12 * scale)
-  // Pole
-  ctx.fillStyle = C.WHITE
-  ctx.fillRect(x, baseY - h, 1, h)
-  // Light
-  ctx.fillStyle = C.B_YELLOW
-  const lightW = Math.max(1, Math.round(2 * scale))
-  ctx.fillRect(x - Math.floor(lightW / 2), baseY - h - 1, lightW, 1)
-  // Glow pixel
-  if (scale > 0.5) {
-    ctx.fillRect(x - Math.floor(lightW / 2), baseY - h - 2, lightW, 1)
+  for (const projection of projectRoadsideObjects(
+    viewportTop, viewportBottom, cameraDistance, playerX, objects, getCurvature,
+  )) {
+    if (projection.left + projection.w < 0 || projection.left >= GAME_WIDTH) continue
+    drawRasterRows(ctx, projection.raster, projection.colors, projection)
   }
 }
 
