@@ -44,6 +44,29 @@ node scripts/clash-check.mjs          # --save-frames ulozi aj PNG
 a nemieša jasové banky. Vzorkuje **párne** riadky zariadenia — `drawScanlines`
 stmavuje nepárne, a vzorka na nich by merala prekryv namiesto hry.
 
+## Kontaktné hárky reálneho renderera
+
+Oba debug režimy kreslia cez produkčný `drawRoad` a príslušný objektový renderer;
+nemajú vlastnú kópiu perspektívy. Názov `far`/`mid`/`near` v bunke je výsledok,
+ktorý práve vrátil skutočný projektor.
+
+```bash
+npm run dev
+ICEROADS_URL=http://localhost:5174/ node scripts/traffic-matrix.mjs .shots/traffic
+ICEROADS_URL=http://localhost:5174/ node scripts/scenery-matrix.mjs .shots/scenery
+```
+
+- `?matrix=1&lod=1` nájde snímku tesne pred a po každom LOD prechode cez reálny
+  traffic projektor. Explicitné `dist=` môže výber zúžiť.
+- `?sceneryMatrix=1` má riadok pre každý typ a stĺpce 220, 120, 80, 50, 25, 20,
+  10 a 3 m. Podporuje `zoom`, `surface`, `curve`, `offset`, `types`, `dist` a
+  `scanlines=1`.
+- `?sceneryMatrix=1&placement=42` namiesto izolovaných objektov ukáže štyri
+  skutočné okná seedovanej cesty. Capture sada obsahuje seed 42 aj ľadový benchmark
+  1443866.
+
+Jas sa hodnotí so `scanlines=1`; bez neho je hárok svetlejší než hra.
+
 ---
 
 ## Pipeline

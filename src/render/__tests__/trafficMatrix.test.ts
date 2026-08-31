@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_SELECTION, MATRIX_DEFAULTS, MATRIX_DIRS, MATRIX_DISTANCES_M, MATRIX_TYPES,
   isMatrixRequested, matrixLayout, matrixLayoutFor, matrixOptionsFromSearch,
+  trafficLodBoundaryDistances,
 } from '../debug/trafficMatrix.ts'
 import { GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
 
@@ -126,6 +127,27 @@ describe('matrixOptionsFromSearch', () => {
     expect(matrixOptionsFromSearch('?dist=220,50,10').distances).toEqual([220, 50, 10])
     expect(matrixOptionsFromSearch('?dist=50,-5,abc').distances).toEqual([50])
     expect(matrixOptionsFromSearch('?dist=abc').distances).toBeUndefined()
+  })
+
+  it('asks the real projector for the LOD handover ladder', () => {
+    expect(matrixOptionsFromSearch('?lod=1').distances).toEqual(trafficLodBoundaryDistances())
+  })
+
+  it('lets an explicit distance ladder override the LOD handover ladder', () => {
+    expect(matrixOptionsFromSearch('?lod=1&dist=220,3').distances).toEqual([220, 3])
+  })
+})
+
+describe('trafficLodBoundaryDistances', () => {
+  it('returns a stable far-to-near pair around all six type boundaries', () => {
+    const distances = trafficLodBoundaryDistances()
+    expect(distances.length).toBeGreaterThanOrEqual(8)
+    expect(trafficLodBoundaryDistances()).toBe(distances)
+    for (let i = 1; i < distances.length; i++) {
+      expect(distances[i]!).toBeLessThan(distances[i - 1]!)
+    }
+    expect(Math.max(...distances)).toBeLessThanOrEqual(220)
+    expect(Math.min(...distances)).toBeGreaterThanOrEqual(2)
   })
 })
 

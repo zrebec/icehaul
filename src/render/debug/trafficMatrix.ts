@@ -19,13 +19,14 @@
 import { C, drawScanlines, type GlowSource } from 'zx-kit'
 import {
   GAME_WIDTH, GAME_HEIGHT, VIEWPORT_TOP, VIEWPORT_BOTTOM,
-  GLOW_ALPHA, SCANLINE_ALPHA,
+  GLOW_ALPHA, SCANLINE_ALPHA, TRAFFIC_VIEW_DISTANCE_M,
   type Surface,
 } from '../../config.ts'
-import { drawRoad, drawTraffic } from '../road3d.ts'
+import { drawRoad, drawTraffic, projectTrafficVehicle } from '../road3d.ts'
 import { drawTruck, pushTruckLampSpots } from '../truck.ts'
 import { renderLampGlow } from '../vehicleGlow.ts'
 import type { TrafficVehicle, TrafficDir, VehicleType } from '../../game/traffic.ts'
+import type { LodTier } from '../vehicleLod.ts'
 
 /**
  * Distances sampled, in metres. Chosen where the projection changes character
@@ -180,7 +181,7 @@ function renderCell(
   type: VehicleType,
   dir: TrafficDir,
   distM: number,
-): void {
+): LodTier | undefined {
   const surfaceAt = () => opts.surface
   const curvatureAt = () => opts.curvature
 
@@ -192,9 +193,10 @@ function renderCell(
   glowSpots.length = 0
 
   drawRoad(cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX, surfaceAt, curvatureAt)
+  const vehicle = cellVehicle(type, dir, distM, opts.vehicleX, opts.trafficBrake)
   drawTraffic(
     cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX,
-    [cellVehicle(type, dir, distM, opts.vehicleX, opts.trafficBrake)], curvatureAt, glowSpots,
+    [vehicle], curvatureAt, glowSpots,
   )
   if (opts.showTruck) {
     const truckX = GAME_WIDTH / 2 + opts.playerX * 50
@@ -204,6 +206,20 @@ function renderCell(
     pushTruckLampSpots(glowSpots, truckX, VIEWPORT_BOTTOM - 2, 0, 0, opts.brake)
   }
   renderLampGlow(cellCtx, glowSpots)
+  return vehicle.lodTier
+}
+
+function drawTierBadge(
+  ctx: CanvasRenderingContext2D,
+  tier: LodTier | undefined,
+  x: number,
+  y: number,
+): void {
+  if (!tier) return
+  ctx.fillStyle = C.BLACK
+  ctx.fillRect(x + 1, y + 1, 27, 9)
+  ctx.fillStyle = tier === 'far' ? C.B_CYAN : tier === 'mid' ? C.B_YELLOW : C.B_RED
+  ctx.fillText(tier, x + 2, y + 2)
 }
 
 /**
@@ -245,13 +261,17 @@ export function drawTrafficMatrix(
       ctx.fillText(`${type}/${dir === 'oncoming' ? 'onc' : 'same'}`, 1, y + 2)
 
       for (let c = 0; c < layout.cols; c++) {
-        renderCell(cellCtx, opts, type, dir, opts.distances[c]!)
+        const tier = renderCell(cellCtx, opts, type, dir, opts.distances[c]!)
+        const x = LABEL_W + c * layout.cellW
         // Crop to the road viewport — the HUD is not what this sheet is about.
         ctx.drawImage(
           cell,
           0, VIEWPORT_TOP, GAME_WIDTH, CELL_H,
-          LABEL_W + c * layout.cellW, y, layout.cellW, layout.cellH,
+          x, y, layout.cellW, layout.cellH,
         )
+        // Read back from the actual vehicle the renderer just projected. The
+        // harness owns no scale law and cannot drift from the game unnoticed.
+        drawTierBadge(ctx, tier, x, y)
       }
       row++
     }
@@ -309,10 +329,54 @@ export function matrixOptionsFromSearch(search: string): Partial<MatrixOptions> 
   const dirs = q.get('dirs')?.split(',').filter(d => (MATRIX_DIRS as readonly string[]).includes(d))
   if (dirs?.length) out.dirs = dirs as TrafficDir[]
 
+  if (q.get('lod') === '1') out.distances = trafficLodBoundaryDistances()
+
+  // An explicit ladder wins over the generated boundary ladder. This makes
+  // `lod=1` a useful default that can still be narrowed for a high-zoom crop.
   const distances = q.get('dist')?.split(',').map(Number).filter(n => Number.isFinite(n) && n > 0)
   if (distances?.length) out.distances = distances
 
   return out
+}
+
+let lodBoundaryDistanceCache: readonly number[] | undefined
+
+/**
+ * Samples the real approach projector and returns the frame immediately before
+ * and after every far/mid and mid/near handover for all three physical boxes.
+ * Lazy by design: the normal game imports this debug module from `main.ts`, but
+ * must not walk thousands of synthetic projection frames unless `?lod=1` asks.
+ */
+export function trafficLodBoundaryDistances(): readonly number[] {
+  if (lodBoundaryDistanceCache) return lodBoundaryDistanceCache
+
+  const found = new Set<number>()
+  const stepM = 0.25
+  const steps = Math.round((TRAFFIC_VIEW_DISTANCE_M - 2) / stepM)
+
+  for (const type of MATRIX_TYPES) {
+    const vehicle = cellVehicle(type, 'same', TRAFFIC_VIEW_DISTANCE_M, 0.5, false)
+    let previousTier: LodTier | undefined
+    let previousDistance = TRAFFIC_VIEW_DISTANCE_M
+
+    for (let step = 0; step <= steps; step++) {
+      const distance = TRAFFIC_VIEW_DISTANCE_M - step * stepM
+      vehicle.distM = distance
+      const projected = projectTrafficVehicle(
+        VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, vehicle, () => 0,
+      )
+      if (!projected) continue
+      if (previousTier && projected.lod !== previousTier) {
+        found.add(previousDistance)
+        found.add(distance)
+      }
+      previousTier = projected.lod
+      previousDistance = distance
+    }
+  }
+
+  lodBoundaryDistanceCache = Object.freeze([...found].sort((a, b) => b - a))
+  return lodBoundaryDistanceCache
 }
 
 /** True when the URL asks for the contact sheet instead of the game. */

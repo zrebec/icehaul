@@ -59,6 +59,7 @@ Work on the dev server and on the deployed build alike:
 | `?glow=0` | turn the lamp bloom off. `?glow=0.5` sets its strength, `?glow=0.5,1.5` its radius too |
 | `?outline=0` | traffic without its dark outline and contact shadow |
 | `?matrix=1` | the traffic contact sheet instead of the game (a developer view) |
+| `?sceneryMatrix=1` | the roadside LOD contact sheet; add `placement=<seed>` for real generated placement |
 
 **The clutch is the whole game.** Gears do not move without **SHIFT** held — and
 what matters is not how long you hold it, but the revs you let it out at. The clean
@@ -114,7 +115,8 @@ On ice: **tap** the steering keys for controlled corrections. **Holding** the ke
   and three of PAPER cannot express an off-palette or clash-breaking picture, so the format itself
   guarantees what a PNG could only be trusted about
 - Headless capture: `node scripts/screenshot.mjs out.png`, contact sheets via
-  `node scripts/traffic-matrix.mjs`, attribute-clash validation via `node scripts/clash-check.mjs`
+  `node scripts/traffic-matrix.mjs` and `node scripts/scenery-matrix.mjs`, attribute-clash
+  validation via `node scripts/clash-check.mjs`
 
 ## Project structure
 
@@ -160,7 +162,7 @@ src/
     sprites/
       playerTruck.ts   40×64 articulated road train, five cab and trailer poses
       vehicles.ts      the six hand-drawn traffic vehicles
-    debug/             the traffic contact sheet (?matrix=1)
+    debug/             traffic and scenery contact sheets (?matrix=1 / ?sceneryMatrix=1)
   audio/
     engine.ts          AY chip engine drone (3 channels)
 scripts/
@@ -168,6 +170,7 @@ scripts/
   drive-shot.mjs       automated drive + capture
   frame-profile.mjs    where a frame actually goes
   traffic-matrix.mjs   contact sheets — the renderer comparison harness
+  scenery-matrix.mjs   roadside LOD sheets + real seeded placement captures
   sprite-import.mjs    AI contact sheet → zx-kit row-string sprites
   screen-import.mjs    .scr screen dump → an inlined TypeScript module
   clash-check.mjs      reads the rendered frame back and proves it is hardware-valid
