@@ -168,6 +168,41 @@ function cellVehicle(
   }
 }
 
+/**
+ * Visit one matrix row as one continuous approach.
+ *
+ * LOD hysteresis lives on `TrafficVehicle.lodTier`, so rebuilding the vehicle
+ * for every distance silently turns the sheet into a stateless threshold test.
+ * Keeping this traversal explicit also gives tests a way to ask the real
+ * projector which authored tier every cell will carry.
+ */
+export function mapTrafficMatrixRow<T>(
+  options: MatrixOptions,
+  type: VehicleType,
+  dir: TrafficDir,
+  visit: (vehicle: TrafficVehicle, column: number) => T,
+): T[] {
+  if (options.distances.length === 0) return []
+
+  const vehicle = cellVehicle(
+    type, dir, TRAFFIC_VIEW_DISTANCE_M, options.vehicleX, options.trafficBrake,
+  )
+  // Boundary-only sheets do not necessarily include the 220 m visibility edge.
+  // Prime the remembered tier there so their first "before" cell carries the
+  // same far state as a vehicle that really approached from the horizon.
+  projectTrafficVehicle(
+    VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, options.playerX, vehicle,
+    () => options.curvature,
+  )
+
+  const results: T[] = []
+  for (let column = 0; column < options.distances.length; column++) {
+    vehicle.distM = options.distances[column]!
+    results.push(visit(vehicle, column))
+  }
+  return results
+}
+
 /** Refilled per cell, never reallocated. */
 const glowSpots: GlowSource[] = []
 
@@ -178,9 +213,7 @@ const glowSpots: GlowSource[] = []
 function renderCell(
   cellCtx: CanvasRenderingContext2D,
   opts: MatrixOptions,
-  type: VehicleType,
-  dir: TrafficDir,
-  distM: number,
+  vehicle: TrafficVehicle,
 ): LodTier | undefined {
   const surfaceAt = () => opts.surface
   const curvatureAt = () => opts.curvature
@@ -193,7 +226,6 @@ function renderCell(
   glowSpots.length = 0
 
   drawRoad(cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX, surfaceAt, curvatureAt)
-  const vehicle = cellVehicle(type, dir, distM, opts.vehicleX, opts.trafficBrake)
   drawTraffic(
     cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX,
     [vehicle], curvatureAt, glowSpots,
@@ -205,7 +237,6 @@ function renderCell(
     // `?truck=0` takes the truck and its halo out together.
     pushTruckLampSpots(glowSpots, truckX, VIEWPORT_BOTTOM - 2, 0, 0, opts.brake)
   }
-  renderLampGlow(cellCtx, glowSpots)
   return vehicle.lodTier
 }
 
@@ -220,6 +251,22 @@ function drawTierBadge(
   ctx.fillRect(x + 1, y + 1, 27, 9)
   ctx.fillStyle = tier === 'far' ? C.B_CYAN : tier === 'mid' ? C.B_YELLOW : C.B_RED
   ctx.fillText(tier, x + 2, y + 2)
+}
+
+/** Production draws its mask before its emissive layer; lock that order here. */
+export function finishTrafficMatrixLayers(
+  scanlines: boolean,
+  drawScanlineLayer: () => void,
+  drawGlowLayer: () => void,
+): void {
+  if (scanlines) drawScanlineLayer()
+  drawGlowLayer()
+}
+
+interface DeferredCellGlow {
+  readonly x: number
+  readonly y: number
+  readonly spots: readonly GlowSource[]
 }
 
 /**
@@ -241,6 +288,16 @@ export function drawTrafficMatrix(
   const cellCtx = cell.getContext('2d')
   if (!cellCtx) throw new Error('matrix: no 2d context for the cell canvas')
 
+  // Glow must be composited after the sheet-wide scanline mask, just as it is
+  // in `main.ts`. Render it into a transparent native-size cell and magnify the
+  // resulting game pixels only when the layer is finally added to the sheet.
+  const glowCell = makeCellCanvas()
+  glowCell.width = GAME_WIDTH
+  glowCell.height = GAME_HEIGHT
+  const glowCellCtx = glowCell.getContext('2d')
+  if (!glowCellCtx) throw new Error('matrix: no 2d context for the glow cell canvas')
+  const deferredGlow: DeferredCellGlow[] = []
+
   ctx.imageSmoothingEnabled = false
   ctx.fillStyle = C.BLACK
   ctx.fillRect(0, 0, layout.width, layout.height)
@@ -260,8 +317,8 @@ export function drawTrafficMatrix(
       ctx.fillStyle = C.B_WHITE
       ctx.fillText(`${type}/${dir === 'oncoming' ? 'onc' : 'same'}`, 1, y + 2)
 
-      for (let c = 0; c < layout.cols; c++) {
-        const tier = renderCell(cellCtx, opts, type, dir, opts.distances[c]!)
+      mapTrafficMatrixRow(opts, type, dir, (vehicle, c) => {
+        const tier = renderCell(cellCtx, opts, vehicle)
         const x = LABEL_W + c * layout.cellW
         // Crop to the road viewport — the HUD is not what this sheet is about.
         ctx.drawImage(
@@ -272,16 +329,36 @@ export function drawTrafficMatrix(
         // Read back from the actual vehicle the renderer just projected. The
         // harness owns no scale law and cannot drift from the game unnoticed.
         drawTierBadge(ctx, tier, x, y)
-      }
+        deferredGlow.push({ x, y, spots: [...glowSpots] })
+        return tier
+      })
       row++
     }
   }
 
-  // Last, over the whole sheet, exactly as `main.ts` draws it over the frame.
-  // Applied to the *output* rows rather than to a cell before zooming: the game
-  // darkens every other device row, so at any zoom half the rows of the final
-  // image is the same 0.65 average brightness the player actually sees.
-  if (opts.scanlines) drawScanlines(ctx, SCANLINE_ALPHA)
+  finishTrafficMatrixLayers(
+    opts.scanlines,
+    // Applied to the *output* rows rather than to a cell before zooming: the
+    // game darkens every other device row at the final device resolution.
+    () => drawScanlines(ctx, SCANLINE_ALPHA),
+    () => {
+      const previousSmooth = ctx.imageSmoothingEnabled
+      const previousComposite = ctx.globalCompositeOperation
+      ctx.imageSmoothingEnabled = false
+      ctx.globalCompositeOperation = 'lighter'
+      for (const entry of deferredGlow) {
+        glowCellCtx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT)
+        renderLampGlow(glowCellCtx, entry.spots)
+        ctx.drawImage(
+          glowCell,
+          0, VIEWPORT_TOP, GAME_WIDTH, CELL_H,
+          entry.x, entry.y, layout.cellW, layout.cellH,
+        )
+      }
+      ctx.imageSmoothingEnabled = previousSmooth
+      ctx.globalCompositeOperation = previousComposite
+    },
+  )
 
   return layout
 }

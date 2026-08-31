@@ -7,29 +7,31 @@ import json
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ASSET_ROOT = REPO_ROOT / "src/render/sprites/assets"
-ZX_COLOURS = {
-    "C.BLACK",
-    "C.BLUE",
-    "C.RED",
-    "C.MAGENTA",
-    "C.GREEN",
-    "C.CYAN",
-    "C.YELLOW",
-    "C.WHITE",
-    "C.B_BLACK",
-    "C.B_BLUE",
-    "C.B_RED",
-    "C.B_MAGENTA",
-    "C.B_GREEN",
-    "C.B_CYAN",
-    "C.B_YELLOW",
-    "C.B_WHITE",
+ZX_RGBA = {
+    "C.BLACK": (0x00, 0x00, 0x00, 0xFF),
+    "C.BLUE": (0x00, 0x00, 0xCD, 0xFF),
+    "C.RED": (0xCD, 0x00, 0x00, 0xFF),
+    "C.MAGENTA": (0xCD, 0x00, 0xCD, 0xFF),
+    "C.GREEN": (0x00, 0xCD, 0x00, 0xFF),
+    "C.CYAN": (0x00, 0xCD, 0xCD, 0xFF),
+    "C.YELLOW": (0xCD, 0xCD, 0x00, 0xFF),
+    "C.WHITE": (0xCD, 0xCD, 0xCD, 0xFF),
+    "C.B_BLACK": (0x00, 0x00, 0x00, 0xFF),
+    "C.B_BLUE": (0x00, 0x00, 0xFF, 0xFF),
+    "C.B_RED": (0xFF, 0x00, 0x00, 0xFF),
+    "C.B_MAGENTA": (0xFF, 0x00, 0xFF, 0xFF),
+    "C.B_GREEN": (0x00, 0xFF, 0x00, 0xFF),
+    "C.B_CYAN": (0x00, 0xFF, 0xFF, 0xFF),
+    "C.B_YELLOW": (0xFF, 0xFF, 0x00, 0xFF),
+    "C.B_WHITE": (0xFF, 0xFF, 0xFF, 0xFF),
 }
+ZX_COLOURS = set(ZX_RGBA)
+TRANSPARENT = (0x00, 0x00, 0x00, 0x00)
 
 
 def load_catalogue() -> list[tuple[dict[str, object], dict[str, object]]]:
@@ -65,6 +67,30 @@ def local_cell_colour_counts(sprite: dict[str, object]) -> list[int]:
             }
             counts.append(len(colours))
     return counts
+
+
+def images_equal(left: Image.Image, right: Image.Image) -> bool:
+    """Exact pixel equality, including RGB channels when alpha is unchanged."""
+    return (
+        left.mode == right.mode
+        and left.size == right.size
+        and left.tobytes() == right.tobytes()
+    )
+
+
+def render_sprite(sprite: dict[str, object]) -> Image.Image:
+    """Rebuild the canonical native preview from JSON alone."""
+    width = sprite["w"]
+    height = sprite["h"]
+    rows = sprite["rows"]
+    legend = sprite["legend"]
+    image = Image.new("RGBA", (width, height), TRANSPARENT)
+    pixels = image.load()
+    for y, row in enumerate(rows):
+        for x, char in enumerate(row):
+            if char != ".":
+                pixels[x, y] = ZX_RGBA[legend[char]]
+    return image
 
 
 class LodSpriteCatalogueTest(unittest.TestCase):
@@ -114,17 +140,43 @@ class LodSpriteCatalogueTest(unittest.TestCase):
             with self.subTest(sprite=entry["name"]):
                 self.assertGreaterEqual(max(local_cell_colour_counts(sprite)), 3)
 
-    def test_png_exports_are_exact_native_and_nearest_neighbour_sizes(self) -> None:
-        for entry, _ in self.catalogue:
+    def test_exact_image_comparison_detects_rgb_change_with_same_alpha(self) -> None:
+        red = Image.new("RGBA", (1, 1), (255, 0, 0, 255))
+        green = Image.new("RGBA", (1, 1), (0, 255, 0, 255))
+        self.assertFalse(images_equal(red, green))
+
+    def test_json_renderer_preserves_palette_and_transparency(self) -> None:
+        sprite = {
+            "w": 2,
+            "h": 1,
+            "rows": ["R."],
+            "legend": {"R": "C.B_RED"},
+        }
+        rendered = render_sprite(sprite)
+        self.assertEqual(
+            list(rendered.getdata()),
+            [(255, 0, 0, 255), (0, 0, 0, 0)],
+        )
+
+    def test_png_exports_match_rows_json_and_exact_nearest_neighbour_pixels(self) -> None:
+        for entry, sprite in self.catalogue:
             with self.subTest(sprite=entry["name"]):
                 width = entry["w"]
                 height = entry["h"]
+                rows = (ASSET_ROOT / entry["files"]["rows"]).read_text(
+                    encoding="utf-8"
+                ).splitlines()
                 native = Image.open(ASSET_ROOT / entry["files"]["native"]).convert("RGBA")
                 preview = Image.open(ASSET_ROOT / entry["files"]["preview4x"]).convert("RGBA")
+                expected_native = render_sprite(sprite)
                 self.assertEqual(native.size, (width, height))
                 self.assertEqual(preview.size, (width * 4, height * 4))
-                expected = native.resize(preview.size, Image.Resampling.NEAREST)
-                self.assertIsNone(ImageChops.difference(preview, expected).getbbox())
+                self.assertEqual(rows, sprite["rows"])
+                self.assertTrue(images_equal(native, expected_native))
+                expected_preview = expected_native.resize(
+                    preview.size, Image.Resampling.NEAREST
+                )
+                self.assertTrue(images_equal(preview, expected_preview))
 
 
 if __name__ == "__main__":
