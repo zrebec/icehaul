@@ -9,6 +9,8 @@ interface SampleGrid {
   readonly y0: number
   readonly stepX: number
   readonly stepY: number
+  /** Semantic marks that must win a colour vote when they cover this cell. */
+  readonly priorityChars?: ReadonlySet<string>
 }
 
 function resampleRows(rows: readonly string[], grid: SampleGrid): string[] {
@@ -59,13 +61,19 @@ function resampleRows(rows: readonly string[], grid: SampleGrid): string[] {
 
       let winner = ''
       let winnerArea = 0
+      let priorityWinner = ''
+      let priorityArea = 0
       for (const [char, covered] of area) {
+        if (grid.priorityChars?.has(char) && covered > priorityArea) {
+          priorityWinner = char
+          priorityArea = covered
+        }
         if (covered > winnerArea) {
           winner = char
           winnerArea = covered
         }
       }
-      row += winner || '.'
+      row += priorityWinner || winner || '.'
     }
     scaled.push(row)
   }
@@ -114,6 +122,7 @@ export function resampleSpriteAtSpan(
   spanH: number,
   anchorX: number,
   anchorBottomY: number,
+  priorityChars: readonly string[] = [],
 ): SpriteRaster | null {
   const srcH = rows.length
   const srcW = rows[0]?.length ?? 0
@@ -133,6 +142,7 @@ export function resampleSpriteAtSpan(
     y0: -insetY / scaleY,
     stepX: 1 / scaleX,
     stepY: 1 / scaleY,
+    priorityChars: priorityChars.length > 0 ? new Set(priorityChars) : undefined,
   })
   if (raster.length === 0) return null
 

@@ -1,6 +1,8 @@
 import { C } from 'zx-kit'
 import type { SpectrumColor } from 'zx-kit'
 import manifest from './assets/manifest.json'
+import type { TrafficDir, VehicleType } from '../../game/traffic.ts'
+import type { LodTier } from '../vehicleLod.ts'
 
 export const ZX_COLOR_BY_NAME = {
   'C.BLACK': C.BLACK,
@@ -31,6 +33,11 @@ export interface ZxSpriteAsset {
 }
 
 export interface LoadedZxSpriteAsset extends ZxSpriteAsset {
+  readonly colors: Readonly<Record<string, SpectrumColor>>
+}
+
+export interface TrafficSprite {
+  readonly rows: readonly string[]
   readonly colors: Readonly<Record<string, SpectrumColor>>
 }
 
@@ -144,3 +151,34 @@ for (const entry of manifest.sprites) {
 
 export const TRAFFIC_SPRITES: Readonly<Record<string, LoadedZxSpriteAsset>> = Object.freeze(trafficSprites)
 export const ROADSIDE_SPRITES: Readonly<Record<string, LoadedZxSpriteAsset>> = Object.freeze(roadsideSprites)
+
+/** Stable manifest key for one authored traffic view. */
+export function trafficSpriteName(dir: TrafficDir, type: VehicleType, lod: LodTier): string {
+  return `${type}-${dir === 'same' ? 'rear' : 'front'}-${lod}`
+}
+
+const brakingSprites = new Map<string, LoadedZxSpriteAsset>()
+
+/**
+ * One of the 18 validated traffic assets, with the only runtime art state:
+ * braking brightens rear `R` cells. Front views return the original object even
+ * when `braking` is requested because the vehicle's brake lamps face away.
+ */
+export function getTrafficSprite(
+  dir: TrafficDir,
+  type: VehicleType,
+  lod: LodTier,
+  braking = false,
+): TrafficSprite {
+  const name = trafficSpriteName(dir, type, lod)
+  const asset = TRAFFIC_SPRITES[name]
+  if (!asset) fail(name, 'missing traffic asset')
+  if (!braking || dir === 'oncoming') return asset
+
+  let hit = brakingSprites.get(name)
+  if (!hit) {
+    hit = { ...asset, colors: Object.freeze({ ...asset.colors, R: C.B_RED }) }
+    brakingSprites.set(name, hit)
+  }
+  return hit
+}

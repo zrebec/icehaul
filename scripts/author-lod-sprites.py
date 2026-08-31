@@ -329,6 +329,11 @@ def vehicle_sprite(kind: str, view: str, lod: str) -> Sprite:
         if bounds[1] - bounds[0] > 4:
             grid.hline(bumper_y, bounds[0] + inset, bounds[0] + inset, "W")
             grid.hline(bumper_y, bounds[1] - inset, bounds[1] - inset, "W")
+        if detail == 0 and kind == "mini":
+            # At 4x3 the uninterrupted seven-pixel bumper held one raster for
+            # 2.03 s. A centre gap keeps the wheels visually separate and gives
+            # fractional growth a real edge to move; measured worst hold 1.83 s.
+            grid.put(width // 2, bumper_y, ".")
 
     wheel_w = max(1, round(width * (0.14 if kind != "bus" else 0.16)))
     wheel_left = max(0, round(width * 0.10))

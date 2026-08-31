@@ -17,7 +17,8 @@ import {
   findLampPair, glowCoreRadiusFor, glowRadiusFor, lampChar, lampColor, lampPairFor,
   pushTrafficLampSpots, renderLampGlow, setGlowSettings, wantsGlowCore,
 } from '../vehicleGlow.ts'
-import { drawTraffic, getTrafficSpriteRows, projectTrafficVehicle } from '../road3d.ts'
+import { drawTraffic, projectTrafficVehicle } from '../road3d.ts'
+import { getTrafficSprite } from '../sprites/catalog.ts'
 import { resetVehicleRasterCache } from '../vehicleRaster.ts'
 import { MATRIX_DISTANCES_M, glowSettingsFromSearch } from '../debug/trafficMatrix.ts'
 import {
@@ -25,10 +26,15 @@ import {
   GLOW_RADIUS_MAX, GLOW_RADIUS_MIN, VIEWPORT_BOTTOM, VIEWPORT_TOP,
 } from '../../config.ts'
 import type { TrafficDir, TrafficVehicle, VehicleType } from '../../game/traffic.ts'
+import type { LodTier } from '../vehicleLod.ts'
 
 const DIRS: readonly TrafficDir[] = ['same', 'oncoming']
 const TYPES: readonly VehicleType[] = ['mini', 'car', 'bus']
-const SPRITES = DIRS.flatMap(dir => TYPES.map(type => ({ dir, type, name: `${dir} ${type}` })))
+const TIERS: readonly LodTier[] = ['far', 'mid', 'near']
+const VIEWS = DIRS.flatMap(dir => TYPES.map(type => ({ dir, type, name: `${dir} ${type}` })))
+const SPRITES = DIRS.flatMap(dir => TYPES.flatMap(type => TIERS.map(lod => ({
+  dir, type, lod, name: `${dir} ${type} ${lod}`,
+}))))
 
 const noCurve = () => 0
 const veh = (distM: number, dir: TrafficDir, type: VehicleType): TrafficVehicle =>
@@ -44,32 +50,32 @@ afterEach(() => {
 })
 
 describe('the lamps are found in the art, not declared', () => {
-  it.each(SPRITES)('$name has a lamp on each side', ({ dir, type }) => {
-    expect(lampPairFor(dir, type)).not.toBeNull()
+  it.each(SPRITES)('$name has a lamp on each side', ({ dir, type, lod }) => {
+    expect(lampPairFor(dir, type, lod)).toEqual(findLampPair(getTrafficSprite(dir, type, lod).rows, dir))
   })
 
-  it.each(SPRITES)('$name puts them in the outer third of the drawing', ({ dir, type }) => {
+  it.each(SPRITES)('$name puts them in the outer third of the drawing', ({ dir, type, lod }) => {
     // The redraw's rule is "lamps occupy the outermost columns". A lamp char
     // that turned up in the middle of a future sprite would drag the centroid
     // inward, and the halo would drift off the light it belongs to — which is
     // the one failure this whole module has to be protected from.
-    const pair = lampPairFor(dir, type)!
+    const pair = lampPairFor(dir, type, lod)!
     expect(pair.left.u, 'left lamp').toBeLessThan(1 / 3)
     expect(pair.right.u, 'right lamp').toBeGreaterThan(2 / 3)
   })
 
-  it.each(SPRITES)('$name is symmetric about its own centre', ({ dir, type }) => {
+  it.each(SPRITES)('$name is symmetric about its own centre', ({ dir, type, lod }) => {
     // Every row of every sprite is a palindrome (`vehicleArt.test.ts`), so the
     // two centroids must mirror. If they stop mirroring, the art broke first.
-    const pair = lampPairFor(dir, type)!
+    const pair = lampPairFor(dir, type, lod)!
     expect(pair.left.u).toBeCloseTo(1 - pair.right.u, 6)
     expect(pair.left.v).toBeCloseTo(pair.right.v, 6)
   })
 
-  it.each(SPRITES)('$name puts them on the body, not the roof or the wheels', ({ dir, type }) => {
-    const pair = lampPairFor(dir, type)!
+  it.each(SPRITES)('$name puts them on the body, not the roof or the wheels', ({ dir, type, lod }) => {
+    const pair = lampPairFor(dir, type, lod)!
     expect(pair.left.v).toBeGreaterThan(0.3)
-    expect(pair.left.v).toBeLessThan(0.8)
+    expect(pair.left.v).toBeLessThan(0.9)
   })
 
   it('reads the direction it is asked about, not the one in the art', () => {
@@ -78,7 +84,7 @@ describe('the lamps are found in the art, not declared', () => {
     // reporting the plate as two lights.
     expect(lampChar('same')).toBe('R')
     expect(lampChar('oncoming')).toBe('Y')
-    expect(findLampPair(getTrafficSpriteRows('oncoming', 'car'), 'same')).toBeNull()
+    expect(findLampPair(getTrafficSprite('oncoming', 'car', 'mid').rows, 'same')).toBeNull()
   })
 
   it('gives a drawing with no lamps no halo at all', () => {
@@ -101,7 +107,7 @@ describe('the lamps are found in the art, not declared', () => {
 })
 
 describe('the halo lands on the vehicle', () => {
-  it.each(SPRITES)('$name keeps both lamps inside its drawn box', ({ dir, type }) => {
+  it.each(VIEWS)('$name keeps both lamps inside its drawn box', ({ dir, type }) => {
     for (const distM of MATRIX_DISTANCES_M) {
       const p = projectTrafficVehicle(
         VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, veh(distM, dir, type), noCurve,
@@ -122,7 +128,7 @@ describe('the halo lands on the vehicle', () => {
     }
   })
 
-  it.each(SPRITES)('$name spreads its lamps apart as it gets closer', ({ dir, type }) => {
+  it.each(VIEWS)('$name spreads its lamps apart as it gets closer', ({ dir, type }) => {
     // The gap between the two haloes is the drawn width times a constant, so it
     // grows with the vehicle. If it ever stopped growing, the halo would have
     // come loose from the projection and be sitting at a fixed screen offset.

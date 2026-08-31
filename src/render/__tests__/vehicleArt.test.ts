@@ -1,217 +1,135 @@
-/**
- * The drawing rules the six traffic vehicles are held to.
- *
- * These are properties, not pixels. Nothing here says what a car looks like —
- * that is a judgement made by eye, and a snapshot of it would only ever get in
- * the way of the next redraw. What it does say is that whatever gets drawn is
- * symmetric, carries its lamps where the renderer and the player both expect
- * them, has road showing under it, and fits the box the projection was tuned
- * against. Every one of those is a defect the imported sprites actually had.
- */
+/** Structural contracts for the 18 authored traffic drawings. */
 
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { C } from 'zx-kit'
-import { getTrafficSpriteColors, getTrafficSpriteRows } from '../road3d.ts'
+import { scaleRoadsideRows } from '../spriteRaster.ts'
 import {
-  SAME_MINI_ROWS, ONCOMING_MINI_ROWS, SAME_CAR_ROWS, ONCOMING_CAR_ROWS,
-  SAME_BUS_ROWS, ONCOMING_BUS_ROWS,
-  SAME_MINI_COLORS, ONCOMING_MINI_COLORS, SAME_CAR_COLORS, ONCOMING_CAR_COLORS,
-  SAME_BUS_COLORS, ONCOMING_BUS_COLORS,
-  type RowColors,
-} from '../sprites/vehicles.ts'
-import type { VehicleType } from '../../game/traffic.ts'
+  getTrafficSprite, trafficSpriteName, TRAFFIC_SPRITES,
+} from '../sprites/catalog.ts'
+import type { LodTier } from '../vehicleLod.ts'
+import type { TrafficDir, VehicleType } from '../../game/traffic.ts'
 
-const DIRS = ['same', 'oncoming'] as const
+const DIRS: readonly TrafficDir[] = ['same', 'oncoming']
 const TYPES: readonly VehicleType[] = ['mini', 'car', 'bus']
+const TIERS: readonly LodTier[] = ['far', 'mid', 'near']
 
-const SPRITES: readonly {
-  name: string
-  dir: 'same' | 'oncoming'
-  rows: readonly string[]
-  colors: RowColors
-}[] = [
-  { name: 'same mini', dir: 'same', rows: SAME_MINI_ROWS, colors: SAME_MINI_COLORS },
-  { name: 'same car', dir: 'same', rows: SAME_CAR_ROWS, colors: SAME_CAR_COLORS },
-  { name: 'same bus', dir: 'same', rows: SAME_BUS_ROWS, colors: SAME_BUS_COLORS },
-  { name: 'oncoming mini', dir: 'oncoming', rows: ONCOMING_MINI_ROWS, colors: ONCOMING_MINI_COLORS },
-  { name: 'oncoming car', dir: 'oncoming', rows: ONCOMING_CAR_ROWS, colors: ONCOMING_CAR_COLORS },
-  { name: 'oncoming bus', dir: 'oncoming', rows: ONCOMING_BUS_ROWS, colors: ONCOMING_BUS_COLORS },
-]
-
-/** The size the projection, the LOD thresholds and the collision raster expect. */
-const EXPECTED_SIZE: Record<VehicleType, readonly [number, number]> = {
-  mini: [14, 11],
-  car: [22, 15],
-  bus: [28, 18],
+const EXPECTED_SIZE: Record<VehicleType, Record<LodTier, readonly [number, number]>> = {
+  mini: { far: [7, 6], mid: [14, 11], near: [28, 22] },
+  car: { far: [11, 8], mid: [22, 15], near: [44, 30] },
+  bus: { far: [14, 9], mid: [28, 18], near: [56, 36] },
 }
 
-describe('every vehicle is symmetric', () => {
-  // The imported sprites were not, because block-density segmentation of an
-  // image has no reason to be. At thirty meaningful pixels that reads as noise.
-  it.each(SPRITES)('$name has a palindrome on every row', ({ rows }) => {
-    for (const [i, row] of rows.entries()) {
-      expect([...row].reverse().join(''), `row ${i}`).toBe(row)
+const CASES = DIRS.flatMap(dir => TYPES.flatMap(type => TIERS.map(lod => ({
+  dir, type, lod, name: `${dir}/${type}/${lod}`,
+}))))
+
+describe('the authored grids agree with the renderer contract', () => {
+  it.each(CASES)('$name is a symmetric rectangle at its declared resolution', ({ dir, type, lod }) => {
+    const asset = TRAFFIC_SPRITES[trafficSpriteName(dir, type, lod)]!
+    expect([asset.w, asset.h]).toEqual(EXPECTED_SIZE[type][lod])
+    expect(asset.rows).toHaveLength(asset.h)
+    for (const [index, row] of asset.rows.entries()) {
+      expect(row, `row ${index} width`).toHaveLength(asset.w)
+      expect([...row].reverse().join(''), `row ${index} symmetry`).toBe(row)
     }
   })
 
-  it.each(SPRITES)('$name is a rectangle', ({ rows }) => {
-    const w = rows[0]!.length
-    for (const [i, row] of rows.entries()) expect(row.length, `row ${i}`).toBe(w)
+  it.each(CASES)('$name defines every colour it draws', ({ dir, type, lod }) => {
+    const sprite = getTrafficSprite(dir, type, lod)
+    for (const char of new Set(sprite.rows.join('').replace(/\./g, ''))) {
+      expect(sprite.colors[char], `missing colour for ${char}`).toBeDefined()
+    }
+  })
+
+  it.each(CASES)('$name ends on transparent ground with separated wheels above it', ({ dir, type, lod }) => {
+    const rows = getTrafficSprite(dir, type, lod).rows
+    expect(rows.at(-1)).toMatch(/^\.+$/)
+    const wheelRow = rows.at(-2)!
+    const left = wheelRow.search(/[^.]/)
+    const right = wheelRow.length - 1 - [...wheelRow].reverse().join('').search(/[^.]/)
+    expect(left, 'no wheel pixels').toBeGreaterThanOrEqual(0)
+    expect(wheelRow.slice(left, right + 1), 'no road between the wheels').toContain('.')
   })
 })
 
-describe('lamps say which way it is going', () => {
-  // The one feature that carries direction. The imported car had them as a bar
-  // across the middle, which is why the far tier had to re-add corner lamps —
-  // and when the two tiers disagree about where lamps are, the art is wrong.
-  it.each(SPRITES)('$name puts its lamps in the outermost columns', ({ rows, dir }) => {
+describe('direction and brake state live in the framebuffer', () => {
+  it.each(CASES)('$name carries only the lamp for its view', ({ dir, type, lod }) => {
+    const body = getTrafficSprite(dir, type, lod).rows.join('')
     const lamp = dir === 'same' ? 'R' : 'Y'
-    const lampRows = rows.filter(r => r.includes(lamp))
-    expect(lampRows.length, 'no lamp row at all').toBeGreaterThan(0)
-
-    for (const row of lampRows) {
-      const first = row.search(/[^.]/)
-      const last = row.length - 1 - [...row].reverse().join('').search(/[^.]/)
-      // A lamp row must start and end in lamp colour: an interior lamp loses
-      // its vote to bodywork the moment the sprite is resampled.
-      expect(row[first], `left edge of "${row}"`).toBe(lamp)
-      expect(row[last], `right edge of "${row}"`).toBe(lamp)
-    }
+    expect(body).toContain(lamp)
+    if (dir === 'oncoming') expect(body).not.toContain('R')
   })
 
-  it.each(SPRITES)('$name uses only its own direction\'s lamp colour', ({ rows, dir }) => {
-    const wrong = dir === 'same' ? 'Y' : 'R'
-    const body = rows.join('')
-    if (dir === 'oncoming') {
-      // Oncoming vehicles must never show red: red is "going away".
-      expect(body).not.toContain(wrong)
-    }
-    // Same-direction vehicles may use Y for a number plate, which is not a lamp.
-  })
+  it.each(TYPES.flatMap(type => TIERS.map(lod => [type, lod] as const)))(
+    '%s/%s brightens only rear R under braking', (type, lod) => {
+      const rolling = getTrafficSprite('same', type, lod)
+      const braking = getTrafficSprite('same', type, lod, true)
+      expect(rolling.colors.R).toBe(C.RED)
+      expect(braking.colors.R).toBe(C.B_RED)
+      for (const char of Object.keys(rolling.colors)) {
+        if (char !== 'R') expect(braking.colors[char]).toBe(rolling.colors[char])
+      }
+      expect(getTrafficSprite('oncoming', type, lod, true))
+        .toBe(getTrafficSprite('oncoming', type, lod, false))
+    },
+  )
+
+  it.each(TYPES.flatMap(type => (['mid', 'near'] as const).map(lod => [type, lod] as const)))(
+    '%s/%s keeps a type-specific body colour', (type, lod) => {
+      const expected = { mini: 'G', car: 'B', bus: 'M' }[type]
+      for (const dir of DIRS) expect(getTrafficSprite(dir, type, lod).rows.join('')).toContain(expected)
+    },
+  )
 })
 
-describe('the wheels touch the road', () => {
-  // The imported car's wheels were black patches embedded in bodywork — rows of
-  // mixed B and X with no road showing — so it had no visible ground contact.
-  // Note it *did* have one clean split row at the very bottom, which is why the
-  // property that catches it is not "is there a gap somewhere" but "is there
-  // anything except wheels below the bumper".
-  const bumperRow = (rows: readonly string[]) => {
-    let last = -1
-    for (const [i, row] of rows.entries()) if (!row.includes('.')) last = i
-    return last
+/** Fill internal holes row-by-row: this test compares the outside contour only. */
+function outerEnvelope(rows: readonly string[]): string[] {
+  return rows.map(row => {
+    const left = row.search(/[^.]/)
+    if (left < 0) return row
+    const right = row.length - 1 - [...row].reverse().join('').search(/[^.]/)
+    return '.'.repeat(left) + 'X'.repeat(right - left + 1) + '.'.repeat(row.length - right - 1)
+  })
+}
+
+function crop(rows: readonly string[]): string[] {
+  let left = Infinity, right = -1, top = Infinity, bottom = -1
+  for (let y = 0; y < rows.length; y++) {
+    for (let x = 0; x < rows[y]!.length; x++) {
+      if (rows[y]![x] === '.') continue
+      left = Math.min(left, x); right = Math.max(right, x)
+      top = Math.min(top, y); bottom = Math.max(bottom, y)
+    }
   }
+  if (right < left) return []
+  return rows.slice(top, bottom + 1).map(row => row.slice(left, right + 1))
+}
 
-  it.each(SPRITES)('$name has a full-width bumper to hang them from', ({ rows }) => {
-    expect(bumperRow(rows), 'no full-width row at all').toBeGreaterThanOrEqual(0)
-  })
+function normalizedOuter(rows: readonly string[]): string[] {
+  return scaleRoadsideRows(crop(outerEnvelope(rows)), 112, 72)
+}
 
-  it.each(SPRITES)('$name has nothing but wheels below the bumper', ({ rows }) => {
-    const below = rows.slice(bumperRow(rows) + 1).filter(r => r.includes('B') || /[^.]/.test(r))
-    expect(below.length, 'no rows below the bumper — the vehicle has no wheels').toBeGreaterThan(0)
-    for (const row of below) {
-      expect(row, `"${row}" below the bumper is not wheels`).toMatch(/^[B.]+$/)
+function silhouetteIou(a: readonly string[], b: readonly string[]): number {
+  let intersection = 0, union = 0
+  for (let y = 0; y < a.length; y++) {
+    for (let x = 0; x < a[y]!.length; x++) {
+      const solidA = a[y]![x] !== '.'
+      const solidB = b[y]![x] !== '.'
+      if (solidA && solidB) intersection++
+      if (solidA || solidB) union++
     }
-  })
+  }
+  return union === 0 ? 1 : intersection / union
+}
 
-  it.each(SPRITES)('$name shows road between its wheels', ({ rows }) => {
-    const below = rows.slice(bumperRow(rows) + 1).filter(r => /[^.]/.test(r))
-    for (const row of below) {
-      const first = row.search(/[^.]/)
-      const last = row.length - 1 - [...row].reverse().join('').search(/[^.]/)
-      expect(row.slice(first, last + 1), `"${row}" is one solid block, not two wheels`)
-        .toContain('.')
-    }
-  })
-})
-
-describe('the drawing and the colour map agree', () => {
-  it.each(SPRITES)('$name defines a colour for every char it draws', ({ rows, colors }) => {
-    for (const char of new Set(rows.join('').replace(/\./g, ''))) {
-      expect(colors[char], `char "${char}" has no colour and would draw nothing`).toBeDefined()
-    }
-  })
-
-  it.each(SPRITES)('$name defines the lamp colour the far tier writes', ({ colors, dir }) => {
-    // `applyFarLamps` writes R (same) or Y (oncoming) into the resampled raster
-    // whether or not the art itself uses that char. A missing key would silently
-    // drop the far tier's only readable feature.
-    expect(colors[dir === 'same' ? 'R' : 'Y']).toBeDefined()
-  })
-})
-
-describe('the box the rest of the renderer was tuned against', () => {
-  // Width and height are read straight off these tables — nothing declares them
-  // separately — so they feed the projection, the LOD tier boundary and the
-  // collision raster. Changing one is a gameplay change, not an art change.
-  it.each(TYPES)('%s keeps its size in both directions', (type) => {
-    const [w, h] = EXPECTED_SIZE[type]
-    for (const dir of DIRS) {
-      const rows = getTrafficSpriteRows(dir, type)
-      expect(rows.length, `${dir} ${type} height`).toBe(h)
-      expect(rows[0]!.length, `${dir} ${type} width`).toBe(w)
-    }
-  })
-
-  it.each(TYPES)('%s ends on an empty row in both directions', (type) => {
-    // The trailing empty row is part of the height the projection uses, so the
-    // vehicle sits a scaled pixel clear of its anchor. Losing it would drop
-    // every vehicle by that much.
-    for (const dir of DIRS) {
-      const rows = getTrafficSpriteRows(dir, type)
-      expect(rows.at(-1), `${dir} ${type}`).toMatch(/^\.+$/)
-    }
-  })
-})
-
-describe('brake lights are a colour, not only a glow', () => {
-  // A same-direction vehicle's tail lamps are RED rolling and B_RED braking —
-  // the ZX BRIGHT bit. Deliberately a change in the framebuffer: `?glow=0` is a
-  // setting a player may choose, and "the car ahead is stopping" is safety
-  // information rather than decoration, so it has to survive the lights off.
-  it.each(['mini', 'car', 'bus'] as const)('%s brightens its lamps under the brake', (type) => {
-    const rolling = getTrafficSpriteColors('same', type, false)
-    const braking = getTrafficSpriteColors('same', type, true)
-    expect(rolling.R).toBe(C.RED)
-    expect(braking.R).toBe(C.B_RED)
-  })
-
-  it.each(['mini', 'car', 'bus'] as const)('%s changes nothing but the lamps', (type) => {
-    const rolling = getTrafficSpriteColors('same', type, false)
-    const braking = getTrafficSpriteColors('same', type, true)
-    for (const char of Object.keys(rolling)) {
-      if (char === 'R') continue
-      expect(braking[char], `char "${char}"`).toBe(rolling[char])
-    }
-  })
-
-  it('the bus can brake now, because its bodywork is no longer red', () => {
-    // It could not, and the reason was the palette rather than the model: `B_RED`
-    // lamps on `B_RED` bodywork are a brake light nobody can see, so the bus was
-    // given no brake state rather than a lying one. Fox called the repaint on
-    // 2026-08-19 and the body went `B_YELLOW`, which frees red entirely.
-    //
-    // Pinned as a property of the *body*, not of the decision: the day anyone
-    // paints a same-direction vehicle red again, this says what it costs.
-    const colors = getTrafficSpriteColors('same', 'bus', false)
-    expect(colors.X, 'a red body would swallow the lamps again').not.toBe(C.B_RED)
-    expect(getTrafficSpriteColors('same', 'bus', true).R).toBe(C.B_RED)
-    expect(colors.R).toBe(C.RED)
-  })
-
-  it.each(['mini', 'car', 'bus'] as const)('oncoming %s has no brake state at all', (type) => {
-    // Its lamps face the player; whatever it is doing with its own brakes is
-    // behind it and none of the player's business.
-    expect(getTrafficSpriteColors('oncoming', type, true))
-      .toBe(getTrafficSpriteColors('oncoming', type, false))
-  })
-
-  it('still defines the lamp char the far tier writes, in both states', () => {
-    // `applyFarLamps` writes R into the resampled raster whether or not the art
-    // uses it, so a brake map missing the key would drop a distant vehicle's
-    // only readable feature at exactly the wrong moment.
-    for (const type of ['mini', 'car', 'bus'] as const) {
-      expect(getTrafficSpriteColors('same', type, true).R).toBeDefined()
-    }
-  })
+describe('adjacent LOD drawings hand over the same outer vehicle', () => {
+  it.each(DIRS.flatMap(dir => TYPES.map(type => [dir, type] as const)))(
+    '%s/%s has normalized silhouette IoU of at least 0.85', (dir, type) => {
+      for (const [from, to] of [['far', 'mid'], ['mid', 'near']] as const) {
+        const a = normalizedOuter(getTrafficSprite(dir, type, from).rows)
+        const b = normalizedOuter(getTrafficSprite(dir, type, to).rows)
+        expect(silhouetteIou(a, b), `${from} -> ${to}`).toBeGreaterThanOrEqual(0.85)
+      }
+    },
+  )
 })

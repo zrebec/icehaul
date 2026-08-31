@@ -30,6 +30,7 @@ export interface ApproachFrame {
   top: number
   w: number
   h: number
+  scale: number
   lod: LodTier
   raster: readonly string[]
 }
@@ -60,7 +61,7 @@ export function walkApproach(
 
     frames.push({
       distM,
-      x: p.x, y: p.y, left: p.left, top: p.top, w: p.w, h: p.h,
+      x: p.x, y: p.y, left: p.left, top: p.top, w: p.w, h: p.h, scale: p.scale,
       lod: p.lod,
       raster: p.raster,
     })

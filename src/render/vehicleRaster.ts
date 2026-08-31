@@ -22,12 +22,10 @@
  * Resampling once and letting both readers share the answer makes the claim true
  * by construction rather than by coincidence.
  *
- * ── What it does not do ─────────────────────────────────────────────────────
- * The resampler resolves each target pixel to the opaque source char covering
- * most of it, so small features lose to bodywork: at 8×6 a car's lights are
- * outvoted by its panels. That is deliberate here. Making meaning survive
- * distance is the far LOD tier's job, and it does it by writing the lamps back
- * on afterwards rather than by hoping the vote keeps them.
+ * Colour normally follows the opaque source char covering most of a target
+ * cell. Callers may name a semantic priority mark (traffic uses `R`/`Y`) so a
+ * small authored lamp wins that colour vote. Coverage and silhouette do not
+ * change: no cell is invented outside the source art.
  */
 
 import { resampleSpriteAtSpan } from './spriteRaster.ts'
@@ -43,9 +41,9 @@ import { buildVehicleContour, type VehicleContour } from './vehicleContour.ts'
  *
  * The working set is bounded and countable. Scale runs from `TRAFFIC_SCALE_FAR`
  * to a little past `TRAFFIC_SCALE_NEAR`, about 366 buckets at
- * {@link SCALE_STEPS}, for each of six sprites — call it 2200 entries. The far
- * flavour only exists below each sprite's tier boundary, adding about 800 more.
- * The cap sits above that with room, so eviction (a full clear) is a guard
+ * {@link SCALE_STEPS}, for each of six views — call it 2200 entries. Eighteen
+ * authored assets partition those buckets across far/mid/near rather than
+ * multiplying them. The cap sits above that with room, so eviction is a guard
  * against a future renderer widening the range, not a thing that happens in
  * play.
  */
@@ -82,8 +80,8 @@ export interface PhysicalSpriteSize {
 export interface VehicleRasterOptions {
   /** Canonical projected box before scale; defaults to the source grid. */
   readonly physicalSize?: PhysicalSpriteSize
-  /** A colour-only post-process such as the legacy far lamp overlay. */
-  readonly refine?: (raster: readonly string[]) => readonly string[]
+  /** Source marks whose meaning must survive a dominant-colour downsample. */
+  readonly priorityChars?: readonly string[]
 }
 
 /** Cached geometry is relative to the anchor, which is why it caches at all. */
@@ -105,6 +103,25 @@ export function resetVehicleRasterCache(): void {
 
 export function vehicleRasterCacheSize(): number {
   return scaledCache.size
+}
+
+/** The exact scale bucket used by both LOD selection and raster construction. */
+export function quantiseVehicleScale(scale: number): number {
+  if (scale <= 0) return 0
+  return Math.max(1, Math.round(scale * SCALE_STEPS)) / SCALE_STEPS
+}
+
+/** Projected physical box before an authored source grid is selected. */
+export function projectedVehicleSize(
+  physicalSize: PhysicalSpriteSize,
+  scale: number,
+): { w: number; h: number } | null {
+  const quantised = quantiseVehicleScale(scale)
+  if (quantised <= 0 || physicalSize.w <= 0 || physicalSize.h <= 0) return null
+  return {
+    w: Math.max(1, Math.ceil(physicalSize.w * quantised)),
+    h: Math.max(1, Math.ceil(physicalSize.h * quantised)),
+  }
 }
 
 /**
@@ -141,9 +158,9 @@ export function rasteriseVehicleAtScale(
 
   // Quantise once, then derive everything from the quantised value — the raster
   // and the position it is drawn at must come from the same number.
-  const steps = Math.max(1, Math.round(scale * SCALE_STEPS))
-  const quantised = steps / SCALE_STEPS
-  const cacheKey = `${assetId}@${steps}`
+  const quantised = quantiseVehicleScale(scale)
+  const steps = Math.round(quantised * SCALE_STEPS)
+  const cacheKey = `${assetId}@${steps}:${options.priorityChars?.join('') ?? ''}`
 
   let hit = scaledCache.get(cacheKey)
   if (hit === undefined) {
@@ -156,15 +173,13 @@ export function rasteriseVehicleAtScale(
       physicalH * quantised,
       0,
       0,
+      options.priorityChars,
     )
     hit = built === null
       ? null
       : {
-        // `refine` may only recolour — the cached `w`/`h` come from the
-        // untouched silhouette, and both tiers must agree on them.
-        raster: options.refine ? options.refine(built.raster) : built.raster,
-        // Derived from the silhouette, which `refine` may not change, so the
-        // far and detail flavours of one scale get identical contours.
+        raster: built.raster,
+        // Derived from the same final silhouette used by draw and collision.
         contour: buildVehicleContour(built.raster),
         dx: built.left, dy: built.top, w: built.w, h: built.h,
       }

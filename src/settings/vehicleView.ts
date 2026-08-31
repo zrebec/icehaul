@@ -106,30 +106,16 @@ export const TRAFFIC_CANONICAL_SIZE = {
   bus: { w: 28, h: 18 },
 } as const
 
-/**
- * Tallest projected height still drawn by the far tier, in pixels.
- *
- * Raised from 9 to 10 when the sprite started being sampled at a fractional
- * size: the height is now the box that *contains* the sprite (`ceil`) rather
- * than the sprite rounded to whole pixels, so the same physical vehicle reports
- * about one pixel more. The extra pixel keeps the boundary where it was — a car
- * hands over at roughly 50 m, as before — rather than moving it.
- *
- * ── SK ────────────────────────────────────────────────────────────────────
- * Najvyššia premietnutá výška, ktorú ešte kreslí ďaleký stupeň, v pixeloch.
- *
- * **↓ nižšie:** detailný sprite začne skôr — viac kresby, ale pri malých veľkostiach
- * sa lampy stratia v karosérii a smer prestane byť čitateľný.
- * **↑ vyššie:** ďaleký stupeň drží dlhšie. Ten *garantuje* lampy tým, že ich zapíše
- * do vonkajších stĺpcov, takže smer prežije — za cenu toho, že vnútorné keylines
- * uvidíš až neskôr.
- */
-export const LOD_FAR_MAX_HEIGHT = 10
+/** Tallest projected height drawn from the authored far asset, in pixels. */
+export const LOD_FAR_MAX_HEIGHT = 7
+
+/** Tallest projected height drawn from the authored mid asset, in pixels. */
+export const LOD_MID_MAX_HEIGHT = 13
 
 /**
- * Dead-band around {@link LOD_FAR_MAX_HEIGHT}, in pixels. Same-direction traffic
- * closes and falls back as it brakes, so the projected height wobbles by a pixel;
- * without this the vehicle would flicker between two different drawings.
+ * Dead-band around both vehicle LOD boundaries, in pixels. Same-direction
+ * traffic closes and falls back as it brakes, so projected height can wobble by
+ * a pixel; without this the vehicle would flicker between authored drawings.
  *
  * ── SK ────────────────────────────────────────────────────────────────────
  * Šírka pásma, v ktorom sa stupeň neprepína, v pixeloch.

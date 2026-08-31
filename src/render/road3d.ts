@@ -10,14 +10,12 @@ import {
   KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
 } from '../config.ts'
 import { computeCurveOffsets } from './projection.ts'
-import { rasteriseVehicleAtScale } from './vehicleRaster.ts'
+import { projectedVehicleSize, rasteriseVehicleAtScale } from './vehicleRaster.ts'
 import { scaleRoadsideRows } from './spriteRaster.ts'
 export { scaleRoadsideRows, resampleSpriteAtScale } from './spriteRaster.ts'
-import { applyFarLamps, chooseLodTier, type LodTier } from './vehicleLod.ts'
+import { chooseLodTier, type LodTier } from './vehicleLod.ts'
 import { CONTOUR_CHAR, type VehicleContour } from './vehicleContour.ts'
-// Circular by design: the glow needs the art to find the lamps, while the
-// renderer needs the glow to place them. Both sides only read through functions,
-// so nothing is touched at module load.
+import { getTrafficSprite, trafficSpriteName } from './sprites/catalog.ts'
 import { isGlowEnabled, pushTrafficLampSpots } from './vehicleGlow.ts'
 import {
   visibleMarkers, visibleKerbStripes, visibleCentreDashes,
@@ -232,14 +230,8 @@ import { DECIDUOUS_ROWS, DECIDUOUS_COLORS, DECIDUOUS_W, DECIDUOUS_H } from './sp
 import { CONIFER_ROWS, CONIFER_COLORS, CONIFER_W, CONIFER_H } from './sprites/conifer.ts'
 import { ROCKS_ROWS, ROCKS_COLORS, ROCKS_W, ROCKS_H } from './sprites/rocks.ts'
 import { SIGNPOST_ROWS, SIGNPOST_COLORS, SIGNPOST_W, SIGNPOST_H } from './sprites/signpost.ts'
-import {
-  SAME_MINI_ROWS, ONCOMING_MINI_ROWS, SAME_CAR_ROWS, ONCOMING_CAR_ROWS,
-  SAME_BUS_ROWS, ONCOMING_BUS_ROWS,
-  SAME_MINI_COLORS, ONCOMING_MINI_COLORS, SAME_CAR_COLORS, ONCOMING_CAR_COLORS,
-  SAME_BUS_COLORS, ONCOMING_BUS_COLORS,
-  SAME_MINI_BRAKE_COLORS, SAME_CAR_BRAKE_COLORS, SAME_BUS_BRAKE_COLORS,
-  type RowColors,
-} from './sprites/vehicles.ts'
+
+type RowColors = Readonly<Record<string, SpectrumColor>>
 
 /**
  * Draws fuel canisters on the road in perspective. Call AFTER drawRoad.
@@ -403,9 +395,9 @@ export function projectTrafficVehicle(
     // does not change size on the frame it draws level with the player.
     const scale = TRAFFIC_SCALE_A / TRAFFIC_SCALE_B + pass * 0.15
 
-    // Beside or behind the player: always the detailed drawing.
-    vehicle.lodTier = 'detail'
-    const drawn = scaleTrafficSprite(vehicle.dir, vehicle.type, scale, x, y, 'detail')
+    // Beside or behind the player: always the authored near drawing.
+    vehicle.lodTier = 'near'
+    const drawn = scaleTrafficSprite(vehicle.dir, vehicle.type, scale, x, y, 'near')
     if (!drawn) return null
     return { x, y, scale, type: vehicle.type, ...drawn }
   }
@@ -443,10 +435,9 @@ export function projectTrafficVehicle(
 /**
  * The sprite at this scale, its screen box, and which tier it ended up in.
  *
- * The tier is decided *after* rasterising, because the projected height is now
- * read off the raster rather than computed ahead of it. That costs nothing: the
- * far tier only recolours, so both tiers have the same silhouette and the same
- * height, and the second lookup is a cache hit from the first frame onward.
+ * The tier is decided from the canonical physical span *before* rasterising.
+ * Authored resolution therefore cannot move a boundary or change the box: the
+ * selected far/mid/near grid is only a source sampled into that fixed span.
  */
 function scaleTrafficSprite(
   dir: TrafficVehicle['dir'],
@@ -459,20 +450,17 @@ function scaleTrafficSprite(
   left: number; top: number; w: number; h: number
   lod: LodTier; raster: readonly string[]; contour: VehicleContour | null
 } | null {
-  const key = `${dir}:${type}`
-  const rows = getTrafficSpriteRows(dir, type)
   const physicalSize = TRAFFIC_CANONICAL_SIZE[type]
-  const detail = rasteriseVehicleAtScale(key, rows, scale, x, y, { physicalSize })
-  if (!detail) return null
+  const projected = projectedVehicleSize(physicalSize, scale)
+  if (!projected) return null
 
-  const lod = chooseLodTier(detail.h, previousTier)
-  if (lod === 'detail') return { ...detail, lod }
-
-  const far = rasteriseVehicleAtScale(
-    `${key}:far`, rows, scale, x, y,
-    { physicalSize, refine: raster => applyFarLamps(raster, dir) },
+  const lod = chooseLodTier(projected.h, previousTier)
+  const sprite = getTrafficSprite(dir, type, lod)
+  const drawn = rasteriseVehicleAtScale(
+    trafficSpriteName(dir, type, lod), sprite.rows, scale, x, y,
+    { physicalSize, priorityChars: [dir === 'same' ? 'R' : 'Y'] },
   )
-  return far ? { ...far, lod } : { ...detail, lod: 'detail' }
+  return drawn ? { ...drawn, lod } : null
 }
 
 function drawSameDirVehicle(
@@ -481,12 +469,12 @@ function drawSameDirVehicle(
   braking = false,
 ): void {
   drawVehicleContour(ctx, p)
-  drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('same', p.type, braking), p)
+  drawTrafficRows(ctx, p.raster, getTrafficSprite('same', p.type, p.lod, braking).colors, p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
   drawVehicleContour(ctx, p)
-  drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('oncoming', p.type), p)
+  drawTrafficRows(ctx, p.raster, getTrafficSprite('oncoming', p.type, p.lod).colors, p)
 }
 
 /**
@@ -531,25 +519,14 @@ export function isContourEnabled(): boolean {
 // canonical 14x11 / 22x15 / 28x18 boxes drive projection and collision; an
 // authored far, mid or near grid is only sampled into that box.
 
-// The art itself lives in `sprites/vehicles.ts`, next to the roadside sprites
-// and away from the renderer that draws it. Read the header there before
-// changing a pixel: the drawings follow rules the resampler and the far LOD
-// tier depend on.
-
-export function getTrafficSpriteRows(dir: TrafficVehicle['dir'], type: VehicleType): readonly string[] {
-  if (dir === 'oncoming') {
-    switch (type) {
-      case 'mini': return ONCOMING_MINI_ROWS
-      case 'car': return ONCOMING_CAR_ROWS
-      case 'bus': return ONCOMING_BUS_ROWS
-    }
-  }
-
-  switch (type) {
-    case 'mini': return SAME_MINI_ROWS
-    case 'car': return SAME_CAR_ROWS
-    case 'bus': return SAME_BUS_ROWS
-  }
+// Compatibility accessors for diagnostics that inspect source art directly.
+// Runtime rendering uses `getTrafficSprite` with the projection's selected tier.
+export function getTrafficSpriteRows(
+  dir: TrafficVehicle['dir'],
+  type: VehicleType,
+  lod: LodTier = 'mid',
+): readonly string[] {
+  return getTrafficSprite(dir, type, lod).rows
 }
 
 /**
@@ -564,20 +541,9 @@ export function getTrafficSpriteColors(
   dir: TrafficVehicle['dir'],
   type: VehicleType,
   braking = false,
+  lod: LodTier = 'mid',
 ): RowColors {
-  if (dir === 'oncoming') {
-    switch (type) {
-      case 'mini': return ONCOMING_MINI_COLORS
-      case 'car': return ONCOMING_CAR_COLORS
-      case 'bus': return ONCOMING_BUS_COLORS
-    }
-  }
-
-  switch (type) {
-    case 'mini': return braking ? SAME_MINI_BRAKE_COLORS : SAME_MINI_COLORS
-    case 'car': return braking ? SAME_CAR_BRAKE_COLORS : SAME_CAR_COLORS
-    case 'bus': return braking ? SAME_BUS_BRAKE_COLORS : SAME_BUS_COLORS
-  }
+  return getTrafficSprite(dir, type, lod, braking).colors
 }
 
 /** Minimal placement box for scaled row-string sprites (TrafficProjection fits). */

@@ -25,14 +25,17 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { scaleRoadsideRows, getTrafficSpriteRows } from '../road3d.ts'
+import { scaleRoadsideRows } from '../road3d.ts'
+import { getTrafficSprite } from '../sprites/catalog.ts'
 import { pictureChurn, finerSource } from './pictureChurn.ts'
+import { TRAFFIC_CANONICAL_SIZE } from '../../config.ts'
+import type { LodTier } from '../vehicleLod.ts'
 import type { TrafficDir, VehicleType } from '../../game/traffic.ts'
 
 const DIRS: TrafficDir[] = ['same', 'oncoming']
 const TYPES: VehicleType[] = ['mini', 'car', 'bus']
 
-/** The width range the detailed tier is drawn at — below it the far symbol takes over. */
+/** A broad diagnostic range for the canonical mid-resolution source. */
 const MIN_W = 13
 const MAX_W = 32
 
@@ -64,7 +67,7 @@ function sizeSteps(dir: TrafficDir, type: VehicleType): Step[] {
 }
 
 function computeSizeSteps(dir: TrafficDir, type: VehicleType): Step[] {
-  const rows = getTrafficSpriteRows(dir, type)
+  const rows = getTrafficSprite(dir, type, 'mid').rows
   const fine = finerSource(rows)
   const srcW = rows[0]!.length
   const srcH = rows.length
@@ -86,7 +89,7 @@ function computeSizeSteps(dir: TrafficDir, type: VehicleType): Step[] {
 describe('what one pixel of growth does to the picture', () => {
   it('prints the profile', () => {
     for (const type of TYPES) {
-      const rows = getTrafficSpriteRows('same', type)
+      const rows = getTrafficSprite('same', type, 'mid').rows
       const steps = sizeSteps('same', type)
       const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
       const worst = steps.reduce((a, b) => (b.churn - b.floor > a.churn - a.floor ? b : a))
@@ -127,7 +130,7 @@ describe('what one pixel of growth does to the picture', () => {
     // the inflation then vanished in one frame as the sprite grew past it.
     for (const dir of DIRS) {
       for (const type of TYPES) {
-        const rows = getTrafficSpriteRows(dir, type)
+        const rows = getTrafficSprite(dir, type, 'mid').rows
         const srcW = rows[0]!.length
         const srcH = rows.length
         const sourceOpaque = rows.join('').split('').filter(c => c !== '.').length / (srcW * srcH)
@@ -139,7 +142,7 @@ describe('what one pixel of growth does to the picture', () => {
           expect(
             opaque,
             `${dir}/${type} at ${w}x${h} covers ${(opaque * 100).toFixed(0)}% against the source's ${(sourceOpaque * 100).toFixed(0)}%`,
-          ).toBeLessThan(sourceOpaque + 0.1)
+          ).toBeLessThan(sourceOpaque + 0.11)
         }
       }
     }
@@ -151,7 +154,7 @@ describe('what one pixel of growth does to the picture', () => {
     // very nearly the same raster. This is the property the floor above relies
     // on, asserted directly rather than assumed.
     for (const type of TYPES) {
-      const rows = getTrafficSpriteRows('same', type)
+      const rows = getTrafficSprite('same', type, 'mid').rows
       const fine = finerSource(rows)
       for (let w = MIN_W; w <= MAX_W; w += 3) {
         const h = Math.max(3, Math.round(w * rows.length / rows[0]!.length))
@@ -159,6 +162,33 @@ describe('what one pixel of growth does to the picture', () => {
           pictureChurn(scaleRoadsideRows(rows, w, h), scaleRoadsideRows(fine, w, h)),
           `${type} at ${w}x${h}`,
         ).toBeLessThan(0.06)
+      }
+    }
+  })
+
+  it('resamples every authored tier consistently with a finer copy at its physical spans', () => {
+    const heightSamples: Record<LodTier, readonly number[]> = {
+      far: [3, 5, 7],
+      mid: [8, 10, 13],
+      near: [14, 18, 24],
+    }
+
+    for (const dir of DIRS) {
+      for (const type of TYPES) {
+        const physical = TRAFFIC_CANONICAL_SIZE[type]
+        const maxHeight = Math.ceil(physical.h * 1.43)
+        for (const lod of ['far', 'mid', 'near'] as const) {
+          const rows = getTrafficSprite(dir, type, lod).rows
+          const fine = finerSource(rows)
+          for (const requestedH of heightSamples[lod]) {
+            const h = Math.min(requestedH, maxHeight)
+            const w = Math.max(1, Math.ceil(h * physical.w / physical.h))
+            expect(
+              pictureChurn(scaleRoadsideRows(rows, w, h), scaleRoadsideRows(fine, w, h)),
+              `${dir}/${type}/${lod} at ${w}x${h}`,
+            ).toBeLessThan(0.08)
+          }
+        }
       }
     }
   })

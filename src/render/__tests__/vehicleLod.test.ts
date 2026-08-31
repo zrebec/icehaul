@@ -1,8 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { applyFarLamps, chooseLodTier } from '../vehicleLod.ts'
+import { C } from 'zx-kit'
+import { chooseLodTier, type LodTier } from '../vehicleLod.ts'
 import { projectTrafficVehicle } from '../road3d.ts'
-import { resetVehicleRasterCache } from '../vehicleRaster.ts'
-import { LOD_FAR_MAX_HEIGHT, LOD_HYSTERESIS_PX, VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
+import { rasteriseVehicleAtScale, resetVehicleRasterCache } from '../vehicleRaster.ts'
+import { getTrafficSprite, trafficSpriteName } from '../sprites/catalog.ts'
+import {
+  LOD_FAR_MAX_HEIGHT, LOD_MID_MAX_HEIGHT, LOD_HYSTERESIS_PX,
+  TRAFFIC_CANONICAL_SIZE, VIEWPORT_BOTTOM, VIEWPORT_TOP,
+} from '../../config.ts'
 import type { TrafficDir, TrafficVehicle, VehicleType } from '../../game/traffic.ts'
 
 const noCurve = () => 0
@@ -10,114 +15,95 @@ const veh = (distM: number, dir: TrafficDir, type: VehicleType): TrafficVehicle 
   ({ spawnDist: 0, distM, x: 0, speed: 0, dir, type, gone: false })
 
 describe('chooseLodTier', () => {
-  it('starts on the plain threshold when nothing was drawn before', () => {
+  it('starts on the two plain thresholds when nothing was drawn before', () => {
+    expect(chooseLodTier(LOD_FAR_MAX_HEIGHT - 1)).toBe('far')
     expect(chooseLodTier(LOD_FAR_MAX_HEIGHT)).toBe('far')
-    expect(chooseLodTier(LOD_FAR_MAX_HEIGHT + 1)).toBe('detail')
+    expect(chooseLodTier(LOD_FAR_MAX_HEIGHT + 1)).toBe('mid')
+    expect(chooseLodTier(LOD_MID_MAX_HEIGHT)).toBe('mid')
+    expect(chooseLodTier(LOD_MID_MAX_HEIGHT + 1)).toBe('near')
   })
 
-  it('holds its tier inside the dead-band', () => {
+  it('holds its tier inside both dead-bands', () => {
     // The band is what stops a braking vehicle, whose projected height wobbles by
     // a pixel, from flickering between two different drawings every frame.
     for (let h = LOD_FAR_MAX_HEIGHT - LOD_HYSTERESIS_PX; h <= LOD_FAR_MAX_HEIGHT + LOD_HYSTERESIS_PX; h++) {
       expect(chooseLodTier(h, 'far'), `h=${h} from far`).toBe('far')
-      expect(chooseLodTier(h, 'detail'), `h=${h} from detail`).toBe('detail')
+      expect(chooseLodTier(h, 'mid'), `h=${h} from mid`).toBe('mid')
+    }
+    for (let h = LOD_MID_MAX_HEIGHT - LOD_HYSTERESIS_PX; h <= LOD_MID_MAX_HEIGHT + LOD_HYSTERESIS_PX; h++) {
+      expect(chooseLodTier(h, 'mid'), `h=${h} from mid`).toBe('mid')
+      expect(chooseLodTier(h, 'near'), `h=${h} from near`).toBe('near')
     }
   })
 
-  it('switches once the band is cleared, in both directions', () => {
-    expect(chooseLodTier(LOD_FAR_MAX_HEIGHT + LOD_HYSTERESIS_PX + 1, 'far')).toBe('detail')
-    expect(chooseLodTier(LOD_FAR_MAX_HEIGHT - LOD_HYSTERESIS_PX - 1, 'detail')).toBe('far')
+  it('switches once either band is cleared, in both directions', () => {
+    expect(chooseLodTier(LOD_FAR_MAX_HEIGHT + LOD_HYSTERESIS_PX + 1, 'far')).toBe('mid')
+    expect(chooseLodTier(LOD_FAR_MAX_HEIGHT - LOD_HYSTERESIS_PX - 1, 'mid')).toBe('far')
+    expect(chooseLodTier(LOD_MID_MAX_HEIGHT + LOD_HYSTERESIS_PX + 1, 'mid')).toBe('near')
+    expect(chooseLodTier(LOD_MID_MAX_HEIGHT - LOD_HYSTERESIS_PX - 1, 'near')).toBe('mid')
   })
 
-  it('cannot oscillate: one crossing per approach', () => {
+  it('can skip a tier after a large height jump', () => {
+    expect(chooseLodTier(LOD_MID_MAX_HEIGHT + LOD_HYSTERESIS_PX + 1, 'far')).toBe('near')
+    expect(chooseLodTier(LOD_FAR_MAX_HEIGHT - LOD_HYSTERESIS_PX - 1, 'near')).toBe('far')
+  })
+
+  it('cannot oscillate: one crossing per boundary in either direction', () => {
     // Walk a vehicle in and back out again, feeding each answer to the next call.
     let tier = chooseLodTier(4)
     const seen: string[] = [tier]
-    for (const h of [5, 6, 7, 8, 9, 10, 11, 12, 11, 10, 9, 8, 7, 6]) {
+    for (const h of [5, 6, 7, 8, 9, 11, 13, 14, 15, 14, 13, 12, 11, 9, 7, 6, 5]) {
       tier = chooseLodTier(h, tier)
       if (tier !== seen[seen.length - 1]) seen.push(tier)
     }
-    // far -> detail -> far, and nothing in between.
-    expect(seen).toEqual(['far', 'detail', 'far'])
+    expect(seen).toEqual(['far', 'mid', 'near', 'mid', 'far'])
   })
 })
 
-describe('applyFarLamps', () => {
-  const SHAPES: Array<[string, readonly string[]]> = [
-    ['tiny', ['.XX.', 'XXXX', 'XXXX']],
-    ['tapered', ['.XXX.', 'XXXXX', 'XXXXX', 'XX.XX']],
-    ['wide', ['..XXXXXX..', '.XXXXXXXX.', 'XXXXXXXXXX', 'XXXXXXXXXX', 'XX..XX..XX']],
-  ]
+describe('authored traffic tiers', () => {
+  const DIRS: readonly TrafficDir[] = ['same', 'oncoming']
+  const TYPES: readonly VehicleType[] = ['mini', 'car', 'bus']
+  const TIERS: readonly LodTier[] = ['far', 'mid', 'near']
 
-  it('changes colour and never shape', () => {
-    // The property the tier handover rests on. If the far tier could move a
-    // pixel, crossing the boundary would be a redraw rather than a recolour, and
-    // that used to be the single largest change in an approach.
-    for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
-      for (const [name, rows] of SHAPES) {
-        const out = applyFarLamps(rows, dir)
-        const shape = (r: readonly string[]) => r.map(row => row.replace(/[^.]/g, 'X'))
-        expect(shape(out), `${dir} ${name}`).toEqual(shape(rows))
-      }
-    }
-  })
-
-  it('puts a lamp at each end of one body row', () => {
-    // The regression that motivated writing the lamps back on: a mini at 220 m
-    // projects to about 4 x 3, and the dominant-colour vote deletes a one-pixel
-    // lamp exactly where it is the only thing that matters. The ends are chosen
-    // because an edge pixel survives where an interior one is swallowed.
-    for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
+  it('puts the correct pair of lamps in every authored asset', () => {
+    for (const dir of DIRS) {
       const lamp = dir === 'same' ? 'R' : 'Y'
-      for (const [name, rows] of SHAPES) {
-        const out = applyFarLamps(rows, dir)
-        const row = out.find(r => r.includes(lamp))
-        expect(row, `${dir} ${name} has no ${lamp}`).toBeDefined()
-        const body = row!.split('').map((c, i) => (c === '.' ? -1 : i)).filter(i => i >= 0)
-        expect(row![body[0]!], `${dir} ${name} left lamp`).toBe(lamp)
-        expect(row![body[body.length - 1]!], `${dir} ${name} right lamp`).toBe(lamp)
+      const wrong = dir === 'same' ? 'Y' : 'R'
+      for (const type of TYPES) {
+        for (const tier of TIERS) {
+          const body = getTrafficSprite(dir, type, tier).rows.join('')
+          expect(body, `${dir}/${type}/${tier} has no ${lamp}`).toContain(lamp)
+          if (dir === 'oncoming') {
+            expect(body, `${dir}/${type}/${tier} contains rear lamp ${wrong}`).not.toContain(wrong)
+          }
+        }
       }
     }
   })
 
-  it('carries direction in the lamp colour and nothing else', () => {
-    // Body colour cannot do this job: a same-direction bus is red bodywork, so
-    // "red means going away" only holds if it is the lamps that are red.
-    const plain = ['XXXXXXXX', 'XXXXXXXX', 'XXXXXXXX', 'XXXXXXXX']
-    expect(applyFarLamps(plain, 'same').join('')).toContain('R')
-    expect(applyFarLamps(plain, 'same').join('')).not.toContain('Y')
-    expect(applyFarLamps(plain, 'oncoming').join('')).toContain('Y')
-    expect(applyFarLamps(plain, 'oncoming').join('')).not.toContain('R')
-  })
+  it('changes only rear R when braking, in every tier', () => {
+    for (const type of TYPES) {
+      for (const tier of TIERS) {
+        const rolling = getTrafficSprite('same', type, tier)
+        const braking = getTrafficSprite('same', type, tier, true)
+        expect(rolling.colors.R, `${type}/${tier} rolling`).toBe(C.RED)
+        expect(braking.colors.R, `${type}/${tier} braking`).toBe(C.B_RED)
+        for (const char of Object.keys(rolling.colors)) {
+          if (char !== 'R') expect(braking.colors[char], `${type}/${tier}/${char}`).toBe(rolling.colors[char])
+        }
 
-  it('is mostly body, so the blob still reads as a vehicle', () => {
-    for (const [name, rows] of SHAPES) {
-      const out = applyFarLamps(rows, 'same')
-      const solid = out.join('').replace(/\./g, '')
-      const body = solid.split('X').length - 1
-      expect(body / solid.length, name).toBeGreaterThan(0.4)
+        const front = getTrafficSprite('oncoming', type, tier)
+        expect(getTrafficSprite('oncoming', type, tier, true)).toBe(front)
+      }
     }
-  })
-
-  it('finds body to write on when the chosen row is a wheel gap', () => {
-    // A car's wheel gap survives the resample, so the row one above the base can
-    // be entirely transparent. Writing the lamps there would lose them.
-    const rows = ['XXXXXX', 'XXXXXX', '......', 'XX..XX']
-    const out = applyFarLamps(rows, 'same')
-    expect(out.join('')).toContain('R')
-    expect(out[2], 'the empty row must stay empty').toBe('......')
-  })
-
-  it('leaves a fully transparent raster alone rather than inventing a lamp', () => {
-    expect(applyFarLamps(['....', '....'], 'same')).toEqual(['....', '....'])
-    expect(applyFarLamps([], 'same')).toEqual([])
   })
 })
 
-describe('the far tier keeps direction readable', () => {
+describe('the projected authored tiers', () => {
   it('shows both lamps at every distance and type the far tier covers', () => {
     resetVehicleRasterCache()
     let covered = 0
+    const failures: string[] = []
     for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
       const lamp = dir === 'same' ? 'R' : 'Y'
       for (const type of ['mini', 'car', 'bus'] as VehicleType[]) {
@@ -136,17 +122,61 @@ describe('the far tier keeps direction readable', () => {
               && row[body[0]!] === lamp
               && row[body[body.length - 1]!] === lamp
           })
-          expect(flanked, `${dir}/${type} at ${dist}m (${p.w}x${p.h}) has no flanking ${lamp} pair`).toBe(true)
+          if (!flanked) {
+            failures.push(`${dir}/${type} at ${dist}m (${p.w}x${p.h}): ${p.raster.join('/')}`)
+          }
         }
       }
     }
     expect(covered, 'no far-tier cases were exercised').toBeGreaterThan(30)
+    expect(failures).toEqual([])
   })
 
-  it('is actually used across most of the approach', () => {
-    const tiers = [220, 150, 100, 50, 25, 10, 2].map(d =>
-      projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, veh(d, 'same', 'car'), noCurve)!.lod)
-    expect(tiers.filter(t => t === 'far').length).toBeGreaterThanOrEqual(4)
-    expect(tiers[tiers.length - 1]).toBe('detail')   // right beside you it is the sprite
+  it('uses all three tiers in monotonic order during an approach', () => {
+    for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
+      for (const type of ['mini', 'car', 'bus'] as VehicleType[]) {
+        const vehicle = veh(220, dir, type)
+        const seen: LodTier[] = []
+        for (let dist = 220; dist >= 2; dist -= 0.25) {
+          vehicle.distM = dist
+          const p = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, vehicle, noCurve)!
+          if (seen.at(-1) !== p.lod) seen.push(p.lod)
+        }
+        expect(seen, `${dir}/${type}`).toEqual(['far', 'mid', 'near'])
+      }
+    }
+  })
+
+  it('resamples the selected authored asset, not a shared fallback drawing', () => {
+    for (const dir of ['same', 'oncoming'] as TrafficDir[]) {
+      for (const type of ['mini', 'car', 'bus'] as VehicleType[]) {
+        const vehicle = veh(220, dir, type)
+        const projected = new Map<LodTier, NonNullable<ReturnType<typeof projectTrafficVehicle>>>()
+        for (let dist = 220; dist >= 2 && projected.size < 3; dist -= 0.25) {
+          vehicle.distM = dist
+          const p = projectTrafficVehicle(VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, vehicle, noCurve)!
+          if (!projected.has(p.lod)) projected.set(p.lod, p)
+        }
+
+        for (const lod of ['far', 'mid', 'near'] as const) {
+          const p = projected.get(lod)!
+          const sprite = getTrafficSprite(dir, type, lod)
+          const expected = rasteriseVehicleAtScale(
+            `expected:${trafficSpriteName(dir, type, lod)}`,
+            sprite.rows,
+            p.scale,
+            p.x,
+            p.y,
+            {
+              physicalSize: TRAFFIC_CANONICAL_SIZE[type],
+              priorityChars: [dir === 'same' ? 'R' : 'Y'],
+            },
+          )!
+          expect(p.raster, `${dir}/${type}/${lod}`).toEqual(expected.raster)
+          expect({ left: p.left, top: p.top, w: p.w, h: p.h })
+            .toEqual({ left: expected.left, top: expected.top, w: expected.w, h: expected.h })
+        }
+      }
+    }
   })
 })

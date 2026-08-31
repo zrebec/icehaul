@@ -66,8 +66,8 @@ describe('how often the drawing changes during an approach', () => {
           if (run === worst) break
           idx += run
         }
-        // Split by tier, because the two are drawn by different code and a fix
-        // to one says nothing about the other.
+        // Split by authored tier, because a fix to one grid says nothing about
+        // the other two.
         const perTier = (tier: string) => {
           const runs = freezeRuns(frames.filter(f => f.lod === tier))
           return runs.length ? Math.max(...runs) : 0
@@ -77,7 +77,9 @@ describe('how often the drawing changes during an approach', () => {
           `   worst ${String(worst).padStart(3)} = ${(worst / FPS).toFixed(2)} s` +
           ` at ${frames[idx]!.distM.toFixed(0).padStart(3)} m` +
           `   median ${median(runs).toFixed(1)}` +
-          `   far ${(perTier('far') / FPS).toFixed(2)} s / detail ${(perTier('detail') / FPS).toFixed(2)} s`,
+          `   far ${(perTier('far') / FPS).toFixed(2)} s` +
+          ` / mid ${(perTier('mid') / FPS).toFixed(2)} s` +
+          ` / near ${(perTier('near') / FPS).toFixed(2)} s`,
         )
       }
     }
