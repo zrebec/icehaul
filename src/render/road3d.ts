@@ -646,8 +646,8 @@ export function drawRoadsideObjects(
 
     // Position outside the road edge
     const edgeX = obj.side === -1
-      ? centerX - half - obj.offset * half
-      : centerX + half + obj.offset * half
+      ? centerX - half - obj.offsetRoadWidths * half
+      : centerX + half + obj.offsetRoadWidths * half
     const screenX = Math.round(edgeX)
 
     if (screenX < -90 || screenX > GAME_WIDTH + 90) continue

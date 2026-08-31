@@ -623,7 +623,11 @@ export function createDriveScene(
       drawRoad(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x,
         (d) => getSurfaceAt(d), (d) => getCurvatureAt(d))
 
-      const roadside = getRoadsideObjects(v.distance - 10, v.distance + PERSPECTIVE_K)
+      const roadside = getRoadsideObjects(
+        (gameSeed + 3) >>> 0,
+        v.distance - 10,
+        v.distance + PERSPECTIVE_K,
+      )
       drawRoadsideObjects(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, roadside,
         (d) => getCurvatureAt(d))
 
