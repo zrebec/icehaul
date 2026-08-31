@@ -1,0 +1,16 @@
+{
+  "w": 8,
+  "h": 5,
+  "rows": [
+    "...cc...",
+    ".wcWWW..",
+    "wWcccWWW",
+    "wwccwwww",
+    ".wwccww."
+  ],
+  "legend": {
+    "c": "C.CYAN",
+    "W": "C.B_WHITE",
+    "w": "C.WHITE"
+  }
+}

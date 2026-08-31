@@ -1,0 +1,33 @@
+{
+  "w": 28,
+  "h": 18,
+  "rows": [
+    "............................",
+    "....WWWWWWWWWWWWWWWWWWWW....",
+    "...MMMCCCCCCCKKCCCCCCCMMM...",
+    "...MMMCCCCCCCKKCCCCCCCMMM...",
+    "..MMMCCCCCCCCKKCCCCCCCCMMM..",
+    ".MMMCCCCCCCCCKKCCCCCCCCCMMM.",
+    ".MMMCCCCCCCCCKKCCCCCCCCCMMM.",
+    "MMMCCCCCCCCCCKKCCCCCCCCCCMMM",
+    "MMMccccccccccKKccccccccccMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "YYMMmmmmmmmmmmmmmmmmmmmmMMYY",
+    "MMKKKKKmmKKKKKKKKKKmmKKKKKMM",
+    "KWKKKKKKKKKKKKKKKKKKKKKKKKWK",
+    "...KKKK..............KKKK...",
+    "............................"
+  ],
+  "legend": {
+    "K": "C.BLACK",
+    "M": "C.B_MAGENTA",
+    "m": "C.MAGENTA",
+    "C": "C.B_CYAN",
+    "c": "C.CYAN",
+    "W": "C.B_WHITE",
+    "Y": "C.B_YELLOW"
+  }
+}
