@@ -234,7 +234,13 @@ def bus_sprite(view: str, lod: str) -> Sprite:
 
     # ── 2. The window band ──
     glass_top = top + 1
-    glass_bottom = max(glass_top, band(0.28 if view == "rear" else 0.40))
+    glass_bottom = max(glass_top, band(0.28))
+    if view == "front":
+        # At far the two fractions round to the same row, so the windscreen has
+        # to be forced one row deeper: without it the only thing separating an
+        # oncoming bus from a receding one over 64% of its approach is the lamp
+        # colour and a four-pixel mask.
+        glass_bottom = max(glass_bottom + 1, band(0.40))
     pillar = max(1, round(width * 0.07))
     for y in range(glass_top, glass_bottom + 1):
         bounds = body_bounds(grid.pixels[y])
