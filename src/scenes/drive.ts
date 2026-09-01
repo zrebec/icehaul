@@ -54,7 +54,10 @@ import {
 import type { RoadSampler } from '../game/routeplan.ts'
 import { createScore, accrueScore, addScoreBonus } from '../game/score.ts'
 import type { RunSummary } from '../game/runStats.ts'
-import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../game/offroad.ts'
+import {
+  aabbOverlap, checkTruckOffroad, checkTruckTrafficCollision, pixelMaskBounds, rasterBounds,
+  type Bounds, type OffroadResult,
+} from '../game/offroad.ts'
 import { debugMode, debugWantsCollision, pushDebugBox, setDebugFacts } from '../render/debug/overlay.ts'
 import { trafficClosingPerFrame, trafficSweepDepths } from '../game/collisionSweep.ts'
 
@@ -328,21 +331,39 @@ export function createDriveScene(
       const edgesLookup = computeRoadEdges(v.distance, v.x, (d) => getCurvatureAt(d))
       lastOffroad = checkTruckOffroad(truckDrawX, truckDrawY, edgesLookup, truckRoadMask)
 
+      // The truck's own AABB, tight around what the mask occupies rather than
+      // the mask's declared size — an articulated 40-wide truck has no 40-wide
+      // row, and using the declared size would flatter the cheap test.
+      const truckBounds = pixelMaskBounds(truckCollisionMask)
+      const truckAabb: Bounds | null = truckBounds === null ? null : {
+        left: truckDrawX + truckBounds.left, top: truckDrawY + truckBounds.top,
+        w: truckBounds.w, h: truckBounds.h,
+      }
+
       if (debugWantsCollision()) {
-        // Two boxes, because the truck has two masks and they are not the same
-        // shape: the road mask decides off-road, the collision mask decides a
-        // crash. Drawing only one of them would hide exactly the disagreement
-        // worth looking for.
-        pushDebugBox({
-          x: truckDrawX, y: truckDrawY,
-          w: truckRoadMask.width, h: truckRoadMask.height,
-          color: lastOffroad.severity > 0 ? C.B_RED : C.B_GREEN,
-          label: 'ROAD',
-        })
+        // Three boxes, and the labels say what each one *is*. The first version
+        // wrote ROAD over the truck, which is the name of the test rather than
+        // the name of the thing, and reading it back that is simply wrong.
+        if (truckAabb) {
+          pushDebugBox({
+            x: truckAabb.left, y: truckAabb.top, w: truckAabb.w, h: truckAabb.h,
+            color: C.B_YELLOW, kind: 'aabb', label: 'TRUCK',
+          })
+        }
+        // The silhouette the pixel test actually walks. Where it sits inside the
+        // yellow rectangle is the margin the box model would have thrown away.
         pushDebugBox({
           x: truckDrawX, y: truckDrawY,
           w: truckCollisionMask.width, h: truckCollisionMask.height,
-          color: C.B_YELLOW,
+          color: C.B_GREEN, kind: 'pixel', columns: truckCollisionMask.rows,
+        })
+        // The off-road footprint is a different mask answering a different
+        // question, so it gets its own name and turns red when it is off.
+        pushDebugBox({
+          x: truckDrawX, y: truckDrawY,
+          w: truckRoadMask.width, h: truckRoadMask.height,
+          color: lastOffroad.severity > 0 ? C.B_RED : C.CYAN,
+          kind: 'pixel', columns: truckRoadMask.rows,
         })
       }
 
@@ -427,6 +448,83 @@ export function createDriveScene(
       // Traffic — move vehicles, then visual screen-space collision.
       tickTraffic(v.distance, v.x, v.speed, dt, road)
 
+
+      // Counted every frame the overlay is on collision: how many vehicles a
+      // boxed collision would have called a crash, against how many the real one
+      // does. The gap between them is the whole reason the pixel test exists.
+      let aabbTouching = 0
+      let pixelTouching = 0
+      for (const tv of getVisibleTraffic(v.distance, TRAFFIC_COLLISION_DEPTH_M)) {
+        // Close up the sprite crosses far more of the screen per frame than it
+        // does of the road, so one test at its new position is not enough: an
+        // oncoming car covers 18 scanlines between two frames at three metres.
+        // Sweep the gap it just closed instead. Far away, and for anything not
+        // approaching, this yields exactly one depth — today's cost.
+        const closing = trafficClosingPerFrame(v.speed, tv.speed, tv.dir === 'oncoming', dt)
+        let hit = false
+        const sweptDepths = trafficSweepDepths(tv.distM - v.distance, closing)
+
+        for (const worldZ of sweptDepths) {
+          // projectTrafficVehicle derives worldZ as `distM - cameraDistance`, so
+          // asking for a depth means handing it the camera distance that produces one.
+          const projected = projectTrafficVehicle(
+            VIEWPORT_TOP, VIEWPORT_BOTTOM, tv.distM - worldZ, v.x, tv,
+            (d) => getCurvatureAt(d),
+          )
+          if (!projected) continue
+
+          // One frame drawn per swept depth, so the overlay shows the gap the
+          // check actually closed rather than only where the vehicle ended up.
+          if (debugWantsCollision()) {
+            // Every swept depth as a dim ghost, so the gap the check closed is
+            // visible; the vehicle's own position gets the pair that matters.
+            const nearest = worldZ === sweptDepths[sweptDepths.length - 1]
+            if (nearest) {
+              const shape = rasterBounds(projected.raster)
+              const vehicleAabb: Bounds | null = shape === null ? null : {
+                left: projected.left + shape.left, top: projected.top + shape.top,
+                w: shape.w, h: shape.h,
+              }
+              const boxed = vehicleAabb !== null && truckAabb !== null
+                && aabbOverlap(truckAabb, vehicleAabb)
+              if (boxed) aabbTouching++
+              if (vehicleAabb) {
+                pushDebugBox({
+                  x: vehicleAabb.left, y: vehicleAabb.top, w: vehicleAabb.w, h: vehicleAabb.h,
+                  color: boxed ? C.B_RED : C.B_YELLOW,
+                  kind: 'aabb', label: tv.type.toUpperCase(),
+                })
+              }
+              pushDebugBox({
+                x: projected.left, y: projected.top, w: projected.w, h: projected.h,
+                color: C.B_CYAN, kind: 'pixel', raster: projected.raster,
+              })
+            } else {
+              pushDebugBox({
+                x: projected.left, y: projected.top, w: projected.w, h: projected.h,
+                color: C.CYAN, kind: 'plain',
+              })
+            }
+          }
+
+          if (checkTruckTrafficCollision(
+            truckDrawX, truckDrawY,
+            projected.left, projected.top, projected.w, projected.h,
+            projected.raster,
+            truckCollisionMask,
+          )) {
+            hit = true
+            pixelTouching++
+            break
+          }
+        }
+
+        if (hit) {
+          startCrash('crash')
+          return
+        }
+      }
+
       // What a bug report needs and a screenshot cannot carry. SEED first: the
       // route is a pure function of it, so a seed plus a distance reproduces any
       // frame exactly. OFF is the off-road severity the physics is actually
@@ -450,54 +548,15 @@ export function createDriveScene(
         cab: `${state(truckArticulation.cabAngle)} ${truckArticulation.cabYaw.toFixed(2)}`,
         trl: `${state(truckArticulation.trailerAngle)} ${truckArticulation.trailerYaw.toFixed(2)}`,
         traf: getVisibleTraffic(v.distance, TRAFFIC_VIEW_DISTANCE_M).length,
+        // The pair Fox asked for: a boxed collision would have crashed `aabb`
+        // times this frame; the real one crashed `pix` times. They should differ
+        // whenever you brush past a vehicle, and `pix` should never lead.
+        aabb: aabbTouching,
+        pix: pixelTouching,
         scen: getRoadsideObjects(
           (gameSeed + 3) >>> 0, v.distance - 10, v.distance + SCENERY_VIEW_DISTANCE_M,
         ).length,
       })
-
-      for (const tv of getVisibleTraffic(v.distance, TRAFFIC_COLLISION_DEPTH_M)) {
-        // Close up the sprite crosses far more of the screen per frame than it
-        // does of the road, so one test at its new position is not enough: an
-        // oncoming car covers 18 scanlines between two frames at three metres.
-        // Sweep the gap it just closed instead. Far away, and for anything not
-        // approaching, this yields exactly one depth — today's cost.
-        const closing = trafficClosingPerFrame(v.speed, tv.speed, tv.dir === 'oncoming', dt)
-        let hit = false
-
-        for (const worldZ of trafficSweepDepths(tv.distM - v.distance, closing)) {
-          // projectTrafficVehicle derives worldZ as `distM - cameraDistance`, so
-          // asking for a depth means handing it the camera distance that produces one.
-          const projected = projectTrafficVehicle(
-            VIEWPORT_TOP, VIEWPORT_BOTTOM, tv.distM - worldZ, v.x, tv,
-            (d) => getCurvatureAt(d),
-          )
-          if (!projected) continue
-
-          // One frame drawn per swept depth, so the overlay shows the gap the
-          // check actually closed rather than only where the vehicle ended up.
-          if (debugWantsCollision()) {
-            pushDebugBox({
-              x: projected.left, y: projected.top, w: projected.w, h: projected.h,
-              color: C.B_CYAN,
-            })
-          }
-
-          if (checkTruckTrafficCollision(
-            truckDrawX, truckDrawY,
-            projected.left, projected.top, projected.w, projected.h,
-            projected.raster,
-            truckCollisionMask,
-          )) {
-            hit = true
-            break
-          }
-        }
-
-        if (hit) {
-          startCrash('crash')
-          return
-        }
-      }
 
       // Tire screech — steering on slippery surfaces
       if (ctxAudio && (surface === 'ice' || surface === 'snow') && v.speed > 45 && (input.steerLeft || input.steerRight)) {
