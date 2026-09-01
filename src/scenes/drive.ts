@@ -30,6 +30,7 @@ import {
 } from '../render/road3d.ts'
 import {
   createPlayerTruckArticulation,
+  PLAYER_TRUCK_ANGLES,
   drawPlayerTruck,
   getPlayerTruckCollisionMask,
   getPlayerTruckRoadMask,
@@ -54,6 +55,7 @@ import type { RoadSampler } from '../game/routeplan.ts'
 import { createScore, accrueScore, addScoreBonus } from '../game/score.ts'
 import type { RunSummary } from '../game/runStats.ts'
 import { checkTruckOffroad, checkTruckTrafficCollision, type OffroadResult } from '../game/offroad.ts'
+import { debugMode, debugWantsCollision, pushDebugBox, setDebugFacts } from '../render/debug/overlay.ts'
 import { trafficClosingPerFrame, trafficSweepDepths } from '../game/collisionSweep.ts'
 
 function hash(n: number): number {
@@ -94,6 +96,11 @@ function emitWheelSpray(
       size,
     })
   }
+}
+
+/** Pose index as `n/5`, so the debug readout says how many steps exist. */
+function state(angle: number): string {
+  return `${angle > 0 ? '+' : ''}${angle}/${PLAYER_TRUCK_ANGLES.length}`
 }
 
 type DriveState = 'waiting' | 'playing' | 'paused' | 'crashing'
@@ -321,6 +328,24 @@ export function createDriveScene(
       const edgesLookup = computeRoadEdges(v.distance, v.x, (d) => getCurvatureAt(d))
       lastOffroad = checkTruckOffroad(truckDrawX, truckDrawY, edgesLookup, truckRoadMask)
 
+      if (debugWantsCollision()) {
+        // Two boxes, because the truck has two masks and they are not the same
+        // shape: the road mask decides off-road, the collision mask decides a
+        // crash. Drawing only one of them would hide exactly the disagreement
+        // worth looking for.
+        pushDebugBox({
+          x: truckDrawX, y: truckDrawY,
+          w: truckRoadMask.width, h: truckRoadMask.height,
+          color: lastOffroad.severity > 0 ? C.B_RED : C.B_GREEN,
+          label: 'ROAD',
+        })
+        pushDebugBox({
+          x: truckDrawX, y: truckDrawY,
+          w: truckCollisionMask.width, h: truckCollisionMask.height,
+          color: C.B_YELLOW,
+        })
+      }
+
       let offroadReturnDir = 0
       if (lastOffroad.severity > 0) {
         offroadReturnDir = lastOffroad.rightOff > lastOffroad.leftOff ? -1 : 1
@@ -402,6 +427,34 @@ export function createDriveScene(
       // Traffic — move vehicles, then visual screen-space collision.
       tickTraffic(v.distance, v.x, v.speed, dt, road)
 
+      // What a bug report needs and a screenshot cannot carry. SEED first: the
+      // route is a pure function of it, so a seed plus a distance reproduces any
+      // frame exactly. OFF is the off-road severity the physics is actually
+      // being handed, not a redraw of the same thing the GRIP bar shows.
+      //
+      // Gated, and not for the arithmetic: `getVisibleTraffic` and
+      // `getRoadsideObjects` each allocate an array, and a profile of a normal
+      // drive already shows a minor GC on nearly every frame. A debug readout
+      // must not be the thing that adds two more allocations to a frame that is
+      // not displaying it.
+      if (debugMode() !== 'off') setDebugFacts({
+        seed: gameSeed,
+        dist: `${v.distance.toFixed(0)}m`,
+        surf: surface,
+        grip: grip.toFixed(2),
+        off: lastOffroad.severity.toFixed(2),
+        // Pose against yaw, because they are the pair that explains the one
+        // complaint a frame-time graph cannot: the yaw moves every frame and the
+        // pose is one of five, so a turn is smooth in the model and stepped on
+        // the glass. Seeing both numbers at once is the whole point.
+        cab: `${state(truckArticulation.cabAngle)} ${truckArticulation.cabYaw.toFixed(2)}`,
+        trl: `${state(truckArticulation.trailerAngle)} ${truckArticulation.trailerYaw.toFixed(2)}`,
+        traf: getVisibleTraffic(v.distance, TRAFFIC_VIEW_DISTANCE_M).length,
+        scen: getRoadsideObjects(
+          (gameSeed + 3) >>> 0, v.distance - 10, v.distance + SCENERY_VIEW_DISTANCE_M,
+        ).length,
+      })
+
       for (const tv of getVisibleTraffic(v.distance, TRAFFIC_COLLISION_DEPTH_M)) {
         // Close up the sprite crosses far more of the screen per frame than it
         // does of the road, so one test at its new position is not enough: an
@@ -419,6 +472,15 @@ export function createDriveScene(
             (d) => getCurvatureAt(d),
           )
           if (!projected) continue
+
+          // One frame drawn per swept depth, so the overlay shows the gap the
+          // check actually closed rather than only where the vehicle ended up.
+          if (debugWantsCollision()) {
+            pushDebugBox({
+              x: projected.left, y: projected.top, w: projected.w, h: projected.h,
+              color: C.B_CYAN,
+            })
+          }
 
           if (checkTruckTrafficCollision(
             truckDrawX, truckDrawY,

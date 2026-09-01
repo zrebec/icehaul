@@ -139,6 +139,7 @@ src/
       catalog.ts          strict manifest/JSON loader
       assets/             33 validated row grids, JSON and PNG previews
     debug/
+      overlay.ts          the O overlay: frame monitor, facts, collision boxes
       trafficMatrix.ts    real traffic renderer contact sheet
       sceneryMatrix.ts    isolated LOD and real seeded placement sheets
 scripts/
@@ -200,6 +201,7 @@ node scripts/frame-delta.mjs "<query>" "<extra>"   # what actually changed betwe
 ?glow=0              no bloom on the lamps (A/B). ?glow=0.5 sets its strength,
                      ?glow=0.8,1.5 also its radius (defaults 0.8 and 1)
 ?matrix=1&surface=ice&curve=2&zoom=4&types=car&dist=220,50,10,2
+?debug=stats         the O overlay open at boot; ?debug=collision starts on the box page
 ?matrix=1&scanlines=1&brake=1   sheet with the game's scanline overlay, truck braking
 ?matrix=1&trafficBrake=1       the traffic drawn braking — the same hole ?brake=1 closed for
                                the truck, since traffic only brakes when the road gives it a
@@ -223,6 +225,10 @@ deploy fails like that, check these two action versions FIRST.
 - **ArrowLeft / ArrowRight** — steer
 - **D** — shift up · **A** — shift down (manual 5-speed gearbox)
 - **ENTER (hold ~1.8 s)** — crank the engine to start / restart a stalled engine; releasing early resets the crank. `STARTING...` overlay while cranking (`CRANK_NEEDED_MS = 1800` in `config.ts`).
+- **O** — cycle the debug overlay: `off → stats → collision → off`. Same key as minefield. Stats is
+  zx-kit's frame monitor plus route identity and what the physics is being handed; collision adds
+  the truck's two masks and every depth the traffic sweep tested. `?debug=stats` / `?debug=collision`
+  open it without a keypress; off draws nothing at all (`render/debug/overlay.ts`).
 
 **The manual gearbox is core.** Each gear has a top speed — **1st caps at ~28 km/h, so you physically cannot reach 120 in a low gear** — and a torque band shown on the **RPM** gauge. Acceleration is deliberately slow and heavy: you climb through the gears with **D** (up) / **A** (down). The engine dies two ways, each after a short warning + hold-ENTER restart:
 - **Stall (lug):** revs fall below `LUG_RPM` (0.25 ≈ 650 rpm) — you braked/slowed or sat in too tall a gear without downshifting (1st gear is immune). Realistic: e.g. **cruising 30 km/h in 5th lugs** (you must downshift). The RPM bar drops toward 0 bars and a ~3.5 s `ENGINE STALLING / SHIFT DOWN A` cough warning precedes the stall. RPM is proportional to speed (`rpm = speed / gear.to`) and is shown raw — it CAN read 0.
