@@ -1,3 +1,10 @@
+# [0.24.0](https://github.com/zrebec/icehaul/compare/v0.23.0...v0.24.0) (2026-09-01)
+
+
+### Features
+
+* **debug:** four corners, load statistics, and AABB against pixel-perfect ([#75](https://github.com/zrebec/icehaul/issues/75)) ([8c432f7](https://github.com/zrebec/icehaul/commit/8c432f70c80c85c968fe6b6af0f7e63fcb4d0c18))
+
 # [0.23.0](https://github.com/zrebec/icehaul/compare/v0.22.0...v0.23.0) (2026-09-01)
 
 
