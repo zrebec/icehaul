@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { C } from 'zx-kit'
 import type { GlowSource } from 'zx-kit'
 import {
-  findLampPair, glowCoreRadiusFor, glowRadiusFor, lampChar, lampColor, lampPairFor,
+  findLampPair, glowCoreRadiusFor, glowRadiusFor, lampChar, lampColor,
   pushTrafficLampSpots, renderLampGlow, setGlowSettings, wantsGlowCore,
 } from '../vehicleGlow.ts'
 import { drawTraffic, projectTrafficVehicle } from '../road3d.ts'
@@ -51,7 +51,11 @@ afterEach(() => {
 
 describe('the lamps are found in the art, not declared', () => {
   it.each(SPRITES)('$name has a lamp on each side', ({ dir, type, lod }) => {
-    expect(lampPairFor(dir, type, lod)).toEqual(findLampPair(getTrafficSprite(dir, type, lod).rows, dir))
+    // This used to compare a cached lookup against the uncached one, under this
+    // name. It caught a wrong cache key and nothing else, so a drawing with no
+    // lamps at all would have passed a test called "has a lamp on each side".
+    // The cache is gone; the assertion is now the one the name promises.
+    expect(findLampPair(getTrafficSprite(dir, type, lod).rows, dir)).not.toBeNull()
   })
 
   it.each(SPRITES)('$name puts them in the outer third of the drawing', ({ dir, type, lod }) => {
@@ -59,7 +63,7 @@ describe('the lamps are found in the art, not declared', () => {
     // that turned up in the middle of a future sprite would drag the centroid
     // inward, and the halo would drift off the light it belongs to — which is
     // the one failure this whole module has to be protected from.
-    const pair = lampPairFor(dir, type, lod)!
+    const pair = findLampPair(getTrafficSprite(dir, type, lod).rows, dir)!
     expect(pair.left.u, 'left lamp').toBeLessThan(1 / 3)
     expect(pair.right.u, 'right lamp').toBeGreaterThan(2 / 3)
   })
@@ -67,13 +71,13 @@ describe('the lamps are found in the art, not declared', () => {
   it.each(SPRITES)('$name is symmetric about its own centre', ({ dir, type, lod }) => {
     // Every row of every sprite is a palindrome (`vehicleArt.test.ts`), so the
     // two centroids must mirror. If they stop mirroring, the art broke first.
-    const pair = lampPairFor(dir, type, lod)!
+    const pair = findLampPair(getTrafficSprite(dir, type, lod).rows, dir)!
     expect(pair.left.u).toBeCloseTo(1 - pair.right.u, 6)
     expect(pair.left.v).toBeCloseTo(pair.right.v, 6)
   })
 
   it.each(SPRITES)('$name puts them on the body, not the roof or the wheels', ({ dir, type, lod }) => {
-    const pair = lampPairFor(dir, type, lod)!
+    const pair = findLampPair(getTrafficSprite(dir, type, lod).rows, dir)!
     expect(pair.left.v).toBeGreaterThan(0.3)
     expect(pair.left.v).toBeLessThan(0.9)
   })

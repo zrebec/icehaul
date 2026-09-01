@@ -249,7 +249,9 @@ src/render/__tests__/approachChurn.test.ts` and `… approachCadence.test.ts` to
   pillars, a waistline and a shaded panel that `far` does not have, and they arrive in one frame.
   The old assertion *"hands over … without changing shape"* was removed, correctly — it could not
   survive three distinct grids — but nothing replaced what it guarded.
-- **Cadence went backwards on the mini**, and the generator is why. Longest hold of one drawing
+- **Cadence went backwards on the mini**, and the generator is why. *(Attacked on 2026-09-01 and
+  closed as **not fixable in the art** — see "The mini's far-field freeze is the floor" below.
+  Do not re-investigate.)* Longest hold of one drawing
   against the 2.0 s budget: **1.83 s** for both minis, against 1.17 s / 1.05 s for the hand-drawn
   art; car 0.83 → 1.10 s, bus 0.55 → 0.92 s. All pass. 1.83 s is also the exact figure the
   2026-08-19 redraw rejected twice while tuning the mini's grille and arches. Root cause is old and
@@ -1581,6 +1583,48 @@ too small to read. Worth watching in a playtest anyway.
 - **`brakeSignal.test.ts`** — counts the cells that change when the brake comes on, per type, across
   the whole approach. It is what turned "is it LOD?" into a table in five minutes.
 
+#### What `sprites/vehicles.ts` knew — migrated here on deletion, 2026-09-01
+
+The hand-drawn fleet stopped being loaded when #70 made the JSON catalogue the runtime source, and
+the module was deleted on 2026-09-01. Three things in its docblock were nowhere else, and they are
+the reasons rather than the pixels — the pixels are in git.
+
+**Why the redraw happened at all.** Six pull requests had fixed how a sprite *reaches* the screen —
+one shared raster, a far tier, a hyperbolic growth curve, an area-weighted resample, fractional
+scaling, a contrast outline — and none of them touched what the sprite *was*. Fox, after all of it:
+*"we are at a better level but honestly the sprites are terrible — not even a person with
+imagination could tell it is a car if they did not already know."* Every graphics decision since has
+been downstream of that sentence.
+
+**Why `scripts/sprite-import.mjs` earns its keep on scenery and cannot be used on vehicles.** It
+segments an image by block density. On a tree, lumpiness reads as nature. On a vehicle it produced
+three defects no renderer can fix:
+
+- **Rear lamps as a bar across the middle.** On a real car, and on every readable 8-bit car, they
+  sit at the outer corners — and they are the single feature that says *car, going away from me*.
+  The far tier had to re-add corner lamps precisely because the art got this wrong.
+- **No bilateral symmetry**, because block-density segmentation has no reason to be symmetric. At
+  this size the asymmetry reads as noise rather than as a manufactured object.
+- **Wheels that never separated from the body**, so nothing showed the road underneath and the
+  vehicle had no visible ground contact.
+
+**The seven rules the drawings followed.** Rules 6 and 7 are recorded in their own sections above;
+these five were only in the module:
+
+1. **Every row is a palindrome.** Symmetry is cheap to hold and it is what makes thirty pixels read
+   as a manufactured object. It costs far-field motion — see the mini's cadence — and it was
+   still judged worth it.
+2. **Lamps occupy the outermost columns of the widest rows.** Not inset: an edge pixel survives the
+   resample where an interior one is outvoted by bodywork.
+3. **Direction is carried by lamp colour, never by body colour.**
+4. **The wheels have road between them** — two dark blocks with a gap, below a solid bumper row.
+5. **Dimensions are fixed.** Width and height feed the projection, the LOD thresholds and the
+   collision raster, so changing them would be a gameplay change wearing an art change's clothes.
+
+The four scenery modules (`deciduous`, `conifer`, `rocks`, `signpost`) went in the same commit and
+carried no reasoning at all — they were `sprite-import.mjs` output, pure data, superseded by the
+validated JSON grids.
+
 #### The second redraw: structure, not shape — 2026-08-19
 
 The first redraw (#42) fixed what the six vehicles *were*: symmetry, lamps at the corners, wheels
@@ -1638,6 +1682,37 @@ which is a judgement a width ratio cannot make.
 The count of *changes* per approach rose where it mattered — car 168 → 177, bus 182 → 195 — so the
 structure is not only visible up close, it does work in the far field too. Dimensions, silhouettes,
 the collision raster and every LOD threshold are untouched: this is a repaint inside the same boxes.
+
+### The mini's far-field freeze is the floor — closed as failed, 2026-09-01
+
+**Do not re-investigate.** The mini holds one drawing for **1.83 s** at 204 m against a 2.0 s
+budget. Two art fixes were tried and measured, both rejected, and the conclusion is that this is not
+an art problem.
+
+| | longest freeze |
+|---|---:|
+| shipped | **1.83 s** |
+| far grid 7×6 → 7×7, extra row left transparent at the top | 1.30 s — **rejected** |
+| 7×7 with the body kept against the top edge | 1.90 s — **rejected** |
+
+**Why the 1.30 s was a mirage, and it is the more useful of the two results.** It is not a cadence
+fix at all: the resample maps the *whole* grid, so a transparent row is padding, and padding draws
+the vehicle smaller. `vehicleContour` caught it immediately — "the outline is no smaller than the
+thing it surrounds" — because the silhouette had shrunk while the outline had not. Any future
+attempt that improves this number by changing a far grid's height should be checked against the
+drawn size before it is believed.
+
+**The second attempt tested a theory and killed it.** At 7×6 the occupied height is 5 rows and the
+projected height at the freeze is 3 — very nearly 2:1 — so the guess was that every row crosses its
+coverage threshold at the same scale, the horizontal form of the dome finding on the bus. Keeping
+the body against the top edge at 7×7 makes the ratio 2.33:1 and it got **worse**. The integer-ratio
+theory is wrong; the bus's dome worked because it added *edge positions*, and the mini has no room
+for any.
+
+What is left is what this file already said before the attempt: a mini at 200 m is a 4 × 3 box whose
+true size grows by a tenth of a pixel over two seconds, and no resampler can invent a change there.
+The remaining levers are `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`, both of which change how
+distance reads — a gameplay decision, not a rendering one, and Fox's to make.
 
 ### Night mode — open, both paths costed
 
@@ -1714,6 +1789,11 @@ far/mid/near sources keep the same physical box at handover; see the 2026-09-01 
 
 ### Rules that hold whatever gets built
 
+- **The JSON catalogue is the only source of objects.** Fox, 2026-09-01, on deleting the last
+  hand-written sprite modules: *„JSON je jediný katalóg objektov."* A drawing that is not in
+  `sprites/assets/manifest.json` is not in the game. No module may hold sprite rows of its own, and
+  a second source would mean two answers to "what does this look like" with only one of them
+  validated at load.
 - **One raster, three consumers.** Draw, collision and glow must read the same rendered raster.
   Collision must never independently rescale the source sprite. Test that every solid pixel of the
   collision mask corresponds to a drawn solid pixel.
