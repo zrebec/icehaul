@@ -49,6 +49,9 @@ GitHub repo: `zrebec/icehaul`. Built on **[zx-kit](https://github.com/zrebec/zx-
 
 ### Sprite asset contract
 
+- **The JSON catalogue is the only source of objects** — a drawing not in the manifest is not in the
+  game, and no module may hold sprite rows of its own. The last hand-written ones were deleted on
+  2026-09-01.
 - `src/render/sprites/assets/manifest.json` lists exactly 18 traffic and 15 roadside assets.
 - `.rows.txt` is the inspectable exact pixel grid; validated JSON is the runtime source of truth; native and
   4× PNG are nearest-neighbour previews, never runtime textures.

@@ -249,7 +249,9 @@ src/render/__tests__/approachChurn.test.ts` and `… approachCadence.test.ts` to
   pillars, a waistline and a shaded panel that `far` does not have, and they arrive in one frame.
   The old assertion *"hands over … without changing shape"* was removed, correctly — it could not
   survive three distinct grids — but nothing replaced what it guarded.
-- **Cadence went backwards on the mini**, and the generator is why. Longest hold of one drawing
+- **Cadence went backwards on the mini**, and the generator is why. *(Attacked on 2026-09-01 and
+  closed as **not fixable in the art** — see "The mini's far-field freeze is the floor" below.
+  Do not re-investigate.)* Longest hold of one drawing
   against the 2.0 s budget: **1.83 s** for both minis, against 1.17 s / 1.05 s for the hand-drawn
   art; car 0.83 → 1.10 s, bus 0.55 → 0.92 s. All pass. 1.83 s is also the exact figure the
   2026-08-19 redraw rejected twice while tuning the mini's grille and arches. Root cause is old and
@@ -1681,6 +1683,37 @@ The count of *changes* per approach rose where it mattered — car 168 → 177, 
 structure is not only visible up close, it does work in the far field too. Dimensions, silhouettes,
 the collision raster and every LOD threshold are untouched: this is a repaint inside the same boxes.
 
+### The mini's far-field freeze is the floor — closed as failed, 2026-09-01
+
+**Do not re-investigate.** The mini holds one drawing for **1.83 s** at 204 m against a 2.0 s
+budget. Two art fixes were tried and measured, both rejected, and the conclusion is that this is not
+an art problem.
+
+| | longest freeze |
+|---|---:|
+| shipped | **1.83 s** |
+| far grid 7×6 → 7×7, extra row left transparent at the top | 1.30 s — **rejected** |
+| 7×7 with the body kept against the top edge | 1.90 s — **rejected** |
+
+**Why the 1.30 s was a mirage, and it is the more useful of the two results.** It is not a cadence
+fix at all: the resample maps the *whole* grid, so a transparent row is padding, and padding draws
+the vehicle smaller. `vehicleContour` caught it immediately — "the outline is no smaller than the
+thing it surrounds" — because the silhouette had shrunk while the outline had not. Any future
+attempt that improves this number by changing a far grid's height should be checked against the
+drawn size before it is believed.
+
+**The second attempt tested a theory and killed it.** At 7×6 the occupied height is 5 rows and the
+projected height at the freeze is 3 — very nearly 2:1 — so the guess was that every row crosses its
+coverage threshold at the same scale, the horizontal form of the dome finding on the bus. Keeping
+the body against the top edge at 7×7 makes the ratio 2.33:1 and it got **worse**. The integer-ratio
+theory is wrong; the bus's dome worked because it added *edge positions*, and the mini has no room
+for any.
+
+What is left is what this file already said before the attempt: a mini at 200 m is a 4 × 3 box whose
+true size grows by a tenth of a pixel over two seconds, and no resampler can invent a change there.
+The remaining levers are `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`, both of which change how
+distance reads — a gameplay decision, not a rendering one, and Fox's to make.
+
 ### Night mode — open, both paths costed
 
 | Path | Contents | Effort |
@@ -1756,6 +1789,11 @@ far/mid/near sources keep the same physical box at handover; see the 2026-09-01 
 
 ### Rules that hold whatever gets built
 
+- **The JSON catalogue is the only source of objects.** Fox, 2026-09-01, on deleting the last
+  hand-written sprite modules: *„JSON je jediný katalóg objektov."* A drawing that is not in
+  `sprites/assets/manifest.json` is not in the game. No module may hold sprite rows of its own, and
+  a second source would mean two answers to "what does this look like" with only one of them
+  validated at load.
 - **One raster, three consumers.** Draw, collision and glow must read the same rendered raster.
   Collision must never independently rescale the source sprite. Test that every solid pixel of the
   collision mask corresponds to a drawn solid pixel.
