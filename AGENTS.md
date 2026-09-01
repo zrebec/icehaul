@@ -7,21 +7,28 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State on `feat/three-tier-sprite-lod` at 0.20.0 (2026-09-01), **815 tests**. The three-tier
-graphics work is complete on the branch; older entries below remain the history that explains its
-constraints.
+State on `main` at `8642063` — #70 merged 2026-09-01, package `0.20.0`, **815 tests / 39 files**.
+The three-tier graphics work is landed. Older entries below remain the history that explains its
+constraints; where one has been overtaken by the code, it now says so on the spot rather than
+reading as current.
 
-> **The authored sprite thread is finished, not parked.** There are 18 traffic and 15 roadside
-> `far / mid / near` JSON assets, all generated through the official ZX sprite validator. Their
-> source-grid resolution is independent of the physical projection box, so the extra detail did not
-> move traffic in its lane or create a second collision shape. The old decision that a middle tier
-> was closed was explicitly reversed by Fox on 2026-08-31; the record is below.
+> **The sprite *pipeline* is finished. The drawings inside it are not.** There are 18 traffic and
+> 15 roadside `far / mid / near` JSON assets, all passed through the official ZX sprite validator.
+> Their source-grid resolution is independent of the physical projection box, so the extra detail
+> did not move traffic in its lane or create a second collision shape — that part is done, and it
+> is the win. What the 33 grids *contain* is produced by `scripts/author-lod-sprites.py`: one
+> parametric function per family, not nine hand-cut grids. A vehicle's front and rear views share
+> their entire upper body. Numbers, and what that leaves open, are in "What the three-tier pass
+> established" below. The old decision that a middle tier was closed was explicitly reversed by Fox
+> on 2026-08-31.
 >
 > **§1 (impossible mission) and §2 (continuous score) are both fixed** — the mission rules and the
 > scoring rules are now pure modules with their own tests, and the bot simulates three legs. §2½
 > records what the 0.8.2 playtest said about where the difficulty actually lives. §3 (snow) and §4
-> (surface dominance, not a bug) stand. **The sprite redraw is done too** — what is left of the
-> graphics list starts at traffic density.
+> (surface dominance, not a bug) stand. **The sprite plumbing is done; the art is not** — the
+> catalogue, the projection order and the LOD selection are finished and correct, and the drawings
+> in them are generated rather than cut. Read "What the three-tier pass established" before adding
+> to the graphics queue: two of its five open items are art, not renderer.
 
 **Controllability** — finished and playtested. Ice at the sharpest curvature holds 40 km/h and every
 speed below it, braking included at 30. Grip ramps across surface seams over 20 m. Hazards may start
@@ -111,10 +118,12 @@ Written down so they stop living in a chat window. None is scheduled; the queue 
    canisters uniformly and place them where a detour costs something — road edge, mid-bend, on the
    ice — and to thin them out with distance travelled. Fuel stops being a tax and becomes a
    decision, which is the fantasy this game is actually about.
-4. **`feat(scene)`: a title screen and a local best-per-route** *(~0.5-1 day)*. Fox has asked for a
-   start screen, and the results screen finally produces comparable numbers to put on one. Daily
-   seed plus a best score for that seed gives replay value with no network and nothing stored that
-   matters. It is also the natural home for a glow switch for players who dislike it.
+4. **`feat(scene)`: a title screen and a local best-per-route** — **half done.** The title screen
+   shipped in #58: `scenes/intro.ts` decodes a native `.scr` at import and carries a menu whose
+   options persist through a zx-kit save profile (`game/prefs.ts`), which is also where the glow and
+   contour switches ended up. **The local best-per-route did not ship** and is still the whole point
+   of the item: the results screen names the route (#61) but nothing stores a score against a seed,
+   so a daily route cannot yet be beaten. *(~0.5 day for what is left.)*
 5. **`feat(render)`: distance fog** *(4-6 h)*. Next in the graphics queue and glow already paid half
    of it — the layer and the blit order exist. Strongest depth cue available, and it turns "smear on
    the horizon" from a defect into an intention, which is what still reads worst about the far field.
@@ -126,6 +135,14 @@ chooses the physical box first, then selects an authored source grid and resampl
 At a handover both assets therefore have the same lane position, bottom anchor, outline and collision
 extent. The extra boundary buys actual type information without buying a geometry jump.
 
+**"Geometry" is the operative word, and the rest of the trade is real.** The box does not move; the
+picture inside it does, because far, mid and near are genuinely different grids. Measured on the
+same walk that produced the two-tier figures: **45 % of the picture changes at the far/mid handover
+and 36 % at mid/near**, against **17 %** for the arrangement this replaced. That is inherent to
+having three drawings rather than one drawing recoloured — it is the price of the tier, not a
+defect in it — but it is a price, it is larger than the 35 % that #34 was raised to remove, and
+**it has not been playtested yet**. See the record below.
+
 #### What the three-tier pass established — 2026-09-01
 
 - The catalogue is deliberately finite: **18 traffic + 15 roadside = 33** assets. A new vehicle type
@@ -134,17 +151,160 @@ extent. The extra boundary buys actual type information without buying a geometr
   previews only. All 33 passed the official `zx_sprite.py` validator again after implementation.
 - Traffic still has one final raster per frame for drawing, collision and lamps; contour remains a
   parallel non-colliding mask. `laneFit`, cadence, churn and resample stability stayed green.
-- The far-mini cadence regression found by the new art was fixed in the art itself: splitting its
-  uninterrupted bumper moved the measured worst hold from **2.03 s to 1.83 s**, below the existing
-  2.0 s ceiling, without moving a scale constant.
-- Roadside decoration is now part of the route identity: `(gameSeed + 3) >>> 0` produces stable
-  clusters in verge/field/far bands, while paired lamps and signs remain close to the road. The
-  renderer grows them through the whole 220 m approach and painter-sorts every type together.
 - `?matrix=1&lod=1` samples the real hysteretic traffic handovers from one continuous approach per
   row. Traffic sheets apply scanlines before their deferred glow, matching `main.ts`.
   `?sceneryMatrix=1` covers all five types and
   eight depths; `placement=42` and `placement=1443866` show the real generator rather than synthetic
   objects. Brightness acceptance is always done with `scanlines=1`.
+
+##### Where the tier boundaries actually are
+
+Vehicles switch on **projected height in pixels**, with a one-pixel dead-band, in
+`chooseLodTier` (`render/vehicleLod.ts`):
+
+    LOD_FAR_MAX_HEIGHT = 7     LOD_MID_MAX_HEIGHT = 13     LOD_HYSTERESIS_PX = 1
+
+Height is `canonical.h × TRAFFIC_SCALE_A / (worldZ + TRAFFIC_SCALE_B)`, so the same two thresholds
+land at a different **distance** for each type. Closing from the far tier the switch happens above
+8 px and above 14 px:
+
+| | far → mid | mid → near | share of the 220 m approach spent on `far` |
+|---|---:|---:|---:|
+| mini | 35.6 m | 5.6 m | **85 %** |
+| car | 61.0 m | 20.1 m | 73 % |
+| bus | 80.1 m | 31.0 m | 64 % |
+
+Confirmed against the renderer: `approachChurn` reports the car's handovers at 60.8 m and 20.0 m.
+
+**Two consequences to keep in mind before drawing anything else.** The `far` grid does most of the
+work — for a mini, a 7 × 6 grid carries five sixths of every approach. And the mini's `near`
+28 × 22 grid only appears inside 5.6 m, which at 60 km/h closing is about **0.2 s** before the
+vehicle is past; the detail authored into it is very nearly never seen. If a tier's art budget has
+to be spent somewhere, `far` and `mid` are where it pays.
+
+Roadside scenery uses the same three names but a **different rule** — `chooseSceneryLod` switches on
+*scale*, not pixels, and has **no hysteresis**:
+
+    SCENERY_LOD_FAR_MAX_SCALE = 0.30   →  far → mid at 79.0 m
+    SCENERY_LOD_MID_MAX_SCALE = 0.50   →  mid → near at 22.5 m
+
+No dead-band is correct here and the asymmetry is deliberate: scenery only ever approaches, so its
+scale is monotonic and cannot oscillate across a boundary. Traffic can close and fall back as it
+brakes, which is exactly why vehicles need the dead-band.
+
+##### What the 33 grids actually contain
+
+They are **generated, not drawn**. `scripts/author-lod-sprites.py` builds every vehicle from a
+single function `vehicle_sprite(kind, view, lod)`: a trapezoid whose width ramp is three constants
+per type, with `detail = {far: 0, mid: 1, near: 2}` gating glass depth, pillars, keylines and the
+shaded panel. Roadside types have one function each, of the same nature.
+
+`view` touches only the bottom of the grid. Measured across all nine pairs — share of pixels that
+differ between the front and rear view of the same vehicle at the same tier:
+
+| | far | mid | near |
+|---|---:|---:|---:|
+| mini | 11.9 % | 3.9 % | 4.5 % |
+| car | 8.0 % | 3.6 % | 2.9 % |
+| bus | 4.8 % | 2.8 % | **2.5 %** |
+
+Roof, glass, pillars, flanks and arches are byte-identical; what differs is the lamp colour
+(`R` ↔ `Y`) and one band — plate versus grille. So the catalogue is 18 files and **nine drawings**,
+and the tier with the most room for a difference has the least. This matters because of a rule this
+file already established and did not repeal: *brightness is exhausted as a carrier, so anything a
+vehicle still needs to say has to be said with shape.* After #70, direction is said with **colour
+alone** — on the `far` tier, which is 64–85 % of every approach, an oncoming and a receding vehicle
+are the same drawing. Lane position still carries it. Nothing else does.
+
+The fleet palette was also re-dealt, without a decision being written for any of the five changes:
+
+| | before #70 | after #70 | what the earlier choice was for |
+|---|---|---|---|
+| bus, same | `B_YELLOW` | `MAGENTA` | yellow freed red **so the brake state existed at all** (2026-08-19, below) |
+| bus, oncoming | `B_RED` | `MAGENTA` | oncoming bus had its own body colour |
+| mini, same | `B_MAGENTA` | `B_GREEN` | magenta was picked because *nothing else in the frame uses it*; green was the **car's** colour |
+| car, same | `B_GREEN` | `B_BLUE` | new to the fleet |
+| mini/car, oncoming | `B_WHITE` | same as their own same-direction body | white was the direction cue |
+
+One of those is an improvement and should be kept: dropping `B_WHITE` bodies removes the pale
+oncoming vehicle that dissolves into a snow surface — the defect the contrast contour (#35) was
+built to paper over. The other four undo measured decisions as a side effect of replacing the art
+pipeline. Glass is now `B_CYAN`/`CYAN` over **13–30 %** of a sprite (`bus-rear-mid` is 30 %), and
+an ice surface is dithered `B_CYAN`/`CYAN`; the contour should hold it, but that has not been
+looked at on an ice segment.
+
+##### What it cost, measured
+
+Run `npx vitest run --disable-console-intercept -t "prints the profile"
+src/render/__tests__/approachChurn.test.ts` and `… approachCadence.test.ts` to reproduce all of this.
+
+- **Handover: 17 % → 45 %.** `same/car`, 220 → 2 m: the far/mid crossing at 60.8 m changes **45 %**
+  of the picture and mid/near at 20.0 m changes **36 %**. The handover is once again the largest
+  single-frame change of the whole approach, which is the property #34 was raised to remove. It is
+  unavoidable once three genuinely different grids exist — but it went unrecorded for a day, and
+  that, not the number, was the failure.
+- **The outer shape is guarded, the interior is not.** `vehicleArt.test.ts` holds normalized
+  silhouette **IoU ≥ 0.85** between adjacent tiers, and `approachChurn` holds the box and ground
+  anchor to within 1 px. Both are computed on the outer envelope. The 45 % is interior: `mid` adds
+  pillars, a waistline and a shaded panel that `far` does not have, and they arrive in one frame.
+  The old assertion *"hands over … without changing shape"* was removed, correctly — it could not
+  survive three distinct grids — but nothing replaced what it guarded.
+- **Cadence went backwards on the mini**, and the generator is why. Longest hold of one drawing
+  against the 2.0 s budget: **1.83 s** for both minis, against 1.17 s / 1.05 s for the hand-drawn
+  art; car 0.83 → 1.10 s, bus 0.55 → 0.92 s. All pass. 1.83 s is also the exact figure the
+  2026-08-19 redraw rejected twice while tuning the mini's grille and arches. Root cause is old and
+  still true: **perfect bilateral symmetry costs far-field motion**, and a formula is perfectly
+  symmetric. Splitting the mini's bumper recovered 2.03 → 1.83 s and no further; a hand-cut grid
+  recovered it to 1.17 s by widening features one at a time.
+- **Silhouette give-back: 16.7 % → 25.0 %** worst share (2 px off a 4 × 3 mini). The assertion is
+  unchanged and still passes because the `max(prev.w, solid × 0.1)` column term absorbs it, but the
+  comment inside `approachChurn.test.ts` still quotes the old figures.
+
+##### Roadside placement
+
+Decoration is now part of route identity. The scene passes a dedicated stream `(gameSeed + 3) >>> 0`
+into a pure `getRoadsideObjects(seed, from, to)`; the renderer grows objects through the whole 220 m
+approach and painter-sorts every type together.
+
+- **Nature comes in clusters**, not a uniform scatter: one cluster per 120 m ± 30 m jitter, 2–4
+  members each spread ±25 m, 80 % of them on the cluster's primary side.
+- **Three bands**, in multiples of road width: `verge` 0.15–0.55 (45 % of rolls), `field` 0.75–1.60
+  (35 %), `far` 1.80–3.00 (20 %). Type mix is deciduous 55 %, conifer 30 %, rocks 15 %.
+- **Signs are seeded** — every 400 m ± 80 m, either side, in the verge. **Lamps are not**: a fixed
+  pair every 180 m at offset 0.15, both sides, identical on every route. That is a deliberate split
+  — functional furniture stays predictable, nature carries the identity — but it does mean lamps
+  contribute nothing to telling two seeds apart.
+
+##### Runtime consequences worth knowing
+
+- **The glow now measures the lamps off the raster that was drawn.** `pushTrafficLampSpots` calls
+  `findLampPair(p.raster, dir)` per vehicle per frame instead of reading a per-sprite cache, so a
+  lamp moved one target pixel by the resampler cannot leave its halo behind. Correct, and cheap at
+  this size. `lampPairFor` and its `lampCache` survive as **test-only** exports; the comment above
+  the cache still claims it is what the runtime measures, which is no longer true.
+- **Glow constants did not move.** `GLOW_CORE_MIN_HEIGHT` is still 8 px; it merely stopped being
+  described in terms of the old `far/detail` boundary. The glow remains closed.
+- **Five modules are now orphaned**: `render/sprites/{vehicles,conifer,deciduous,rocks,signpost}.ts`
+  are imported by nothing. `vehicles.ts` in particular carries the seven authoring rules and the
+  measured tables behind the two hand-drawn passes — the reasoning summarised in "The second
+  redraw" below came from it. Migrate or delete deliberately; leaving it in `src/` means the next
+  reader takes an unreferenced file as current.
+
+##### What this leaves open
+
+1. **Is 45 % at 60 m acceptable?** Only a playtest answers it. If yes, it closes as the honest price
+   of three tiers. If no, the lever is making `mid` a closer relative of `far` rather than moving a
+   constant.
+2. **Front and rear need to differ in shape, not only in lamp colour** — most of all on `far`, where
+   most of the approach happens. This is the one finding here that is a genuine gameplay regression
+   rather than a bookkeeping one.
+3. **The bus does not read as a bus.** It uses the car's tapering trapezoid with a gentler ramp; a
+   bus is a box. Same generator constant, different shape law needed.
+4. **Two roadside types have visible artefacts** on `roadside-contact-sheet.png`: `conifer-near` has
+   a black keyline running the full height *through the crown*, `deciduous-near` has red branch
+   marks over green foliage, and `rocks-*` reads as a cyan puddle rather than stone.
+5. **The colour re-deal needs a decision, not an accident** — the bus especially, where yellow had a
+   functional reason recorded below.
 
 ### Playtest findings, 0.11.1 — the longest run so far
 
@@ -802,6 +962,13 @@ What landed:
 |---|---|---|---|---|
 | before | 28 / 44 / 51 | 10 / 7 / 6 | 3.07 / 1.87 / 2.12 s | 35% of the picture |
 | after | 124 / 187 / 211 | **2 frames** | **1.97 / 0.98 / 0.83 s** | 17%, and no shape change |
+| *and today (#70)* | *121 / 175 / 193* | *2 frames* | *1.83 / 1.10 / 0.92 s* | *45% far→mid, 36% mid→near* |
+
+> **The last row is not this pull request's result — it is what three authored tiers did to it
+> later.** The freeze and handover columns both moved the wrong way, for reasons recorded under
+> "What the three-tier pass established" at the top of this file. Everything the rest of this
+> section explains about *why* the numbers behave as they do still holds; only the "after" figures
+> stopped being the current state.
 
 **One geometry detail is worth not rediscovering.** Centring the box exactly on the anchor forces an
 *even* width — `floor(x - span/2)` and `ceil(x + span/2)` are mirror images about a whole pixel — so
@@ -816,9 +983,15 @@ that was right about the symptom and, it turned out, was the fault:
 - **The box never shrinks.** Exact, by construction.
 - **A frame gives back at most one column's worth of pixels, or a tenth of the silhouette.** Not
   zero, and the reason is honest: resampling a sprite with interior holes — a wheel gap, a tapered
-  corner — at a larger scale slides those holes. A whole approach gives back 152 pixels; the worst
-  share is 16.7%, which is two pixels off a 5 × 4 mini.
-- **The far tier changes colour and never shape**, which is what makes the handover cheap.
+  corner — at a larger scale slides those holes. A whole approach gave back 152 pixels; the worst
+  share was 16.7%, which is two pixels off a 5 × 4 mini. *With the authored grids it is 137 pixels
+  and a worst share of **25.0%** — still two pixels, now off a 4 × 3 mini, so it is the same floor
+  measured on a smaller box. The assertion is unchanged and passes on its column term.*
+- ~~**The far tier changes colour and never shape**, which is what makes the handover cheap.~~
+  **Superseded 2026-09-01.** With three authored grids the far tier draws its own art again, so the
+  handover changes shape by construction and costs 45% of the picture. The guarantee that replaced
+  this one is weaker on purpose: silhouette IoU ≥ 0.85 across a handover, plus a box and ground
+  anchor that may not move more than a pixel. The interior is no longer held by anything.
 
 **What is left is the floor, and it is in the far field.** A mini at 200 m is a 4 × 3 box whose true
 size grows by a tenth of a pixel over two seconds. No resampler can invent a change there. The levers
@@ -1221,6 +1394,13 @@ peak**, which is right: the truck's peak is its white core.
 
 #### The bus is yellow now — Fox's call, 2026-08-19
 
+> **The bus is no longer yellow.** #70 repainted the whole fleet as a side effect of replacing the
+> art pipeline: the bus is `MAGENTA`/`B_MAGENTA` in both directions. The reasoning below is the
+> reason yellow was chosen and it has not been answered — **magenta carries the red channel**, which
+> is the exact property `B_RED` bodywork had when the brake light was found to be lying. It is
+> probably better than `B_RED` and probably worse than `B_YELLOW`, and nobody has measured it.
+> Re-run `brakeSignal.test.ts` and a `?trafficBrake=1` sheet before calling this closed.
+
 `SAME_BUS_COLORS.X` was `B_RED` with `RED` lamps, so the bus had **no brake state at all**: a bright
 red lamp on bright red bodywork is a brake light that lies, and `vehicles.ts` had spent two
 paragraphs asking for the repaint it needed. Fox was behind a bus when he reported seeing nothing.
@@ -1291,6 +1471,13 @@ the raster; these are the interior lines it never had.
 where their silhouettes stop differing there was nothing left to tell them apart. The mini is
 `B_MAGENTA` now — no vehicle, surface, kerb or marker uses it.
 
+> **Superseded 2026-09-01, and the principle is the part to keep.** #70 re-dealt the fleet: mini
+> `B_GREEN`, car `B_BLUE`, bus `MAGENTA`, and oncoming bodies no longer differ from same-direction
+> ones. The mini therefore wears the colour this paragraph took *off* it. The rule that produced the
+> original choice — *two vehicles that stop differing in silhouette must not share a colour* — is
+> still satisfied, since all three differ. What is no longer satisfied is direction: it left the
+> body entirely and now rides on the lamps alone.
+
 **Two things the drawing gave up, both to measurement rather than taste.**
 
 - *The oncoming mini has no wheel arches.* Its front is a full-width dark grille and an arch row
@@ -1305,10 +1492,15 @@ where their silhouettes stop differing there was nothing left to tell them apart
 
 Longest hold of one drawing, against the 2.0 s budget:
 
-    first redraw    with keylines
-    same mini  1.28 s -> 1.17 s      oncoming mini  0.95 s -> 1.05 s
-    same car   0.83 s -> 0.83 s      oncoming car   0.83 s -> 0.83 s
-    same bus   0.57 s -> 0.55 s      oncoming bus   0.82 s -> 0.83 s
+    first redraw    with keylines    authored tiers (#70)
+    same mini  1.28 s -> 1.17 s   -> 1.83 s      oncoming mini  0.95 s -> 1.05 s -> 1.83 s
+    same car   0.83 s -> 0.83 s   -> 1.10 s      oncoming car   0.83 s -> 0.83 s -> 0.98 s
+    same bus   0.57 s -> 0.55 s   -> 0.92 s      oncoming bus   0.82 s -> 0.83 s -> 0.92 s
+
+The third column is where the generated grids landed. Still inside budget, and still the best
+argument in this file for why a formula cannot replace a hand-cut grid: every recovery in the
+second column came from widening **one** feature at a time until it survived down to four pixels,
+which is a judgement a width ratio cannot make.
 
 The count of *changes* per approach rose where it mattered — car 168 → 177, bus 182 → 195 — so the
 structure is not only visible up close, it does work in the far field too. Dimensions, silhouettes,
@@ -1377,6 +1569,11 @@ Direction is carried by **lamp colour, never body colour**: a same-direction bus
 and yellow *inside* the bodywork, so a test looking for the lamps must look for the flanking pair at
 the ends of a row, not for the colour anywhere.
 
+That rule was written to stop direction being *confused* by bodywork, when the drawings themselves
+also differed front from rear. After #70 they do not — the two views share their whole upper body —
+so the rule has quietly become the *whole* mechanism rather than a safeguard on it. It is still the
+right rule; it is no longer sufficient on its own. See the front/rear table at the top of the file.
+
 Type was not really distinguished at this size — the silhouettes existed, but at six pixels of
 height they carried no more than the size difference already did. The conclusion that a middle tier
 was closed was **reversed by Fox on 2026-08-31** after reviewing real prepared art. The current
@@ -1387,6 +1584,12 @@ far/mid/near sources keep the same physical box at handover; see the 2026-09-01 
 - **One raster, three consumers.** Draw, collision and glow must read the same rendered raster.
   Collision must never independently rescale the source sprite. Test that every solid pixel of the
   collision mask corresponds to a drawn solid pixel.
+- **A front view and a rear view are two drawings, not one drawing with a recoloured strip.** They
+  must differ in silhouette or in interior structure, not only in lamp colour — most of all on the
+  tier the approach actually spends its time in. This is the rule #70 broke, and it is testable
+  without judging art: *the two views of one vehicle at one tier must differ in at least N% of their
+  opaque pixels, and at least one of those differences must lie outside the lamp rows.* Today all
+  nine pairs would fail it at any N above 12%.
 - **Glow only on lights, never the body.** Bloom over a whole vehicle just makes a bigger blob. Two
   lamps per vehicle is still a hard limit. **The rest of this rule was measured and reversed in #43**
   (see above): 0.2–0.35 alpha is invisible on flat palette art seen through a 0.65 scanline overlay,
