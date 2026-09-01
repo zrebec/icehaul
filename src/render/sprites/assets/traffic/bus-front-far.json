@@ -4,12 +4,12 @@
   "rows": [
     "..............",
     "..WWWWWWWWWW..",
-    ".MCCCCCCCCCCM.",
     "MCCCCCCCCCCCCM",
-    "MMMMMMMMMMMMMM",
+    "MCCCCCCCCCCCCM",
+    "MCCCCCCCCCCCCM",
     "YMMMMKKKKMMMMY",
     "KWKKKKKKKKKKWK",
-    ".KK........KK.",
+    "...KK....KK...",
     ".............."
   ],
   "legend": {

@@ -290,6 +290,57 @@ approach and painter-sorts every type together.
   redraw" below came from it. Migrate or delete deliberately; leaving it in `src/` means the next
   reader takes an unreferenced file as current.
 
+##### The bus became a box — 2026-09-01
+
+Fox, reviewing the catalogue: the bus does not read as a bus. It did not, and the cause was
+structural rather than a matter of taste — every vehicle came out of one `vehicle_sprite` whose
+silhouette is a trapezoid, so the bus was the car's shape with a gentler width ramp. It now has its
+own law in `bus_sprite`, and the mini and car grids are byte-identical across the change.
+
+**The physical box stays 28 × 18.** It feeds lane fit, growth and collision, so the bus is still
+half again wider than it is tall and *height is not available as a cue*. Everything that changed is
+something which survives that.
+
+| | before | after |
+|---|---|---|
+| Sides | taper 0.72 → 1.0 | **vertical**, under a domed roof |
+| Glass | 0.42 of the body | **0.28** going away, **0.40** coming at you |
+| Lamps | horizontal pair | **stacked corner clusters** |
+| Wheels | ~10 % inset | **22 %**, where a bus's rear axle sits |
+| Rear only | — | **engine louvres**, low and centred |
+
+**Two things were decided by measurement, and both are worth not rediscovering.**
+
+*The roof is domed because a flat top froze the far field.* A perfect rectangle has edges at only
+two x positions, so as it grows every edge cell crosses its coverage threshold at nearly the same
+scale — the horizontal form of the symmetry cost this file already records for the mini.
+
+| | longest freeze (budget 2.0 s) | changes / 785 | worst give-back |
+|---|---:|---:|---:|
+| trapezoid | 0.92 s | 193 | 12.0 % |
+| box, flat roof | **1.47 s** | 164 | 8.0 % |
+| box, domed roof | **0.83 s** | 176 | 8.0 % |
+
+Flat-topped it was *worse than the shape it replaced*. A coach roof is domed anyway, and the dome
+gives the silhouette two more edge positions to move through; the result beats the trapezoid on both
+freeze and give-back. **A box that has to grow smoothly needs its corners taken off** — that is the
+general form.
+
+*The lamp stack roughly doubles the brake signal in the framebuffer,* which is the answer to the
+2026-08-19 finding that a braking bus could only be read from its halo. Cells that change when the
+brake comes on:
+
+| | 35 m | 25 m | 15 m | 8 m | 3 m |
+|---|---:|---:|---:|---:|---:|
+| before | 8 | 8 | 8 | 12 | 18 |
+| after | **16** | **12** | **24** | **30** | **40** |
+
+**The front is no longer the rear with recoloured lamps.** A coach head-on is mostly windscreen, so
+the front's glass runs deeper and the louvres belong to the back. At `far` the two fractions round to
+the same row, so the windscreen is forced one row deeper there explicitly — without it the only thing
+separating an oncoming bus from a receding one over 64 % of its approach was the lamp colour and a
+four-pixel mask.
+
 ##### What this leaves open
 
 1. **Is 45 % at 60 m acceptable?** Only a playtest answers it. If yes, it closes as the honest price
@@ -297,9 +348,10 @@ approach and painter-sorts every type together.
    constant.
 2. **Front and rear need to differ in shape, not only in lamp colour** — most of all on `far`, where
    most of the approach happens. This is the one finding here that is a genuine gameplay regression
-   rather than a bookkeeping one.
-3. **The bus does not read as a bus.** It uses the car's tapering trapezoid with a gentler ramp; a
-   bus is a box. Same generator constant, different shape law needed.
+   rather than a bookkeeping one. *Done for the bus as a side effect of its reshape: 4.8 / 2.8 /
+   2.5 % of the grid became 14.3 / 18.7 / 26.7 %. The mini and the car are untouched.*
+3. ~~**The bus does not read as a bus.**~~ **Done 2026-09-01** — it had the car's tapering
+   trapezoid with a gentler ramp, and now has its own shape law. See "The bus became a box" below.
 4. **Two roadside types have visible artefacts** on `roadside-contact-sheet.png`: `conifer-near` has
    a black keyline running the full height *through the crown*, `deciduous-near` has red branch
    marks over green foliage, and `rocks-*` reads as a cyan puddle rather than stone.

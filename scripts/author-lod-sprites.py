@@ -170,7 +170,157 @@ def body_bounds(row: list[str]) -> tuple[int, int] | None:
     return (solid[0], solid[-1]) if solid else None
 
 
+def bus_sprite(view: str, lod: str) -> Sprite:
+    """A bus is a box, and sharing the car's tapering trapezoid is why it read as
+    a wide saloon instead.
+
+    The physical box is 28x18 and cannot change — it feeds lane fit, growth and
+    collision — so the bus is half again wider than it is tall and height is not
+    available as a cue. Everything here is a cue that survives that.
+
+    1. **Vertical sides under a domed roof.** The taper is gone; only the top
+       one to three rows are drawn in. This is the whole difference between a
+       bus and a large car at this size, and see the note on the dome below for
+       why it is not a flat top.
+    2. **A window band, not a glasshouse.** A car's glass is a large share of
+       its height; a bus rear face is mostly panel with a band under the roof.
+       0.28 of the body going away, against the car's 0.40-plus.
+    3. **Stacked corner lamps.** Buses and lorries carry their tail lights in a
+       vertical cluster at each corner where a car carries a horizontal pair.
+       The stack also downsamples better than a pair, because it presents the
+       lamp colour on several rows of the outer edge at once — the same reason
+       lamps sit in the outermost columns at all. Measured: cells that change
+       when the brake comes on went from 8 to 24 at 15 m and 18 to 40 at 3 m,
+       which is the framebuffer answer to a bus whose braking could only be read
+       from its halo.
+    4. **Wheels pushed well inboard.** A bus's rear axle sits a long way in from
+       the corners and a car's does not.
+
+    The front and rear are not one drawing with a recoloured strip. A coach seen
+    head-on is mostly windscreen, so the front's glass runs to 0.40 of the body
+    against the rear's 0.28, and the engine louvres belong to the back only.
+    """
+    width, height = VEHICLE_DIMS["bus"][lod]
+    grid = Grid(width, height)
+    body = BODY_CHAR["bus"]
+    shade = BODY_SHADE["bus"]
+    detail = {"far": 0, "mid": 1, "near": 2}[lod]
+
+    wheel_y = height - 2
+    bumper_y = height - 3
+    top = 1
+    rows = bumper_y - top + 1
+
+    def band(fraction: float) -> int:
+        return top + max(0, min(rows - 1, round(rows * fraction)))
+
+    # ── 1. The box, under a domed roof ──
+    #
+    # The sides are vertical — that is the whole point — but a perfect rectangle
+    # has edges at only two x positions, so as it grows every edge cell crosses
+    # its coverage threshold at nearly the same scale and the far field freezes.
+    # Measured: flat-topped, the bus held one drawing for 1.47 s against 0.92 s
+    # for the trapezoid it replaced. A coach roof is domed anyway, and the dome
+    # gives the silhouette two more edge positions to move through.
+    grid.rect(0, top, width - 1, bumper_y, body)
+    dome = max(1, round(width * 0.14))
+    domed_rows = 1 + detail
+    for index in range(domed_rows):
+        inset = max(1, round(dome * (domed_rows - index) / domed_rows))
+        for offset in range(inset):
+            grid.put(offset, top + index, ".")
+            grid.put(width - 1 - offset, top + index, ".")
+    grid.centred(top, parity_width(width, width - 2 * dome), "W")
+
+    # ── 2. The window band ──
+    glass_top = top + 1
+    glass_bottom = max(glass_top, band(0.28))
+    if view == "front":
+        # At far the two fractions round to the same row, so the windscreen has
+        # to be forced one row deeper: without it the only thing separating an
+        # oncoming bus from a receding one over 64% of its approach is the lamp
+        # colour and a four-pixel mask.
+        glass_bottom = max(glass_bottom + 1, band(0.40))
+    pillar = max(1, round(width * 0.07))
+    for y in range(glass_top, glass_bottom + 1):
+        bounds = body_bounds(grid.pixels[y])
+        if not bounds:
+            continue
+        left, right = bounds[0] + pillar, bounds[1] - pillar
+        if left <= right:
+            grid.hline(y, left, right, "C")
+    if detail >= 1:
+        deep = max(1, (glass_bottom - glass_top + 1) // 3)
+        for y in range(glass_bottom - deep + 1, glass_bottom + 1):
+            for x in range(width):
+                if grid.pixels[y][x] == "C":
+                    grid.put(x, y, "c")
+
+    # ── 3. Structure below the glass ──
+    if detail >= 1:
+        # Belt line directly under the window, edge to edge but for one pixel.
+        grid.hline(glass_bottom + 1, 1, width - 2, "K")
+        # A darker lower panel so the flat face is two planes, not one slab.
+        panel_top = band(0.46)
+        for y in range(panel_top, bumper_y):
+            grid.hline(y, 1, width - 2, shade)
+    if detail >= 2 and view == "rear":
+        # Rear engine louvres, low and centred: the one interior feature a coach
+        # has that a car does not — and it belongs to the back of the vehicle
+        # only, which is one more thing telling the two views apart.
+        louvre_w = parity_width(width, max(2, round(width * 0.34)))
+        left = (width - louvre_w) // 2
+        for y in range(band(0.52), band(0.66) + 1, 2):
+            grid.hline(y, left, width - 1 - left, "K")
+
+    # ── 4. Stacked corner lamps ──
+    lamp = "R" if view == "rear" else "Y"
+    lamp_w = 1 if detail == 0 else 2 if detail == 1 else 4
+    stack_h = 1 if detail == 0 else 3 if detail == 1 else 6
+    lamp_top = band(0.72)
+    lamp_bottom = min(bumper_y - 1, lamp_top + stack_h - 1)
+    for y in range(lamp_top, lamp_bottom + 1):
+        for offset in range(lamp_w):
+            grid.put(offset, y, lamp)
+            grid.put(width - 1 - offset, y, lamp)
+        if detail >= 1:
+            grid.put(lamp_w, y, "K")
+            grid.put(width - 1 - lamp_w, y, "K")
+
+    # ── 5. The face: a plate going away, a bumper mask coming at you ──
+    face_y = min(bumper_y - 1, lamp_bottom + 1 if detail >= 1 else lamp_bottom)
+    if view == "rear":
+        plate_w = parity_width(width, max(2, round(width * 0.16)))
+        left = (width - plate_w) // 2
+        grid.hline(face_y, left, width - 1 - left, "W")
+    else:
+        mask_w = parity_width(width, max(2, round(width * 0.30)))
+        left = (width - mask_w) // 2
+        grid.hline(face_y, left, width - 1 - left, "K")
+        if detail >= 2:
+            grid.hline(face_y - 1, left + 1, width - 2 - left, "w")
+
+    # ── 6. Bumper and wheels ──
+    grid.hline(bumper_y, 0, width - 1, "K")
+    if width > 6:
+        inset = max(1, round(width * 0.08))
+        grid.put(inset, bumper_y, "W")
+        grid.put(width - 1 - inset, bumper_y, "W")
+
+    wheel_inset = max(1, round(width * 0.22))
+    wheel_w = max(1, round(width * 0.13))
+    for x in range(wheel_inset, min(width, wheel_inset + wheel_w)):
+        grid.put(x, wheel_y, "K")
+        grid.put(width - 1 - x, wheel_y, "K")
+
+    # Last row stays transparent: it is part of the ground anchor.
+    return Sprite(f"bus-{view}-{lod}", "traffic", f"bus-{view}", lod,
+                  width, height, grid.rows(), VEHICLE_LEGEND)
+
+
 def vehicle_sprite(kind: str, view: str, lod: str) -> Sprite:
+    if kind == "bus":
+        return bus_sprite(view, lod)
     width, height = VEHICLE_DIMS[kind][lod]
     grid = Grid(width, height)
     body = BODY_CHAR[kind]
