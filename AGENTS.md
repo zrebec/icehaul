@@ -341,15 +341,58 @@ the same row, so the windscreen is forced one row deeper there explicitly — wi
 separating an oncoming bus from a receding one over 64 % of its approach was the lamp colour and a
 four-pixel mask.
 
+##### The front stopped being the rear — 2026-09-01
+
+The catalogue shipped with the two views of a vehicle differing by **2.5-4.5 %** of the grid at
+`mid` and `near`, all of it the lamp colour and one band: plate going away, grille coming at you.
+Direction was carried by four pixels of colour on a tier that covers most of an approach, in a game
+whose own record says brightness is exhausted as a carrier and anything left has to be said with
+shape.
+
+| share of the grid that differs | far | mid | near |
+|---|---:|---:|---:|
+| mini, before | 11.9 % | 3.9 % | 4.5 % |
+| **mini, after** | **16.7 %** | **11.7 %** | **10.1 %** |
+| car, before | 8.0 % | 3.6 % | 2.9 % |
+| **car, after** | **10.2 %** | **10.3 %** | **7.4 %** |
+| bus (reshaped in the same day's work) | 14.3 % | 18.7 % | 26.7 % |
+
+**What the front gained, and why each one:**
+
+- **Wing mirrors.** The only difference that reaches the *silhouette* rather than the colours inside
+  it, and that is the point: interior detail is what the resample eats first, while an outline pixel
+  survives where a body pixel is outvoted — the same reason lamps sit in the outermost columns.
+  They hang off the shoulder row, or off the last glass row where the shoulder is already full
+  width. **That fallback is the whole reason `far` works**: at `far` the shoulder touches the canvas
+  edge on every type, and a mirror clipped against it is not a mirror, it is a missing pixel.
+- **Wider headlights.** A headlight is bigger than a tail light on every car ever built.
+- **A real grille at `near`** — two dark rows with the plate as a bright bar through them, against
+  the rear's single white plate on a plain panel.
+
+**What the rear gained:** the boot lid's shut line, a horizontal seam across the panel. A front's
+equivalent is hidden under the glass from head-on, so this is a difference that exists in the real
+object rather than one invented to satisfy a threshold.
+
+**The rule now has a test**, in `vehicleArt.test.ts`: the two views of a vehicle at a tier must
+differ in **at least 5 %** of the grid, *and* at least one of those differences must lie outside the
+rows the lamps occupy. The threshold catches the defect — 7 of 9 pairs failed it as originally
+shipped — and the second clause exists to catch the wrong fix, since a share alone could be
+satisfied by making the lamps enormous, which is the same mistake in a larger font.
+
+**One thing this did not buy, stated because the opposite was expected.** Mirrors add edge positions
+to the silhouette, and on the bus that was exactly what cured a frozen far field. Here it changed
+nothing: the mini still holds one drawing for **1.83 s** and the car for 1.10 s, unmoved. At `far` a
+mirror is a single pixel and the resample swallows it, so the freeze stays where it was. The mini's
+cadence remains open on its own terms.
+
 ##### What this leaves open
 
 1. **Is 45 % at 60 m acceptable?** Only a playtest answers it. If yes, it closes as the honest price
    of three tiers. If no, the lever is making `mid` a closer relative of `far` rather than moving a
    constant.
-2. **Front and rear need to differ in shape, not only in lamp colour** — most of all on `far`, where
-   most of the approach happens. This is the one finding here that is a genuine gameplay regression
-   rather than a bookkeeping one. *Done for the bus as a side effect of its reshape: 4.8 / 2.8 /
-   2.5 % of the grid became 14.3 / 18.7 / 26.7 %. The mini and the car are untouched.*
+2. ~~**Front and rear need to differ in shape, not only in lamp colour.**~~ **Done 2026-09-01** for
+   the whole fleet — the bus as a side effect of its reshape, then the mini and car deliberately.
+   See "The front stopped being the rear" below; the rule now has a test.
 3. ~~**The bus does not read as a bus.**~~ **Done 2026-09-01** — it had the car's tapering
    trapezoid with a gentler ramp, and now has its own shape law. See "The bus became a box" below.
 4. **Two roadside types have visible artefacts** on `roadside-contact-sheet.png`: `conifer-near` has
