@@ -1543,6 +1543,48 @@ too small to read. Worth watching in a playtest anyway.
 - **`brakeSignal.test.ts`** — counts the cells that change when the brake comes on, per type, across
   the whole approach. It is what turned "is it LOD?" into a table in five minutes.
 
+#### What `sprites/vehicles.ts` knew — migrated here on deletion, 2026-09-01
+
+The hand-drawn fleet stopped being loaded when #70 made the JSON catalogue the runtime source, and
+the module was deleted on 2026-09-01. Three things in its docblock were nowhere else, and they are
+the reasons rather than the pixels — the pixels are in git.
+
+**Why the redraw happened at all.** Six pull requests had fixed how a sprite *reaches* the screen —
+one shared raster, a far tier, a hyperbolic growth curve, an area-weighted resample, fractional
+scaling, a contrast outline — and none of them touched what the sprite *was*. Fox, after all of it:
+*"we are at a better level but honestly the sprites are terrible — not even a person with
+imagination could tell it is a car if they did not already know."* Every graphics decision since has
+been downstream of that sentence.
+
+**Why `scripts/sprite-import.mjs` earns its keep on scenery and cannot be used on vehicles.** It
+segments an image by block density. On a tree, lumpiness reads as nature. On a vehicle it produced
+three defects no renderer can fix:
+
+- **Rear lamps as a bar across the middle.** On a real car, and on every readable 8-bit car, they
+  sit at the outer corners — and they are the single feature that says *car, going away from me*.
+  The far tier had to re-add corner lamps precisely because the art got this wrong.
+- **No bilateral symmetry**, because block-density segmentation has no reason to be symmetric. At
+  this size the asymmetry reads as noise rather than as a manufactured object.
+- **Wheels that never separated from the body**, so nothing showed the road underneath and the
+  vehicle had no visible ground contact.
+
+**The seven rules the drawings followed.** Rules 6 and 7 are recorded in their own sections above;
+these five were only in the module:
+
+1. **Every row is a palindrome.** Symmetry is cheap to hold and it is what makes thirty pixels read
+   as a manufactured object. It costs far-field motion — see the mini's cadence — and it was
+   still judged worth it.
+2. **Lamps occupy the outermost columns of the widest rows.** Not inset: an edge pixel survives the
+   resample where an interior one is outvoted by bodywork.
+3. **Direction is carried by lamp colour, never by body colour.**
+4. **The wheels have road between them** — two dark blocks with a gap, below a solid bumper row.
+5. **Dimensions are fixed.** Width and height feed the projection, the LOD thresholds and the
+   collision raster, so changing them would be a gameplay change wearing an art change's clothes.
+
+The four scenery modules (`deciduous`, `conifer`, `rocks`, `signpost`) went in the same commit and
+carried no reasoning at all — they were `sprite-import.mjs` output, pure data, superseded by the
+validated JSON grids.
+
 #### The second redraw: structure, not shape — 2026-08-19
 
 The first redraw (#42) fixed what the six vehicles *were*: symmetry, lamps at the corners, wheels

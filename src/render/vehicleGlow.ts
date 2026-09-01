@@ -28,8 +28,10 @@
  *
  * Runtime positions are measured from the final resampled raster carried by the
  * projection. That same raster is drawn and collided, so a lamp moved by one
- * target pixel cannot leave its halo behind. `lampPairFor` exposes the equivalent
- * source-grid measurement for art contract tests.
+ * target pixel cannot leave its halo behind. There is deliberately no cached
+ * per-sprite answer beside it: one existed until 2026-09-01, and once the
+ * runtime started reading the raster it was production code kept alive by the
+ * tests that measured it.
  *
  * ── The halo is not the vehicle ─────────────────────────────────────────────
  * Same rule as the contour in `vehicleContour.ts`: decoration drawn around a
@@ -114,19 +116,6 @@ export function findLampPair(rows: readonly string[], dir: TrafficDir): LampPair
     left: { u: lx / ln / w, v: ly / ln / h },
     right: { u: rx / rn / w, v: ry / rn / h },
   }
-}
-
-/** Measured once per sprite: the art cannot change while the game is running. */
-const lampCache = new Map<string, LampPair | null>()
-
-export function lampPairFor(dir: TrafficDir, type: VehicleType, lod: LodTier = 'mid'): LampPair | null {
-  const key = `${dir}:${type}:${lod}`
-  let hit = lampCache.get(key)
-  if (hit === undefined) {
-    hit = findLampPair(getTrafficSprite(dir, type, lod).rows, dir)
-    lampCache.set(key, hit)
-  }
-  return hit
 }
 
 /**
