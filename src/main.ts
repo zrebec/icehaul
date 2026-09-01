@@ -31,6 +31,9 @@ import {
 } from './render/debug/sceneryMatrix.ts'
 import { setContourEnabled } from './render/road3d.ts'
 import { renderPendingLampGlow, setGlowSettings } from './render/vehicleGlow.ts'
+import {
+  beginDebugFrame, debugModeFromSearch, endDebugFrame, initDebugOverlay, renderDebugOverlay,
+} from './render/debug/overlay.ts'
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
 
@@ -100,6 +103,11 @@ function bootGame(): void {
     resumeAudio()
   }, { once: true })
 
+  // `O` cycles the debug overlay; `?debug=` opens it without a keypress. It
+  // composites after the scanlines for the same reason the glow does — see
+  // render/debug/overlay.ts.
+  initDebugOverlay(debugModeFromSearch(window.location.search))
+
   const scenes = createSceneManager()
 
   // One route per local calendar day, overridable with ?seed= so a specific road,
@@ -118,6 +126,7 @@ function bootGame(): void {
 
   let last = performance.now()
   function frame(now: number) {
+    beginDebugFrame(now)
     const dt = Math.min(50, now - last)
     last = now
 
@@ -134,6 +143,10 @@ function bootGame(): void {
     // picture to 65% brightness, which is how the first version came out
     // invisible in the game while looking right on the contact sheet.
     renderPendingLampGlow(ctx)
+
+    // After the glow, so the readout is never the thing a halo washes out.
+    endDebugFrame()
+    renderDebugOverlay(ctx)
 
     requestAnimationFrame(frame)
   }
