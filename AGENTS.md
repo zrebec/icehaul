@@ -1092,6 +1092,44 @@ that was right about the symptom and, it turned out, was the fault:
 size grows by a tenth of a pixel over two seconds. No resampler can invent a change there. The levers
 are `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`, both of which change how distance reads.
 
+### The debug overlay, and what it is for — 2026-09-01
+
+`O` cycles `off → stats → collision`. The frame monitor is zx-kit's; the rest is this game's, and
+two parts of it are decisions rather than plumbing.
+
+**The load corner is four numbers, not one.** An instantaneous CPU figure is the frame you happened
+to sample. `MIN`/`MAX`/`AVG` and the **worst one per cent** over a 600-frame window say whether the
+budget is comfortable, occasionally tight, or being missed — and the 1 % is the one that matters,
+because a mean of 6 % with one frame in a hundred at 90 % is a stutter you feel and a mean you
+cannot see it in. Nearest rank, not an interpolated percentile: below a hundred samples the worst
+one per cent is simply the worst sample, and saying so beats inventing a number between two frames
+that both happened. The window fills every frame, not only while the overlay is open, so opening it
+to look at a stutter that has already happened shows the window it happened in.
+
+**Collision mode exists to make "pixel-perfect" testable by driving.** The rule has always been that
+collision reads the same final raster the renderer drew, but until now the only way to check it was
+to trust a unit test. Every vehicle now draws two things at once:
+
+- a **yellow AABB**, tight around what the mask actually occupies rather than its declared size —
+  an articulated 40-wide truck has no 40-wide row, and using the declared width would flatter the
+  cheap model;
+- a **cyan silhouette trace**, the outermost solid cell of each row, which is the boundary
+  `checkTruckTrafficCollision` really walks.
+
+`AABB n / PIX n` counts how many vehicles the boxed model would have called a crash against how many
+the real one did. **`PIX` must never lead `AABB`** — a pixel overlap without a box overlap is
+geometrically impossible and would mean one of the two is reading the wrong raster. The gap in the
+other direction is the point: every frame where `AABB` is 1 and `PIX` is 0 is a crash the player
+would have suffered for nothing.
+
+`pixelMaskBounds`, `rasterBounds` and `aabbOverlap` live in `game/offroad.ts` beside the real check,
+are pure, and are tested — including the L-shape case where two boxes overlap and no occupied cell
+does, which is the whole argument in four lines.
+
+**Labels name the thing, not the test.** The first version wrote `ROAD` over the truck, which is the
+name of the check rather than the name of the object; read back, it is simply wrong. Boxes now say
+`TRUCK`, `CAR`, `BUS`, `MINI`.
+
 ## Branch workflow
 
 **One branch is one pull request. Once the PR is open, that branch is finished — go back to `main`.**

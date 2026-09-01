@@ -225,10 +225,23 @@ deploy fails like that, check these two action versions FIRST.
 - **ArrowLeft / ArrowRight** — steer
 - **D** — shift up · **A** — shift down (manual 5-speed gearbox)
 - **ENTER (hold ~1.8 s)** — crank the engine to start / restart a stalled engine; releasing early resets the crank. `STARTING...` overlay while cranking (`CRANK_NEEDED_MS = 1800` in `config.ts`).
-- **O** — cycle the debug overlay: `off → stats → collision → off`. Same key as minefield. Stats is
-  zx-kit's frame monitor plus route identity and what the physics is being handed; collision adds
-  the truck's two masks and every depth the traffic sweep tested. `?debug=stats` / `?debug=collision`
-  open it without a keypress; off draws nothing at all (`render/debug/overlay.ts`).
+- **O** — cycle the debug overlay: `off → stats → collision → off`. Same key as minefield.
+  `?debug=stats` / `?debug=collision` open it without a keypress; off draws nothing at all
+  (`render/debug/overlay.ts`). Four corners, because they are four different questions and a single
+  stacked block sat over the road it was describing:
+
+  | corner | shows |
+  |---|---|
+  | top left | `FPS`, frame ms |
+  | top right | `CPU` now, then `AVG` / `MIN` / `MAX` / `1%` over a 600-frame window. `1%` is the **worst** one per cent — the frame you feel — and the whole corner turns `B_RED` once it passes the budget |
+  | bottom left | `SEED` first (a seed plus a distance reproduces any frame), distance, surface, grip, off-road severity |
+  | bottom right | traffic and scenery counts, cab and trailer **pose against yaw**, and on the collision page `AABB` / `PIX` |
+
+  **Collision mode is how pixel-perfect gets verified by driving rather than by arithmetic.** Every
+  vehicle draws two things: a yellow **AABB** — tight around what the mask occupies, not its declared
+  size — and a cyan **silhouette trace**, one pixel per row per side, which is the boundary the real
+  test walks. Swept depths are dim ghosts behind them. `AABB n / PIX n` counts how many vehicles a
+  boxed collision would have crashed into against how many the real one did; `PIX` must never lead.
 
 **The manual gearbox is core.** Each gear has a top speed — **1st caps at ~28 km/h, so you physically cannot reach 120 in a low gear** — and a torque band shown on the **RPM** gauge. Acceleration is deliberately slow and heavy: you climb through the gears with **D** (up) / **A** (down). The engine dies two ways, each after a short warning + hold-ENTER restart:
 - **Stall (lug):** revs fall below `LUG_RPM` (0.25 ≈ 650 rpm) — you braked/slowed or sat in too tall a gear without downshifting (1st gear is immune). Realistic: e.g. **cruising 30 km/h in 5th lugs** (you must downshift). The RPM bar drops toward 0 bars and a ~3.5 s `ENGINE STALLING / SHIFT DOWN A` cough warning precedes the stall. RPM is proportional to speed (`rpm = speed / gear.to`) and is shown raw — it CAN read 0.
