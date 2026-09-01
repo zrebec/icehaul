@@ -24,6 +24,11 @@ import {
   contourEnabledFromSearch, glowSettingsFromSearch,
   drawTrafficMatrix, isMatrixRequested, matrixLayoutFor, matrixOptionsFromSearch,
 } from './render/debug/trafficMatrix.ts'
+import {
+  drawSceneryMatrix, drawSceneryPlacement, isSceneryMatrixRequested,
+  sceneryMatrixLayoutFor, sceneryMatrixOptionsFromSearch,
+  sceneryPlacementLayoutFor, sceneryPlacementSeedFromSearch,
+} from './render/debug/sceneryMatrix.ts'
 import { setContourEnabled } from './render/road3d.ts'
 import { renderPendingLampGlow, setGlowSettings } from './render/vehicleGlow.ts'
 
@@ -43,7 +48,24 @@ setGlowSettings(glowSettingsFromSearch(window.location.search))
 // ?matrix=1 — the traffic contact sheet, not the game. Renders one static image
 // and stops: no scene manager, no input, no audio, no frame loop. It exists so a
 // renderer change can be judged against identical frames; see AGENTS.md step 0.
-if (isMatrixRequested(window.location.search)) {
+if (isSceneryMatrixRequested(window.location.search)) {
+  const options = sceneryMatrixOptionsFromSearch(window.location.search)
+  const placementSeed = sceneryPlacementSeedFromSearch(window.location.search)
+  const layout = placementSeed === undefined
+    ? sceneryMatrixLayoutFor(options)
+    : sceneryPlacementLayoutFor(options)
+  canvas.width = layout.width
+  canvas.height = layout.height
+  canvas.style.width = `${layout.width}px`
+  canvas.style.height = `${layout.height}px`
+  const sheetCtx = canvas.getContext('2d')
+  if (!sheetCtx) throw new Error('scenery matrix: no 2d context')
+  if (placementSeed === undefined) {
+    drawSceneryMatrix(sheetCtx, () => document.createElement('canvas'), options)
+  } else {
+    drawSceneryPlacement(sheetCtx, () => document.createElement('canvas'), placementSeed, options)
+  }
+} else if (isMatrixRequested(window.location.search)) {
   const options = matrixOptionsFromSearch(window.location.search)
   const layout = matrixLayoutFor(options)
   canvas.width = layout.width

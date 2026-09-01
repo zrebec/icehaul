@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { scaleRoadsideRows } from '../road3d.ts'
+import { resampleSpriteAtSpan } from '../spriteRaster.ts'
 
 describe('scaleRoadsideRows', () => {
   it('preserves transparent gaps when reducing a sprite', () => {
@@ -35,5 +36,31 @@ describe('scaleRoadsideRows', () => {
       'GG..',
       'GG..',
     ])
+  })
+})
+
+describe('resampleSpriteAtSpan', () => {
+  it('makes source resolution irrelevant to the projected box and silhouette', () => {
+    const oneX = [
+      '.XX.',
+      'XXXX',
+      'X..X',
+    ]
+    const twoX = [
+      '..XXXX..',
+      '..XXXX..',
+      'XXXXXXXX',
+      'XXXXXXXX',
+      'XX....XX',
+      'XX....XX',
+    ]
+
+    const low = resampleSpriteAtSpan(oneX, 7.25, 5.5, 100, 80)
+    const high = resampleSpriteAtSpan(twoX, 7.25, 5.5, 100, 80)
+
+    expect(low).not.toBeNull()
+    expect(high).toEqual(low)
+    expect({ left: low!.left, top: low!.top, w: low!.w, h: low!.h })
+      .toEqual({ left: 96, top: 74, w: 8, h: 6 })
   })
 })

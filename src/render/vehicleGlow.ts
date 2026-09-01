@@ -21,17 +21,15 @@
  * lamps — a same-direction bus is `B_RED` all over — so a rule that looked for
  * the colour would have lit the whole vehicle.
  *
- * The redraw (#42) removed the need for the table entirely. The six drawings now
- * follow two rules that make derivation exact: *lamps occupy the outermost
- * columns of the widest rows*, and *direction is carried by lamp colour, never
- * by body colour*. In all six sprites the direction's lamp char — `R` going
- * away, `Y` coming at you — appears **only** where a lamp is. So the position is
- * a measurement of the drawing, and a redraw moves the halo with the lamp for
- * free. `vehicleArt.test.ts` already holds the properties this relies on.
+ * All eighteen authored views follow two rules that make derivation exact:
+ * lamps sit at the outer sides, and direction is carried by the lamp mark rather
+ * than body colour. `R` going away and `Y` coming at you appear only where a
+ * lamp is. A redraw therefore moves the halo with the lamp for free.
  *
- * Positions come out normalised to the sprite box, so projecting one onto the
- * screen is a multiply by the *drawn* width and height — which are outputs of
- * the resampler, never inputs to it.
+ * Runtime positions are measured from the final resampled raster carried by the
+ * projection. That same raster is drawn and collided, so a lamp moved by one
+ * target pixel cannot leave its halo behind. `lampPairFor` exposes the equivalent
+ * source-grid measurement for art contract tests.
  *
  * ── The halo is not the vehicle ─────────────────────────────────────────────
  * Same rule as the contour in `vehicleContour.ts`: decoration drawn around a
@@ -52,7 +50,9 @@ import {
   GLOW_CORE_RADIUS_MAX, GLOW_CORE_RADIUS_MIN, GLOW_CORE_RADIUS_PER_HEIGHT,
   GLOW_RADIUS_BRAKE_MULT, GLOW_BRAKE_PASSES,
 } from '../config.ts'
-import { getTrafficSpriteRows, type TrafficProjection } from './road3d.ts'
+import type { TrafficProjection } from './road3d.ts'
+import { getTrafficSprite } from './sprites/catalog.ts'
+import type { LodTier } from './vehicleLod.ts'
 import type { TrafficDir, VehicleType } from '../game/traffic.ts'
 
 /** A lamp's centre inside the sprite box, as a fraction of its width and height. */
@@ -119,11 +119,11 @@ export function findLampPair(rows: readonly string[], dir: TrafficDir): LampPair
 /** Measured once per sprite: the art cannot change while the game is running. */
 const lampCache = new Map<string, LampPair | null>()
 
-export function lampPairFor(dir: TrafficDir, type: VehicleType): LampPair | null {
-  const key = `${dir}:${type}`
+export function lampPairFor(dir: TrafficDir, type: VehicleType, lod: LodTier = 'mid'): LampPair | null {
+  const key = `${dir}:${type}:${lod}`
   let hit = lampCache.get(key)
   if (hit === undefined) {
-    hit = findLampPair(getTrafficSpriteRows(dir, type), dir)
+    hit = findLampPair(getTrafficSprite(dir, type, lod).rows, dir)
     lampCache.set(key, hit)
   }
   return hit
@@ -178,7 +178,9 @@ export function pushTrafficLampSpots(
   dir: TrafficDir,
   braking = false,
 ): void {
-  const lamps = lampPairFor(dir, p.type)
+  // Read the raster that was actually drawn. This keeps glow, collision and the
+  // framebuffer on one answer even when resampling moves a lamp by a pixel.
+  const lamps = findLampPair(p.raster, dir)
   if (!lamps) return
 
   // A braking vehicle's halo is wider and denser, and that is the whole signal.

@@ -6,13 +6,14 @@
  * number rather than an opinion. Fox, from the driving seat: "buď nevidím alebo
  * ide o LOD."
  *
- * Measured across the whole approach because the answer is not the same at both
- * ends: the far tier writes its own lamps onto the resampled sprite, the detail
- * tier inherits whatever survived the resample from the art.
+ * Measured across the whole approach because each tier has its own authored lamp
+ * cluster. The semantic colour vote keeps those source cells in the final
+ * raster even at the smallest far sizes.
  */
 
 import { describe, it, expect } from 'vitest'
-import { projectTrafficVehicle, getTrafficSpriteColors } from '../road3d.ts'
+import { projectTrafficVehicle } from '../road3d.ts'
+import { getTrafficSprite } from '../sprites/catalog.ts'
 import { VIEWPORT_TOP, VIEWPORT_BOTTOM } from '../../config.ts'
 import type { TrafficVehicle, VehicleType } from '../../game/traffic.ts'
 
@@ -47,8 +48,8 @@ function signalAt(type: VehicleType, distanceM: number): Signal | null {
   )
   if (!p) return null
 
-  const rolling = getTrafficSpriteColors('same', type, false)
-  const braking = getTrafficSpriteColors('same', type, true)
+  const rolling = getTrafficSprite('same', type, p.lod, false).colors
+  const braking = getTrafficSprite('same', type, p.lod, true).colors
 
   let changed = 0
   let solid = 0

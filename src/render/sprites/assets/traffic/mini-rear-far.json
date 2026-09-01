@@ -1,0 +1,19 @@
+{
+  "w": 7,
+  "h": 6,
+  "rows": [
+    "..WWW..",
+    ".GCCCG.",
+    "RGWWWGR",
+    "KWK.KWK",
+    ".K...K.",
+    "......."
+  ],
+  "legend": {
+    "K": "C.BLACK",
+    "G": "C.B_GREEN",
+    "C": "C.B_CYAN",
+    "W": "C.B_WHITE",
+    "R": "C.RED"
+  }
+}

@@ -19,13 +19,14 @@
 import { C, drawScanlines, type GlowSource } from 'zx-kit'
 import {
   GAME_WIDTH, GAME_HEIGHT, VIEWPORT_TOP, VIEWPORT_BOTTOM,
-  GLOW_ALPHA, SCANLINE_ALPHA,
+  GLOW_ALPHA, SCANLINE_ALPHA, TRAFFIC_VIEW_DISTANCE_M,
   type Surface,
 } from '../../config.ts'
-import { drawRoad, drawTraffic } from '../road3d.ts'
+import { drawRoad, drawTraffic, projectTrafficVehicle } from '../road3d.ts'
 import { drawTruck, pushTruckLampSpots } from '../truck.ts'
 import { renderLampGlow } from '../vehicleGlow.ts'
 import type { TrafficVehicle, TrafficDir, VehicleType } from '../../game/traffic.ts'
+import type { LodTier } from '../vehicleLod.ts'
 
 /**
  * Distances sampled, in metres. Chosen where the projection changes character
@@ -167,6 +168,41 @@ function cellVehicle(
   }
 }
 
+/**
+ * Visit one matrix row as one continuous approach.
+ *
+ * LOD hysteresis lives on `TrafficVehicle.lodTier`, so rebuilding the vehicle
+ * for every distance silently turns the sheet into a stateless threshold test.
+ * Keeping this traversal explicit also gives tests a way to ask the real
+ * projector which authored tier every cell will carry.
+ */
+export function mapTrafficMatrixRow<T>(
+  options: MatrixOptions,
+  type: VehicleType,
+  dir: TrafficDir,
+  visit: (vehicle: TrafficVehicle, column: number) => T,
+): T[] {
+  if (options.distances.length === 0) return []
+
+  const vehicle = cellVehicle(
+    type, dir, TRAFFIC_VIEW_DISTANCE_M, options.vehicleX, options.trafficBrake,
+  )
+  // Boundary-only sheets do not necessarily include the 220 m visibility edge.
+  // Prime the remembered tier there so their first "before" cell carries the
+  // same far state as a vehicle that really approached from the horizon.
+  projectTrafficVehicle(
+    VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, options.playerX, vehicle,
+    () => options.curvature,
+  )
+
+  const results: T[] = []
+  for (let column = 0; column < options.distances.length; column++) {
+    vehicle.distM = options.distances[column]!
+    results.push(visit(vehicle, column))
+  }
+  return results
+}
+
 /** Refilled per cell, never reallocated. */
 const glowSpots: GlowSource[] = []
 
@@ -177,10 +213,8 @@ const glowSpots: GlowSource[] = []
 function renderCell(
   cellCtx: CanvasRenderingContext2D,
   opts: MatrixOptions,
-  type: VehicleType,
-  dir: TrafficDir,
-  distM: number,
-): void {
+  vehicle: TrafficVehicle,
+): LodTier | undefined {
   const surfaceAt = () => opts.surface
   const curvatureAt = () => opts.curvature
 
@@ -194,7 +228,7 @@ function renderCell(
   drawRoad(cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX, surfaceAt, curvatureAt)
   drawTraffic(
     cellCtx, VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, opts.playerX,
-    [cellVehicle(type, dir, distM, opts.vehicleX, opts.trafficBrake)], curvatureAt, glowSpots,
+    [vehicle], curvatureAt, glowSpots,
   )
   if (opts.showTruck) {
     const truckX = GAME_WIDTH / 2 + opts.playerX * 50
@@ -203,7 +237,36 @@ function renderCell(
     // `?truck=0` takes the truck and its halo out together.
     pushTruckLampSpots(glowSpots, truckX, VIEWPORT_BOTTOM - 2, 0, 0, opts.brake)
   }
-  renderLampGlow(cellCtx, glowSpots)
+  return vehicle.lodTier
+}
+
+function drawTierBadge(
+  ctx: CanvasRenderingContext2D,
+  tier: LodTier | undefined,
+  x: number,
+  y: number,
+): void {
+  if (!tier) return
+  ctx.fillStyle = C.BLACK
+  ctx.fillRect(x + 1, y + 1, 27, 9)
+  ctx.fillStyle = tier === 'far' ? C.B_CYAN : tier === 'mid' ? C.B_YELLOW : C.B_RED
+  ctx.fillText(tier, x + 2, y + 2)
+}
+
+/** Production draws its mask before its emissive layer; lock that order here. */
+export function finishTrafficMatrixLayers(
+  scanlines: boolean,
+  drawScanlineLayer: () => void,
+  drawGlowLayer: () => void,
+): void {
+  if (scanlines) drawScanlineLayer()
+  drawGlowLayer()
+}
+
+interface DeferredCellGlow {
+  readonly x: number
+  readonly y: number
+  readonly spots: readonly GlowSource[]
 }
 
 /**
@@ -225,6 +288,16 @@ export function drawTrafficMatrix(
   const cellCtx = cell.getContext('2d')
   if (!cellCtx) throw new Error('matrix: no 2d context for the cell canvas')
 
+  // Glow must be composited after the sheet-wide scanline mask, just as it is
+  // in `main.ts`. Render it into a transparent native-size cell and magnify the
+  // resulting game pixels only when the layer is finally added to the sheet.
+  const glowCell = makeCellCanvas()
+  glowCell.width = GAME_WIDTH
+  glowCell.height = GAME_HEIGHT
+  const glowCellCtx = glowCell.getContext('2d')
+  if (!glowCellCtx) throw new Error('matrix: no 2d context for the glow cell canvas')
+  const deferredGlow: DeferredCellGlow[] = []
+
   ctx.imageSmoothingEnabled = false
   ctx.fillStyle = C.BLACK
   ctx.fillRect(0, 0, layout.width, layout.height)
@@ -244,24 +317,48 @@ export function drawTrafficMatrix(
       ctx.fillStyle = C.B_WHITE
       ctx.fillText(`${type}/${dir === 'oncoming' ? 'onc' : 'same'}`, 1, y + 2)
 
-      for (let c = 0; c < layout.cols; c++) {
-        renderCell(cellCtx, opts, type, dir, opts.distances[c]!)
+      mapTrafficMatrixRow(opts, type, dir, (vehicle, c) => {
+        const tier = renderCell(cellCtx, opts, vehicle)
+        const x = LABEL_W + c * layout.cellW
         // Crop to the road viewport — the HUD is not what this sheet is about.
         ctx.drawImage(
           cell,
           0, VIEWPORT_TOP, GAME_WIDTH, CELL_H,
-          LABEL_W + c * layout.cellW, y, layout.cellW, layout.cellH,
+          x, y, layout.cellW, layout.cellH,
         )
-      }
+        // Read back from the actual vehicle the renderer just projected. The
+        // harness owns no scale law and cannot drift from the game unnoticed.
+        drawTierBadge(ctx, tier, x, y)
+        deferredGlow.push({ x, y, spots: [...glowSpots] })
+        return tier
+      })
       row++
     }
   }
 
-  // Last, over the whole sheet, exactly as `main.ts` draws it over the frame.
-  // Applied to the *output* rows rather than to a cell before zooming: the game
-  // darkens every other device row, so at any zoom half the rows of the final
-  // image is the same 0.65 average brightness the player actually sees.
-  if (opts.scanlines) drawScanlines(ctx, SCANLINE_ALPHA)
+  finishTrafficMatrixLayers(
+    opts.scanlines,
+    // Applied to the *output* rows rather than to a cell before zooming: the
+    // game darkens every other device row at the final device resolution.
+    () => drawScanlines(ctx, SCANLINE_ALPHA),
+    () => {
+      const previousSmooth = ctx.imageSmoothingEnabled
+      const previousComposite = ctx.globalCompositeOperation
+      ctx.imageSmoothingEnabled = false
+      ctx.globalCompositeOperation = 'lighter'
+      for (const entry of deferredGlow) {
+        glowCellCtx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT)
+        renderLampGlow(glowCellCtx, entry.spots)
+        ctx.drawImage(
+          glowCell,
+          0, VIEWPORT_TOP, GAME_WIDTH, CELL_H,
+          entry.x, entry.y, layout.cellW, layout.cellH,
+        )
+      }
+      ctx.imageSmoothingEnabled = previousSmooth
+      ctx.globalCompositeOperation = previousComposite
+    },
+  )
 
   return layout
 }
@@ -309,10 +406,54 @@ export function matrixOptionsFromSearch(search: string): Partial<MatrixOptions> 
   const dirs = q.get('dirs')?.split(',').filter(d => (MATRIX_DIRS as readonly string[]).includes(d))
   if (dirs?.length) out.dirs = dirs as TrafficDir[]
 
+  if (q.get('lod') === '1') out.distances = trafficLodBoundaryDistances()
+
+  // An explicit ladder wins over the generated boundary ladder. This makes
+  // `lod=1` a useful default that can still be narrowed for a high-zoom crop.
   const distances = q.get('dist')?.split(',').map(Number).filter(n => Number.isFinite(n) && n > 0)
   if (distances?.length) out.distances = distances
 
   return out
+}
+
+let lodBoundaryDistanceCache: readonly number[] | undefined
+
+/**
+ * Samples the real approach projector and returns the frame immediately before
+ * and after every far/mid and mid/near handover for all three physical boxes.
+ * Lazy by design: the normal game imports this debug module from `main.ts`, but
+ * must not walk thousands of synthetic projection frames unless `?lod=1` asks.
+ */
+export function trafficLodBoundaryDistances(): readonly number[] {
+  if (lodBoundaryDistanceCache) return lodBoundaryDistanceCache
+
+  const found = new Set<number>()
+  const stepM = 0.25
+  const steps = Math.round((TRAFFIC_VIEW_DISTANCE_M - 2) / stepM)
+
+  for (const type of MATRIX_TYPES) {
+    const vehicle = cellVehicle(type, 'same', TRAFFIC_VIEW_DISTANCE_M, 0.5, false)
+    let previousTier: LodTier | undefined
+    let previousDistance = TRAFFIC_VIEW_DISTANCE_M
+
+    for (let step = 0; step <= steps; step++) {
+      const distance = TRAFFIC_VIEW_DISTANCE_M - step * stepM
+      vehicle.distM = distance
+      const projected = projectTrafficVehicle(
+        VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, vehicle, () => 0,
+      )
+      if (!projected) continue
+      if (previousTier && projected.lod !== previousTier) {
+        found.add(previousDistance)
+        found.add(distance)
+      }
+      previousTier = projected.lod
+      previousDistance = distance
+    }
+  }
+
+  lodBoundaryDistanceCache = Object.freeze([...found].sort((a, b) => b - a))
+  return lodBoundaryDistanceCache
 }
 
 /** True when the URL asks for the contact sheet instead of the game. */

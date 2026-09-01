@@ -15,11 +15,11 @@ nemiešať ich:
 | | Sprity | Celé obrazovky |
 |---|---|---|
 | Čo | Vozidlá, stromy, značky | Titulka, neskôr aj pozadie po havárii |
-| Zdroj | AI kontaktný hárok (PNG) | zx-art → **`.scr`** |
-| Nástroj | `scripts/sprite-import.mjs` | `scripts/screen-import.mjs` |
-| Výstup | `src/render/sprites/<meno>.ts` | `src/assets/<meno>.ts` (base64) |
-| Presnosť zdroja | nepresná, treba segmentáciu a doskakovanie na paletu | pixel-presná, netreba nič |
-| Záruka palety | **kontrolovaná** importérom | **konštrukčná** — formát ju nevie porušiť |
+| Zdroj | kódovo vytvorená presná `.rows.txt` mriežka | zx-art → **`.scr`** |
+| Nástroj | `scripts/author-lod-sprites.py` → oficiálny `zx_sprite.py` | `scripts/screen-import.mjs` |
+| Runtime výstup | validovaný JSON cez `sprites/catalog.ts` | `src/assets/<meno>.ts` (base64) |
+| Náhľady | natívny transparentný PNG + jediný 4× nearest-neighbour PNG | PNG iba na kontrolu `.scr` |
+| Záruka palety | **validovaná** uzavretou mapou názvov `C.*` | **konštrukčná** — formát ju nevie porušiť |
 
 Ten posledný riadok je celý dôvod, prečo obrazovky nechodia cez PNG. Atribútový
 bajt `.scr` má tri bity na INK a tri na PAPER, takže **sedemnásta farba ani tretia
@@ -44,74 +44,113 @@ node scripts/clash-check.mjs          # --save-frames ulozi aj PNG
 a nemieša jasové banky. Vzorkuje **párne** riadky zariadenia — `drawScanlines`
 stmavuje nepárne, a vzorka na nich by merala prekryv namiesto hry.
 
----
+## Kontaktné hárky reálneho renderera
 
-## Pipeline
-
-```
-docs/assets/<sheet>.png  ──node scripts/sprite-import.mjs──▶  src/render/sprites/<name>.ts
-   (2×2 contact sheet)        (segment + downsample + snap)        (ROWS + COLORS)
-```
-
-## Source sheet format
-
-- A **2×2 grid of sprites** on a **black** background (one PNG, up to 4 sprites).
-- Art may be AI-generated (imagegen) and therefore **imprecise** — the visible 8×8
-  grid is **decorative only**. The importer never aligns to it.
-- Each sprite has a label below it; labels and dimension marks are ignored.
-- Colours should be (roughly) ZX palette; anything is snapped to the nearest of the
-  16 zx-kit colours, and near-black becomes the transparent background.
-- Lives in `docs/assets/` next to `vehicle-sprite-reference.png`.
-
-## The importer (`scripts/sprite-import.mjs`)
-
-For each quadrant it:
-1. **Segments** the art by block-density (the largest connected blob of "occupied"
-   12 px blocks) — robust to dithering, labels and dimension ticks.
-2. **Downsamples** that blob to the target game-pixel size (area-average per cell +
-   transparency where a cell is mostly background).
-3. **Snaps** each cell to the nearest zx-kit palette colour.
-
-Target sizes (multiple of 8, **min 24×24**) and the sheet layout are declared in the
-`EXPECTED` table at the top of the script — edit there to add sprites or retarget sizes.
+Oba debug režimy kreslia cez produkčný `drawRoad` a príslušný objektový renderer;
+nemajú vlastnú kópiu perspektívy. Názov `far`/`mid`/`near` v bunke je výsledok,
+ktorý práve vrátil skutočný projektor.
 
 ```bash
-node scripts/sprite-import.mjs                 # dry run: geometry + ASCII preview
-node scripts/sprite-import.mjs --write         # writes src/render/sprites/*.ts
-node scripts/sprite-import.mjs other.png --write
+npm run dev
+node scripts/traffic-matrix.mjs .shots/traffic
+node scripts/scenery-matrix.mjs .shots/scenery
 ```
 
-## Output format (in code)
+- `?matrix=1&lod=1` nájde snímku tesne pred a po každom LOD prechode cez reálny
+  traffic projektor. Každý riadok je jeden súvislý príchod od 220 m, takže sa zachová
+  aj produkčná LOD hysterézia. Explicitné `dist=` môže výber zúžiť.
+- `?sceneryMatrix=1` má riadok pre každý typ a stĺpce 220, 120, 80, 50, 25, 20,
+  10 a 3 m. Podporuje `zoom`, `surface`, `curve`, `offset`, `types`, `dist` a
+  `scanlines=1`.
+- `?sceneryMatrix=1&placement=42` namiesto izolovaných objektov ukáže štyri
+  skutočné okná seedovanej cesty. Capture sada obsahuje seed 42 aj ľadový benchmark
+  1443866.
 
-Same shape as the oncoming-traffic sprites in `render/road3d.ts`, so a single
-renderer (`drawScaledRows`, perspective-scaled) draws both traffic and roadside:
+Jas sa hodnotí so `scanlines=1`; bez neho je hárok svetlejší než hra. Traffic hárok
+rovnako ako `main.ts` najprv nanesie scanline masku a až potom deferred lamp glow — bloom
+sa preto maskou znovu nestlmí.
 
-```ts
-export const CONIFER_W = 32
-export const CONIFER_H = 56
-export const CONIFER_ROWS = ['....gg....', ...] as const
-export const CONIFER_COLORS: Record<string, SpectrumColor> = { g: C.GREEN, C: C.B_CYAN, ... }
+---
+
+## Trojstupňová sprite pipeline
+
+```text
+scripts/author-lod-sprites.py
+        │  presná kódová pixelová konštrukcia
+        ▼
+<name>.rows.txt
+        │  zx-spectrum-screen / zx_sprite.py
+        ├────────▶ <name>.json       runtime zdroj
+        ├────────▶ <name>.png        natívny RGBA náhľad
+        └────────▶ <name>_4x.png     nearest-neighbour kontrola pixelov
+                         │
+manifest.json ───────────┴──▶ sprites/catalog.ts ──▶ renderer
 ```
 
-Row-string chars: `.` = transparent; lowercase = normal-brightness colour, UPPERCASE =
-bright (`g`=`GREEN`, `G`=`B_GREEN`, `c`/`C`=`CYAN`/`B_CYAN`, `y`/`Y`, `r`/`R`, `w`/`W`, …).
+Celý katalóg sa reprodukuje jedným príkazom:
 
-The generated files carry an `AUTO-GENERATED … do not edit by hand` header — re-run the
-importer to change them; tweak the source PNG or the `EXPECTED` table, not the `.ts`.
+```bash
+python3 scripts/author-lod-sprites.py
+```
 
-## Current sprites
+Skript vyžaduje presne **33** položiek, zavolá oficiálny validátor pre každú z nich,
+obnoví `manifest.json`, `validation.txt` a rodinné kontaktné hárky. Úspešný druhý beh
+musí nechať `git diff` prázdny.
 
-| Sprite | Size | Sheet |
-|--------|------|-------|
-| `deciduous` | 40×56 | `decorations-v2.png` |
-| `conifer`   | 32×56 | `decorations-v2.png` |
-| `rocks`     | 40×24 | `decorations-v2.png` |
-| `signpost`  | 32×40 | `decorations-v2.png` |
+`scripts/test-lod-sprites.py` potom byte-exaktne overí celý derivovaný reťazec: textové
+riadky sa musia rovnať JSON `rows`, natívny RGBA PNG sa znovu zostaví z JSON legendy a
+4× PNG musí byť presný nearest-neighbour resize. Porovnanie zahŕňa RGB aj alpha kanál.
+
+`sprites/catalog.ts` potom pri štarte kontroluje presný tvar `{w,h,rows,legend}`,
+rozmery, jednopísmenové symboly, úplnú legendu a uzavretý zoznam názvov ZX farieb.
+PNG sa neimportuje do bundlu.
+
+### Softvérový sprite nie je `.scr` bunka
+
+Každý nepriehľadný pixel musí byť jedna presná farba `C.*`; antialiasing, polopriehľadná
+hrana, blur a interpolácia sú zakázané. Na rozdiel od `.scr` však softvérovo kompozitovaný
+sprite **nemá limit dvoch farieb v lokálnej 8×8 bunke**. Fox tento pôvodný limit zrušil
+2026-08-31 po vizuálnej kontrole, pretože z `mid` a `near` odstraňoval práve vnútorné
+keylines a farebné roviny, pre ktoré existujú.
+
+### Katalóg a rozmery zdrojov
+
+Traffic: tri typy × front/rear × tri LOD = **18**.
+
+| typ | far | mid | near | kanonický fyzický box |
+|---|---:|---:|---:|---:|
+| mini | 7×6 | 14×11 | 28×22 | 14×11 |
+| car | 11×8 | 22×15 | 44×30 | 22×15 |
+| bus | 14×9 | 28×18 | 56×36 | 28×18 |
+
+Roadside: päť typov × tri LOD = **15**.
+
+| typ | far | mid | near | kanonický fyzický box |
+|---|---:|---:|---:|---:|
+| deciduous | 8×12 | 16×24 | 32×48 | 22×31 |
+| conifer | 8×12 | 16×24 | 32×48 | 18×31 |
+| rocks | 8×5 | 16×10 | 32×20 | 22×13 |
+| sign | 8×12 | 16×24 | 24×32 | 18×22 |
+| lamp | 3×8 | 5×16 | 9×32 | 6×28 |
+
+Zdrojová mriežka a fyzický box sú zámerne dve veci. Renderer najprv určí box z
+kanonického rozmeru a world-depth mierky, až potom vyberie LOD JSON a resampluje ho
+do už určeného rozpätia. Handover preto nemení pruh, bottom-center kotvu ani hitbox.
+
+### Starý PNG importer
+
+`scripts/sprite-import.mjs` zostáva historickým nástrojom pre experimenty so starými
+AI kontaktnými hárkami. Nie je zdrojom dnešných 33 assetov a jeho výstupné `.ts` sprity
+runtime renderer nepoužíva.
 
 
 ---
 
-# Sprite prompts for AI image generation
+# Historické sprite prompty pre AI image generation
+
+> Táto sekcia predchádza validovanému JSON katalógu. Je referenciou výtvarného smeru,
+> nie návodom na úpravu dnešných traffic/roadside assetov; jej atribútové obmedzenia sa
+> na softvérovo kompozitované sprity nevzťahujú.
 
 Use these prompts with ChatGPT (DALL-E) or similar AI image generators.
 After generation, manually convert the result to a zx-kit `createBitmap` byte array.

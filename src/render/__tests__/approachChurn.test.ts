@@ -30,6 +30,9 @@
 import { describe, it, expect } from 'vitest'
 import { pictureChurn } from './pictureChurn.ts'
 import { DIRS, TYPES, walkApproach, type ApproachFrame } from './approachWalk.ts'
+import { rasteriseVehicleAtScale } from '../vehicleRaster.ts'
+import { getTrafficSprite, trafficSpriteName } from '../sprites/catalog.ts'
+import { TRAFFIC_CANONICAL_SIZE } from '../../config.ts'
 
 /** Cells that differ, over the overlap, with both rasters aligned top-left. */
 function contentChurn(a: readonly string[], b: readonly string[]): number {
@@ -117,11 +120,11 @@ describe('what changes between frames during an approach', () => {
     console.log(`  largest single-frame picture change: ${(worstPicture * 100).toFixed(0)}%` +
       (worstAt ? ` at ${worstAt.distM.toFixed(1)} m — ${worstAt.w}x${worstAt.h}, ${worstAt.lod}` : ''))
 
-    const handover = frames.findIndex((f, i) => i > 0 && f.lod !== frames[i - 1]!.lod)
-    if (handover > 0) {
-      const f = frames[handover]!
-      console.log(`  tier handover at ${f.distM.toFixed(1)} m (${f.w}x${f.h}): ` +
-        `${(pictureChurn(frames[handover - 1]!.raster, f.raster) * 100).toFixed(0)}% of the picture changed`)
+    const handovers = frames.flatMap((f, i) =>
+      i > 0 && f.lod !== frames[i - 1]!.lod ? [{ index: i, frame: f }] : [])
+    for (const { index, frame } of handovers) {
+      console.log(`  tier handover to ${frame.lod} at ${frame.distM.toFixed(1)} m (${frame.w}x${frame.h}): ` +
+        `${(pictureChurn(frames[index - 1]!.raster, frame.raster) * 100).toFixed(0)}% of the picture changed`)
     }
     expect(frames.length).toBeGreaterThan(500)
   })
@@ -177,23 +180,46 @@ describe('what changes between frames during an approach', () => {
     }
   })
 
-  it('hands over between tiers exactly once, and without changing shape', () => {
-    // Two tiers, one crossing. The handover used to be the largest single change
-    // in an approach — 35% of the picture — because it swapped one drawing for a
-    // different one. It now only recolours, so the shape either side of it is
-    // identical and the crossing costs no more than an ordinary frame.
+  it('hands over far -> mid -> near without moving its box or ground anchor', () => {
+    // Asset grids have three different resolutions, but the physical box is
+    // canonical and the bottom-centre anchor belongs to projection. A handover
+    // may coincide with one ordinary pixel of growth; it may not add a jump.
     for (const dir of DIRS) {
       for (const type of TYPES) {
         const frames = walkApproach(dir, type)
-        const switches = frames.filter((f, i) => i > 0 && f.lod !== frames[i - 1]!.lod)
-        expect(switches, `${dir}/${type} tier switches`).toHaveLength(1)
+        const at = frames.flatMap((frame, index) =>
+          index > 0 && frame.lod !== frames[index - 1]!.lod ? [index] : [])
+        expect(at.map(index => frames[index]!.lod), `${dir}/${type} tier switches`)
+          .toEqual(['mid', 'near'])
 
-        const at = frames.findIndex((f, i) => i > 0 && f.lod !== frames[i - 1]!.lod)
-        const before = frames[at - 1]!
-        const after = frames[at]!
-        const shape = (f: ApproachFrame) => f.raster.map(r => r.replace(/[^.]/g, 'X'))
-        if (before.w === after.w && before.h === after.h) {
-          expect(shape(after), `${dir}/${type} handover shape`).toEqual(shape(before))
+        for (const index of at) {
+          const before = frames[index - 1]!
+          const after = frames[index]!
+          expect(Math.abs(after.w - before.w), `${dir}/${type} width at ${after.lod}`).toBeLessThanOrEqual(1)
+          expect(Math.abs(after.h - before.h), `${dir}/${type} height at ${after.lod}`).toBeLessThanOrEqual(1)
+          expect(
+            Math.abs((after.top + after.h) - (before.top + before.h)),
+            `${dir}/${type} projected ground motion at ${after.lod}`,
+          ).toBeLessThanOrEqual(1)
+
+          const renderTier = (lod: ApproachFrame['lod']) => {
+            const sprite = getTrafficSprite(dir, type, lod)
+            return rasteriseVehicleAtScale(
+              trafficSpriteName(dir, type, lod), sprite.rows, after.scale, 128, 100,
+              {
+                physicalSize: TRAFFIC_CANONICAL_SIZE[type],
+                priorityChars: [dir === 'same' ? 'R' : 'Y'],
+              },
+            )!
+          }
+          const oldAsset = renderTier(before.lod)
+          const newAsset = renderTier(after.lod)
+          expect(
+            { left: newAsset.left, top: newAsset.top, w: newAsset.w, h: newAsset.h },
+            `${dir}/${type} LOD-induced box jump at ${after.lod}`,
+          ).toEqual({ left: oldAsset.left, top: oldAsset.top, w: oldAsset.w, h: oldAsset.h })
+          expect(newAsset.top + newAsset.h, `${dir}/${type} LOD-induced ground jump at ${after.lod}`)
+            .toBe(oldAsset.top + oldAsset.h)
         }
       }
     }

@@ -1,0 +1,22 @@
+{
+  "w": 14,
+  "h": 9,
+  "rows": [
+    "..............",
+    "..WWWWWWWWWW..",
+    ".MCCCCCCCCCCM.",
+    "MCCCCCCCCCCCCM",
+    "MMMMMMMMMMMMMM",
+    "YMMMMKKKKMMMMY",
+    "KWKKKKKKKKKKWK",
+    ".KK........KK.",
+    ".............."
+  ],
+  "legend": {
+    "K": "C.BLACK",
+    "M": "C.B_MAGENTA",
+    "C": "C.B_CYAN",
+    "W": "C.B_WHITE",
+    "Y": "C.B_YELLOW"
+  }
+}

@@ -239,8 +239,8 @@ export const GLOW_CORE_RADIUS_MAX = 4
 /**
  * Shortest drawn vehicle that gets a core, in pixels.
  *
- * Set at the far/detail LOD boundary (`LOD_FAR_MAX_HEIGHT`, roughly 50 m for a
- * car) because of what the core costs: it desaturates the halo toward white, and
+ * Kept at 8 px, now the plain far/mid handover, because of what the core costs:
+ * it desaturates the halo toward white, and
  * far away the halo's **colour is the only thing that says which way the vehicle
  * is going**. Close up the shape already says it, so the light may blow out.
  *

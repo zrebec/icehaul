@@ -4,17 +4,24 @@ import {
   GAME_WIDTH, HORIZON_PCT,
   LATERAL_SHIFT, PERSPECTIVE_K,
   TRAFFIC_SCALE_A, TRAFFIC_SCALE_B,
+  TRAFFIC_CANONICAL_SIZE,
   TRAFFIC_VIEW_DISTANCE_M,
+  SCENERY_CANONICAL_SIZE, SCENERY_SCALE_NEAR_Z_M, SCENERY_VIEW_DISTANCE_M,
   ROAD_HALF_TOP, ROAD_HALF_BOTTOM,
   KERB_WIDTH_BOTTOM, KERB_WIDTH_TOP,
 } from '../config.ts'
 import { computeCurveOffsets } from './projection.ts'
-import { rasteriseVehicleAtScale } from './vehicleRaster.ts'
-import { applyFarLamps, chooseLodTier, type LodTier } from './vehicleLod.ts'
+import { projectedVehicleSize, rasteriseVehicleAtScale } from './vehicleRaster.ts'
+import { scaleRoadsideRows } from './spriteRaster.ts'
+export { scaleRoadsideRows, resampleSpriteAtScale } from './spriteRaster.ts'
+import { chooseLodTier, type LodTier } from './vehicleLod.ts'
 import { CONTOUR_CHAR, type VehicleContour } from './vehicleContour.ts'
-// Circular by design, the same shape as `vehicleRaster.ts` above: the glow needs
-// the art to find the lamps, the renderer needs the glow to place them. Both
-// sides only read through functions, so nothing is touched at module load.
+import {
+  getRoadsideSprite, getTrafficSprite, roadsideSpriteName, trafficSpriteName,
+} from './sprites/catalog.ts'
+import {
+  chooseSceneryLod, rasteriseRoadsideAtScale, roadsideScaleForDepth,
+} from './roadsideRaster.ts'
 import { isGlowEnabled, pushTrafficLampSpots } from './vehicleGlow.ts'
 import {
   visibleMarkers, visibleKerbStripes, visibleCentreDashes,
@@ -225,18 +232,8 @@ function drawSurfaceScanline(
 import type { Canister } from '../game/canisters.ts'
 import type { RoadsideObject, RoadsideType } from '../game/roadside.ts'
 import type { TrafficVehicle, VehicleType } from '../game/traffic.ts'
-import { DECIDUOUS_ROWS, DECIDUOUS_COLORS, DECIDUOUS_W, DECIDUOUS_H } from './sprites/deciduous.ts'
-import { CONIFER_ROWS, CONIFER_COLORS, CONIFER_W, CONIFER_H } from './sprites/conifer.ts'
-import { ROCKS_ROWS, ROCKS_COLORS, ROCKS_W, ROCKS_H } from './sprites/rocks.ts'
-import { SIGNPOST_ROWS, SIGNPOST_COLORS, SIGNPOST_W, SIGNPOST_H } from './sprites/signpost.ts'
-import {
-  SAME_MINI_ROWS, ONCOMING_MINI_ROWS, SAME_CAR_ROWS, ONCOMING_CAR_ROWS,
-  SAME_BUS_ROWS, ONCOMING_BUS_ROWS,
-  SAME_MINI_COLORS, ONCOMING_MINI_COLORS, SAME_CAR_COLORS, ONCOMING_CAR_COLORS,
-  SAME_BUS_COLORS, ONCOMING_BUS_COLORS,
-  SAME_MINI_BRAKE_COLORS, SAME_CAR_BRAKE_COLORS, SAME_BUS_BRAKE_COLORS,
-  type RowColors,
-} from './sprites/vehicles.ts'
+
+type RowColors = Readonly<Record<string, SpectrumColor>>
 
 /**
  * Draws fuel canisters on the road in perspective. Call AFTER drawRoad.
@@ -400,9 +397,9 @@ export function projectTrafficVehicle(
     // does not change size on the frame it draws level with the player.
     const scale = TRAFFIC_SCALE_A / TRAFFIC_SCALE_B + pass * 0.15
 
-    // Beside or behind the player: always the detailed drawing.
-    vehicle.lodTier = 'detail'
-    const drawn = scaleTrafficSprite(vehicle.dir, vehicle.type, scale, x, y, 'detail')
+    // Beside or behind the player: always the authored near drawing.
+    vehicle.lodTier = 'near'
+    const drawn = scaleTrafficSprite(vehicle.dir, vehicle.type, scale, x, y, 'near')
     if (!drawn) return null
     return { x, y, scale, type: vehicle.type, ...drawn }
   }
@@ -440,10 +437,9 @@ export function projectTrafficVehicle(
 /**
  * The sprite at this scale, its screen box, and which tier it ended up in.
  *
- * The tier is decided *after* rasterising, because the projected height is now
- * read off the raster rather than computed ahead of it. That costs nothing: the
- * far tier only recolours, so both tiers have the same silhouette and the same
- * height, and the second lookup is a cache hit from the first frame onward.
+ * The tier is decided from the canonical physical span *before* rasterising.
+ * Authored resolution therefore cannot move a boundary or change the box: the
+ * selected far/mid/near grid is only a source sampled into that fixed span.
  */
 function scaleTrafficSprite(
   dir: TrafficVehicle['dir'],
@@ -456,18 +452,17 @@ function scaleTrafficSprite(
   left: number; top: number; w: number; h: number
   lod: LodTier; raster: readonly string[]; contour: VehicleContour | null
 } | null {
-  const key = `${dir}:${type}`
-  const rows = getTrafficSpriteRows(dir, type)
-  const detail = rasteriseVehicleAtScale(key, rows, scale, x, y)
-  if (!detail) return null
+  const physicalSize = TRAFFIC_CANONICAL_SIZE[type]
+  const projected = projectedVehicleSize(physicalSize, scale)
+  if (!projected) return null
 
-  const lod = chooseLodTier(detail.h, previousTier)
-  if (lod === 'detail') return { ...detail, lod }
-
-  const far = rasteriseVehicleAtScale(
-    `${key}:far`, rows, scale, x, y, raster => applyFarLamps(raster, dir),
+  const lod = chooseLodTier(projected.h, previousTier)
+  const sprite = getTrafficSprite(dir, type, lod)
+  const drawn = rasteriseVehicleAtScale(
+    trafficSpriteName(dir, type, lod), sprite.rows, scale, x, y,
+    { physicalSize, priorityChars: [dir === 'same' ? 'R' : 'Y'] },
   )
-  return far ? { ...far, lod } : { ...detail, lod: 'detail' }
+  return drawn ? { ...drawn, lod } : null
 }
 
 function drawSameDirVehicle(
@@ -476,12 +471,12 @@ function drawSameDirVehicle(
   braking = false,
 ): void {
   drawVehicleContour(ctx, p)
-  drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('same', p.type, braking), p)
+  drawRasterRows(ctx, p.raster, getTrafficSprite('same', p.type, p.lod, braking).colors, p)
 }
 
 function drawOncomingVehicle(ctx: CanvasRenderingContext2D, p: TrafficProjection): void {
   drawVehicleContour(ctx, p)
-  drawTrafficRows(ctx, p.raster, getTrafficSpriteColors('oncoming', p.type), p)
+  drawRasterRows(ctx, p.raster, getTrafficSprite('oncoming', p.type, p.lod).colors, p)
 }
 
 /**
@@ -522,29 +517,18 @@ export function isContourEnabled(): boolean {
   return contourEnabled
 }
 
-// The sprite's own dimensions are no longer declared separately from its art:
-// the drawn size is `ceil(sourceDimension * scale)`, read straight off the rows.
-// A table that had to be kept in step with the pixel data could only ever drift.
+// Physical dimensions and art resolution are deliberately separate. The
+// canonical 14x11 / 22x15 / 28x18 boxes drive projection and collision; an
+// authored far, mid or near grid is only sampled into that box.
 
-// The art itself lives in `sprites/vehicles.ts`, next to the roadside sprites
-// and away from the renderer that draws it. Read the header there before
-// changing a pixel: the drawings follow rules the resampler and the far LOD
-// tier depend on.
-
-export function getTrafficSpriteRows(dir: TrafficVehicle['dir'], type: VehicleType): readonly string[] {
-  if (dir === 'oncoming') {
-    switch (type) {
-      case 'mini': return ONCOMING_MINI_ROWS
-      case 'car': return ONCOMING_CAR_ROWS
-      case 'bus': return ONCOMING_BUS_ROWS
-    }
-  }
-
-  switch (type) {
-    case 'mini': return SAME_MINI_ROWS
-    case 'car': return SAME_CAR_ROWS
-    case 'bus': return SAME_BUS_ROWS
-  }
+// Compatibility accessors for diagnostics that inspect source art directly.
+// Runtime rendering uses `getTrafficSprite` with the projection's selected tier.
+export function getTrafficSpriteRows(
+  dir: TrafficVehicle['dir'],
+  type: VehicleType,
+  lod: LodTier = 'mid',
+): readonly string[] {
+  return getTrafficSprite(dir, type, lod).rows
 }
 
 /**
@@ -559,35 +543,22 @@ export function getTrafficSpriteColors(
   dir: TrafficVehicle['dir'],
   type: VehicleType,
   braking = false,
+  lod: LodTier = 'mid',
 ): RowColors {
-  if (dir === 'oncoming') {
-    switch (type) {
-      case 'mini': return ONCOMING_MINI_COLORS
-      case 'car': return ONCOMING_CAR_COLORS
-      case 'bus': return ONCOMING_BUS_COLORS
-    }
-  }
-
-  switch (type) {
-    case 'mini': return braking ? SAME_MINI_BRAKE_COLORS : SAME_MINI_COLORS
-    case 'car': return braking ? SAME_CAR_BRAKE_COLORS : SAME_CAR_COLORS
-    case 'bus': return braking ? SAME_BUS_BRAKE_COLORS : SAME_BUS_COLORS
-  }
+  return getTrafficSprite(dir, type, lod, braking).colors
 }
 
 /** Minimal placement box for scaled row-string sprites (TrafficProjection fits). */
 interface SpriteBox { left: number; top: number; w: number; h: number }
 
-function drawTrafficRows(
+function drawRasterRows(
   ctx: CanvasRenderingContext2D,
   raster: readonly string[],
   colors: RowColors,
   p: SpriteBox,
 ): void {
-  // `raster` is already the projected size: one raster pixel is one screen pixel.
-  // There is no scaling arithmetic left here, and therefore none left to disagree
-  // with the collision check, which reads the very same raster. The measurements
-  // behind that change are in vehicleRaster.ts.
+  // The raster is already projected: one raster pixel is one screen pixel.
+  // Equal-mark runs reduce canvas calls without changing any ZX cell.
   for (let y = 0; y < raster.length; y++) {
     const row = raster[y]!
     let x = 0
@@ -605,228 +576,76 @@ function drawTrafficRows(
   }
 }
 
-/** Fraction of a target cell that must be opaque for it to be drawn at all. */
-const COVERAGE_THRESHOLD = 0.2
-
-/**
- * Resample a character sprite to exactly `targetW × targetH`.
- *
- * Each target cell covers a rectangle of the source, and every source pixel it
- * touches votes **by how much of that pixel actually falls inside** — the
- * dominant colour by area wins, and the cell is dropped when opaque area is
- * under {@link COVERAGE_THRESHOLD}.
- *
- * ── Why the weighting is not optional ───────────────────────────────────────
- * Counting each touched pixel once instead was stable at plain ratios and wrong
- * everywhere else. Scaling 22 px to 21, most target cells sit inside one source
- * pixel, but each cell whose interval straddles a boundary took *both* pixels at
- * equal weight — a local 2:1 downscale inside an otherwise 1:1 image. That was
- * measurable twice over:
- *
- * - **A step that grew the sprite past 1:1 replaced a quarter of the picture.**
- *   The inflation vanished in a single frame at `w = srcW`. Weighting removes
- *   the whole excess: no size step now changes the picture more than an eight-
- *   times finer source would force (worst 13.6 pp of excess → 0.5 pp).
- * - **Rasters were far off the source.** 16.5% of a car's picture wrong at a
- *   typical width, against 11.2% weighted — and what was wrong was silhouette:
- *   a 20%-covered edge cell counted as a full pixel, so every downscale drew the
- *   vehicle fatter than it is.
- *
- * The dominant-colour vote is unchanged and still loses small features to
- * bodywork; that is the far tier's job, not this function's.
- */
-export function scaleRoadsideRows(
-  rows: readonly string[],
-  targetW: number,
-  targetH: number,
-): string[] {
-  const srcH = rows.length
-  const srcW = rows[0]?.length ?? 0
-  if (srcW === 0 || srcH === 0 || targetW <= 0 || targetH <= 0) return []
-
-  return resampleRows(rows, {
-    w: targetW, h: targetH,
-    x0: 0, y0: 0,
-    stepX: srcW / targetW, stepY: srcH / targetH,
-  })
-}
-
-/**
- * Where each target cell reads from, in source coordinates.
- *
- * Splitting this out from {@link scaleRoadsideRows} is what lets a sprite be
- * sampled at a size the integer grid cannot express. `scaleRoadsideRows` fits a
- * sprite to a whole number of cells, so the only way it can grow is a whole
- * column at a time; a grid whose `step` and origin are free can put the sprite's
- * edge *between* cells, and then growth arrives one pixel at a time as each edge
- * cell in turn crosses {@link COVERAGE_THRESHOLD}. See `vehicleRaster.ts`.
- */
-interface SampleGrid {
-  /** Target cells across and down. */
-  w: number
-  h: number
-  /** Source coordinate at the left/top edge of target cell 0. May be negative. */
-  x0: number
-  y0: number
-  /** Source units spanned by one target cell. `1 / scale` for a uniform scale. */
-  stepX: number
-  stepY: number
-}
-
-function resampleRows(rows: readonly string[], grid: SampleGrid): string[] {
-  const srcH = rows.length
-  const srcW = rows[0]?.length ?? 0
-  if (srcW === 0 || srcH === 0 || grid.w <= 0 || grid.h <= 0) return []
-
-  // The denominator is the cell's **whole** area, not the part of it that found
-  // source pixels to sample. A cell straddling the sprite's edge is mostly
-  // outside it, and counting only the inside would let a sliver of bodywork fill
-  // the cell — the same "drawn fatter than it is" fault the area weighting was
-  // introduced to remove, reappearing at the silhouette instead of inside it.
-  const cellArea = grid.stepX * grid.stepY
-  if (cellArea <= 0) return []
-
-  const scaled: string[] = []
-  for (let dy = 0; dy < grid.h; dy++) {
-    const top = grid.y0 + dy * grid.stepY
-    const bottom = top + grid.stepY
-    let row = ''
-
-    for (let dx = 0; dx < grid.w; dx++) {
-      const left = grid.x0 + dx * grid.stepX
-      const right = left + grid.stepX
-      const area = new Map<string, number>()
-      let opaque = 0
-
-      for (let sy = Math.max(0, Math.floor(top)); sy < Math.min(Math.ceil(bottom), srcH); sy++) {
-        const rowOverlap = Math.min(bottom, sy + 1) - Math.max(top, sy)
-        if (rowOverlap <= 0) continue
-        const sourceRow = rows[sy]!
-
-        for (let sx = Math.max(0, Math.floor(left)); sx < Math.min(Math.ceil(right), srcW); sx++) {
-          const colOverlap = Math.min(right, sx + 1) - Math.max(left, sx)
-          if (colOverlap <= 0) continue
-
-          const char = sourceRow[sx] ?? '.'
-          if (char === '.') continue
-
-          const covered = colOverlap * rowOverlap
-          opaque += covered
-          area.set(char, (area.get(char) ?? 0) + covered)
-        }
-      }
-
-      if (opaque / cellArea < COVERAGE_THRESHOLD) {
-        row += '.'
-        continue
-      }
-
-      let winner = ''
-      let winnerArea = 0
-      for (const [char, covered] of area) {
-        if (covered > winnerArea) {
-          winner = char
-          winnerArea = covered
-        }
-      }
-      row += winner || '.'
-    }
-    scaled.push(row)
-  }
-
-  return scaled
-}
-
-/**
- * Resample a sprite at a **fractional** size, anchored bottom-centre.
- *
- * The box is `ceil(span)` cells on each axis and the sprite sits inside it at a
- * fractional offset, so growing `scale` by a hair moves one edge cell past the
- * coverage threshold and lights *it* — not the whole column its neighbours
- * share. That is where the pixel-at-a-time growth comes from.
- *
- * ── Why the box is not simply centred on the anchor ─────────────────────────
- * Centring it exactly forces an even width. `floor(x - span/2)` and
- * `ceil(x + span/2)` are mirror images about a whole pixel, so the box can only
- * ever be `2 * ceil(span / 2)` wide — it grows two columns at a time, which is
- * twice as coarse as the quantisation this function exists to remove.
- *
- * Rounding the box's left edge instead lets the width follow `ceil(span)`, and
- * the vehicle grows alternately leftward and rightward as the parity changes.
- * The cost is that the drawn centre sits within half a pixel of the anchor
- * rather than exactly on it, which is below what the display can show — and the
- * vertical axis needs none of this, being anchored on an edge and not a centre.
- */
-export function resampleSpriteAtScale(
-  rows: readonly string[],
-  scale: number,
-  anchorX: number,
-  anchorBottomY: number,
-): { raster: string[]; left: number; top: number; w: number; h: number } | null {
-  const srcH = rows.length
-  const srcW = rows[0]?.length ?? 0
-  if (srcW === 0 || srcH === 0 || scale <= 0) return null
-
-  const spanW = srcW * scale
-  const spanH = srcH * scale
-  const w = Math.max(1, Math.ceil(spanW))
-  const h = Math.max(1, Math.ceil(spanH))
-
-  // Where the sprite's own edges sit inside the box, in cells.
-  const insetX = (w - spanW) / 2
-  const insetY = h - spanH
-
-  const raster = resampleRows(rows, {
-    w, h,
-    x0: -insetX / scale,
-    y0: -insetY / scale,
-    stepX: 1 / scale,
-    stepY: 1 / scale,
-  })
-  if (raster.length === 0) return null
-
-  return {
-    raster,
-    left: anchorX - Math.round(w / 2),
-    top: anchorBottomY - h,
-    w, h,
-  }
-}
-
-function drawRoadsideRows(
-  ctx: CanvasRenderingContext2D,
-  rows: readonly string[],
-  colors: RowColors,
-  p: SpriteBox,
-): void {
-  const scaled = scaleRoadsideRows(rows, p.w, p.h)
-  for (let y = 0; y < scaled.length; y++) {
-    const row = scaled[y]!
-    for (let x = 0; x < row.length; x++) {
-      const color = colors[row[x]!]
-      if (!color) continue
-      ctx.fillStyle = color
-      ctx.fillRect(p.left + x, p.top + y, 1, 1)
-    }
-  }
-}
-
 // ── Roadside objects rendering ───────────────────────────────────────────────
 
-interface RoadsideSprite { rows: readonly string[]; colors: RowColors; w: number; h: number }
-
-// Imported sprite per scenery kind (`lamp` stays procedural — no sprite). On-screen
-// size derives from each sprite's own W/H, so relative sizes come from the art itself
-// (see docs/sprites.md), scaled by ROADSIDE_WORLD_UNIT × perspective depth.
-const ROADSIDE_SPRITES: Record<Exclude<RoadsideType, 'lamp'>, RoadsideSprite> = {
-  deciduous: { rows: DECIDUOUS_ROWS, colors: DECIDUOUS_COLORS, w: DECIDUOUS_W, h: DECIDUOUS_H },
-  conifer:   { rows: CONIFER_ROWS,   colors: CONIFER_COLORS,   w: CONIFER_W,   h: CONIFER_H },
-  rocks:     { rows: ROCKS_ROWS,     colors: ROCKS_COLORS,     w: ROCKS_W,     h: ROCKS_H },
-  sign:      { rows: SIGNPOST_ROWS,  colors: SIGNPOST_COLORS,  w: SIGNPOST_W,  h: SIGNPOST_H },
+export interface RoadsideProjection {
+  readonly x: number
+  readonly y: number
+  readonly left: number
+  readonly top: number
+  readonly w: number
+  readonly h: number
+  readonly worldZ: number
+  readonly scale: number
+  readonly type: RoadsideType
+  readonly lod: LodTier
+  readonly raster: readonly string[]
+  readonly colors: RowColors
 }
 
-/** Sprite-pixel → screen-pixel size at full perspective depth (scale = 1). Tune for legibility. */
-const ROADSIDE_WORLD_UNIT = 0.55
+/**
+ * Project all visible scenery once, in painter's order. Source grids are chosen
+ * after physical scale, so the three authored resolutions cannot move an object.
+ */
+export function projectRoadsideObjects(
+  viewportTop: number,
+  viewportBottom: number,
+  cameraDistance: number,
+  playerX: number,
+  objects: readonly RoadsideObject[],
+  getCurvature: (distM: number) => number,
+): RoadsideProjection[] {
+  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
+  const roadHeight = viewportBottom - horizonY
+  const scanlines = roadHeight - 1
+  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
+  const curveOffset = computeCurveOffsets(cameraDistance, scanlines, getCurvature)
+  const projected: RoadsideProjection[] = []
+
+  for (const object of [...objects].sort((a, b) => b.distM - a.distM)) {
+    const worldZ = object.distM - cameraDistance
+    if (worldZ < SCENERY_SCALE_NEAR_Z_M || worldZ > SCENERY_VIEW_DISTANCE_M) continue
+
+    const i = Math.max(0, Math.min(scanlines - 1, Math.round(PERSPECTIVE_K / worldZ) - 1))
+    const y = horizonY + i + 1
+    const t = (i + 1) / roadHeight
+    const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
+    const centerX = baseVanX + (curveOffset[i] ?? 0)
+    const edgeX = object.side === -1
+      ? centerX - half - object.offsetRoadWidths * half
+      : centerX + half + object.offsetRoadWidths * half
+    const x = Math.round(edgeX)
+
+    const scale = roadsideScaleForDepth(worldZ)
+    const lod = chooseSceneryLod(scale)
+    const sprite = getRoadsideSprite(object.type, lod)
+    const raster = rasteriseRoadsideAtScale(
+      roadsideSpriteName(object.type, lod),
+      sprite.rows,
+      scale,
+      x,
+      y,
+      SCENERY_CANONICAL_SIZE[object.type],
+      object.type === 'lamp' ? ['Y'] : [],
+    )
+    if (!raster) continue
+    projected.push({
+      x, y, worldZ, scale, type: object.type, lod, colors: sprite.colors,
+      ...raster,
+    })
+  }
+  return projected
+}
 
 /**
  * Draw roadside decorations (trees, rocks, signs, lampposts) in perspective.
@@ -841,62 +660,11 @@ export function drawRoadsideObjects(
   objects: readonly RoadsideObject[],
   getCurvature: (distM: number) => number,
 ): void {
-  const horizonY = viewportTop + Math.floor((viewportBottom - viewportTop) * HORIZON_PCT)
-  const roadHeight = viewportBottom - horizonY
-  const scanlines = roadHeight - 1
-  const baseVanX = GAME_WIDTH / 2 - playerX * LATERAL_SHIFT
-
-  const curveOffset = computeCurveOffsets(cameraDistance, scanlines, getCurvature)
-
-  for (const obj of objects) {
-    const worldZ = obj.distM - cameraDistance
-    if (worldZ < 3 || worldZ > PERSPECTIVE_K) continue
-
-    const dy = PERSPECTIVE_K / worldZ
-    const i = Math.round(dy) - 1
-    if (i < 0 || i >= scanlines) continue
-
-    const y = horizonY + i + 1
-    const t = (i + 1) / roadHeight
-    const half = ROAD_HALF_TOP + (ROAD_HALF_BOTTOM - ROAD_HALF_TOP) * t
-    const centerX = baseVanX + (curveOffset[i] ?? 0)
-
-    // Position outside the road edge
-    const edgeX = obj.side === -1
-      ? centerX - half - obj.offset * half
-      : centerX + half + obj.offset * half
-    const screenX = Math.round(edgeX)
-
-    if (screenX < -90 || screenX > GAME_WIDTH + 90) continue
-
-    // Perspective depth scale: small far at the horizon → large up close.
-    const scale = Math.max(0.15, t)
-
-    if (obj.type === 'lamp') {
-      drawLamp(ctx, screenX, y, scale)
-      continue
-    }
-    // Size from the sprite's own dimensions × world unit × depth — keeps aspect and
-    // relative sizes (a 56-tall tree is naturally bigger than 24-tall rocks).
-    const spr = ROADSIDE_SPRITES[obj.type]
-    const w = Math.max(2, Math.round(spr.w * ROADSIDE_WORLD_UNIT * scale))
-    const h = Math.max(2, Math.round(spr.h * ROADSIDE_WORLD_UNIT * scale))
-    drawRoadsideRows(ctx, spr.rows, spr.colors, { left: screenX - (w >> 1), top: y - h, w, h })
-  }
-}
-
-function drawLamp(ctx: CanvasRenderingContext2D, x: number, baseY: number, scale: number): void {
-  const h = Math.round(12 * scale)
-  // Pole
-  ctx.fillStyle = C.WHITE
-  ctx.fillRect(x, baseY - h, 1, h)
-  // Light
-  ctx.fillStyle = C.B_YELLOW
-  const lightW = Math.max(1, Math.round(2 * scale))
-  ctx.fillRect(x - Math.floor(lightW / 2), baseY - h - 1, lightW, 1)
-  // Glow pixel
-  if (scale > 0.5) {
-    ctx.fillRect(x - Math.floor(lightW / 2), baseY - h - 2, lightW, 1)
+  for (const projection of projectRoadsideObjects(
+    viewportTop, viewportBottom, cameraDistance, playerX, objects, getCurvature,
+  )) {
+    if (projection.left + projection.w < 0 || projection.left >= GAME_WIDTH) continue
+    drawRasterRows(ctx, projection.raster, projection.colors, projection)
   }
 }
 

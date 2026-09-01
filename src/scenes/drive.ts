@@ -6,7 +6,8 @@ import {
 } from 'zx-kit'
 
 import {
-  GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP, PERSPECTIVE_K, TRAFFIC_VIEW_DISTANCE_M,
+  GAME_HEIGHT, GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP, PERSPECTIVE_K,
+  SCENERY_VIEW_DISTANCE_M, TRAFFIC_VIEW_DISTANCE_M,
   COLS, BLINK_MS, SCREECH_COOLDOWN_S, OFFROAD_BEEP_COOLDOWN_S,
   EDGE_MARGIN_WARN_PX,
   LOW_FUEL_WARN, LOW_FUEL_CRITICAL,
@@ -623,7 +624,11 @@ export function createDriveScene(
       drawRoad(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x,
         (d) => getSurfaceAt(d), (d) => getCurvatureAt(d))
 
-      const roadside = getRoadsideObjects(v.distance - 10, v.distance + PERSPECTIVE_K)
+      const roadside = getRoadsideObjects(
+        (gameSeed + 3) >>> 0,
+        v.distance - 10,
+        v.distance + SCENERY_VIEW_DISTANCE_M,
+      )
       drawRoadsideObjects(ctx, VIEWPORT_TOP, VIEWPORT_BOTTOM, v.distance, v.x, roadside,
         (d) => getCurvatureAt(d))
 

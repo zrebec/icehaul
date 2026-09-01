@@ -20,7 +20,7 @@ import puppeteer from 'puppeteer'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-const BASE = process.env.ICEROADS_URL ?? 'http://localhost:5173/'
+const BASE = process.env.ICEROADS_URL ?? 'http://localhost:5174/'
 const OUT_DIR = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : 'matrix'
 const onlyIdx = process.argv.indexOf('--only')
 const ONLY = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null
@@ -34,6 +34,21 @@ const SHEETS = [
   { name: 'ice', params: { surface: 'ice', curve: 0, zoom: 1 } },
   { name: 'snow', params: { surface: 'snow', curve: 0, zoom: 1 } },
   { name: 'ice-curve', params: { surface: 'ice', curve: 2, zoom: 1 } },
+  // The projector itself finds the frame on each side of every type-specific
+  // far/mid and mid/near handover. Tier names are painted into the cells, so a
+  // threshold or canonical-size change cannot leave this sheet silently stale.
+  {
+    name: 'lod-boundaries',
+    params: { surface: 'asphalt', curve: 0, zoom: 1, lod: 1, scanlines: 1, truck: 0 },
+  },
+  // One shared far/mid/near sample for all six views. At 33 m mini, car and bus
+  // are simultaneously in mid; 220 m is far and 3 m near for all three.
+  {
+    name: 'lod-readability-4x',
+    params: {
+      surface: 'asphalt', curve: 0, zoom: 4, dist: '220,33,3', scanlines: 1, truck: 0,
+    },
+  },
   // Zoomed sheets are filtered on purpose: an unfiltered 4x sheet is over 7000 px
   // wide, which is not something anyone can actually look at.
   { name: 'car-4x', params: { surface: 'ice', curve: 0, zoom: 4, types: 'car', dist: '220,50,10,2' } },

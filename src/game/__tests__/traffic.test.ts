@@ -342,7 +342,7 @@ describe('projectTrafficVehicle', () => {
 describe('brake lights on a same-direction vehicle', () => {
   // The follower is the only thing that ever slows a same-direction vehicle, so
   // "it went slower this tick" is the brake pedal. The renderer reads this flag
-  // and swaps RED for B_RED in the framebuffer — see sprites/vehicles.ts.
+  // and swaps RED for B_RED in the selected authored asset's colour map.
   //
   // Worth knowing what this can and cannot show: the guard only acts on traffic
   // *behind* the player, which is the last 10 m of the visible window. A vehicle

@@ -7,12 +7,15 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State at 0.11.1 (2026-08-16), 562 tests. Everything below is done and merged unless marked.
+State on `feat/three-tier-sprite-lod` at 0.20.0 (2026-09-01), **815 tests**. The three-tier
+graphics work is complete on the branch; older entries below remain the history that explains its
+constraints.
 
-> **The graphics thread is parked, not finished.** 0.8.1 shipped and was played end to end, and the
-> playtest turned up four things — one of them a mission that was arithmetically impossible to
-> complete. **Read "Playtest findings, 0.8.1" below before picking up the sprite work**; the ordered
-> graphics list further down is still correct but is no longer the top of the queue.
+> **The authored sprite thread is finished, not parked.** There are 18 traffic and 15 roadside
+> `far / mid / near` JSON assets, all generated through the official ZX sprite validator. Their
+> source-grid resolution is independent of the physical projection box, so the extra detail did not
+> move traffic in its lane or create a second collision shape. The old decision that a middle tier
+> was closed was explicitly reversed by Fox on 2026-08-31; the record is below.
 >
 > **§1 (impossible mission) and §2 (continuous score) are both fixed** — the mission rules and the
 > scoring rules are now pure modules with their own tests, and the bot simulates three legs. §2½
@@ -40,6 +43,13 @@ order and came out of a playtest:
 | 3b | Traffic fits its lane, and sits in it | #37 |
 | 4 | All six vehicles redrawn by hand, and moved to `sprites/vehicles.ts` | #42 |
 | 3c | Lamps bloom through the `glow` layer — traffic and the player's own tail lights | #43 |
+| — | 33 validated JSON sprite assets and a strict runtime catalogue | `1a817fb` |
+| — | Authored grid resolution decoupled from projected physical size | `f6067bd` |
+| — | Three authored traffic tiers, with one shared draw/collide/glow raster | `c3df343` |
+| — | Seeded roadside bands and clusters | `6f0e88c` |
+| — | Perspective `far / mid / near` roadside renderer | `a9031a0` |
+| — | Traffic/scenery LOD sheets and real placement captures | `69ff332` |
+| — | Review-hardening: hysteretic sheets, production glow order, exact PNG validation | `a1af000` |
 
 **The pipeline was done before the drawings were** — the story of why, and the one measurement the
 redraw turned up, are under "The sprites themselves are the bottleneck now" below.
@@ -61,16 +71,9 @@ without needing a measurement to argue for it. Worth remembering when the next i
 
 **Next, in order:**
 
-0. **Vehicle detail — interior keylines.** New, and it comes straight out of the traffic-braking
-   playtest: *"hre chýbajú detaily (hlavne vozidiel)"*. The hard reason under the aesthetic one is
-   that **brightness is exhausted as a carrier**: `RED` and `B_RED` are 50 units apart on one
-   channel, which is two cells at 200 m, and the halo saturates them into each other. Any further
-   state a vehicle might need to signal has to come from *shape*, not from brightness. The outer
-   contour already exists (#35); what does not is black keylines *inside* the sprite, the way arcade
-   and Amiga art did it. **A keyline does not grow the sprite, it eats its colour area** — at 22x15
-   every line is a whole row or column — and at the far tier (5x4) nothing of it survives, so meaning
-   there stays with lamp colour and silhouette. Growing the sprite by a pixel instead is a resolution
-   change in miniature: it moves the projection, three LOD thresholds and the collision raster.
+0. ~~**Vehicle detail — interior keylines.**~~ **Done 2026-09-01.** The near sources are authored at
+   2× the canonical grid and carry black internal structure; mid carries the silhouette/type; far
+   keeps direction in its paired lamps. The source grid never grows the projected box.
 1. **Traffic density scaling with distance** — Fox's, from the 0.8.2 playtest (§2½). `TRAFFIC_SPACING_M`
    is the lever; a distance term goes in `game/traffic.ts` where spacing is drawn. **Now more valuable
    than when it was written:** traffic has behaviour worth seeing more of, and a queue that forms
@@ -116,8 +119,32 @@ Written down so they stop living in a chat window. None is scheduled; the queue 
    of it — the layer and the blit order exist. Strongest depth cue available, and it turns "smear on
    the horizon" from a defect into an intention, which is what still reads worst about the far field.
 
-A **middle LOD tier is now closed**, not deferred. It existed to soften a handover that no longer
-costs anything, and a third tier would only put back a boundary where there is currently none.
+A **middle LOD tier is now shipped**, after Fox explicitly reversed the earlier closure on
+2026-08-31 while reviewing the prepared art. The rejected version treated a tier as a second size
+law, so it would have reintroduced a visible boundary. The shipped version does not: projection
+chooses the physical box first, then selects an authored source grid and resamples it into that box.
+At a handover both assets therefore have the same lane position, bottom anchor, outline and collision
+extent. The extra boundary buys actual type information without buying a geometry jump.
+
+#### What the three-tier pass established — 2026-09-01
+
+- The catalogue is deliberately finite: **18 traffic + 15 roadside = 33** assets. A new vehicle type
+  still stays behind the fleet gate because it now costs six drawings, not one.
+- JSON is the runtime source of truth. `.rows.txt` is the inspectable exact grid; native and 4× PNG are
+  previews only. All 33 passed the official `zx_sprite.py` validator again after implementation.
+- Traffic still has one final raster per frame for drawing, collision and lamps; contour remains a
+  parallel non-colliding mask. `laneFit`, cadence, churn and resample stability stayed green.
+- The far-mini cadence regression found by the new art was fixed in the art itself: splitting its
+  uninterrupted bumper moved the measured worst hold from **2.03 s to 1.83 s**, below the existing
+  2.0 s ceiling, without moving a scale constant.
+- Roadside decoration is now part of the route identity: `(gameSeed + 3) >>> 0` produces stable
+  clusters in verge/field/far bands, while paired lamps and signs remain close to the road. The
+  renderer grows them through the whole 220 m approach and painter-sorts every type together.
+- `?matrix=1&lod=1` samples the real hysteretic traffic handovers from one continuous approach per
+  row. Traffic sheets apply scanlines before their deferred glow, matching `main.ts`.
+  `?sceneryMatrix=1` covers all five types and
+  eight depths; `placement=42` and `placement=1443866` show the real generator rather than synthetic
+  objects. Brightness acceptance is always done with `scanlines=1`.
 
 ### Playtest findings, 0.11.1 — the longest run so far
 
@@ -826,11 +853,11 @@ Two habits that avoid it entirely:
 
 ## Playtest seed catalogue
 
-The road, traffic and canisters are all deterministic functions of one seed, so **a seed is the
+The road, traffic, canisters and roadside placement are deterministic functions of one seed, so **a seed is the
 whole route**. Load one with `?seed=<decimal>`:
 
 ```
-http://localhost:5173/?seed=1443866          dev
+http://localhost:5174/?seed=1443866          dev
 https://zrebec.github.io/icehaul/?seed=534501  deployed
 ```
 
@@ -926,36 +953,30 @@ geometry up close.**
 
 | Distance | Scale | Car on screen |
 |---|---|---|
-| 220 m | 0.38 | ~8 × 6 px |
-| 100 m | 0.43 | ~9 × 6 px |
-| 50 m | 0.49 | ~11 × 7 px |
-| 10 m | 0.75 | ~17 × 11 px |
-| beside you | 1.43 | **~31 × 21 px** |
+| 220 m | 0.20 | ~4 × 3 px |
+| 100 m | 0.38 | ~8 × 6 px |
+| 50 m | 0.60 | ~13 × 9 px |
+| 25 m | 0.86 | ~19 × 13 px |
+| 10 m | 1.15 | ~25 × 18 px |
+| 1.2 m anchor | 1.43 | **~32 × 22 px** |
 
-Sources are 14 × 11 (mini), 22 × 15 (car), 28 × 18 (bus). At 8 × 6 px no body, windows, grille,
-wheels and lights can coexist — so at the horizon the goal is not to recognise a model. The player
-needs lane, direction, closing speed and threat. Type can wait for a bigger tier.
+The **canonical physical boxes** are 14 × 11 (mini), 22 × 15 (car), 28 × 18 (bus); the authored
+source grids may be half-size, canonical-size or 2× without changing those numbers. At 4 × 3 px no
+body, windows, grille, wheels and lights can coexist — so at the horizon the goal is not to recognise
+a model. The player needs lane, direction, closing speed and threat. Type arrives in mid.
 
 ### Raising the resolution is rejected for this purpose
 
-Vehicle scale never touches `GAME_WIDTH`. From `road3d.ts`:
+Vehicle scale never touches `GAME_WIDTH`. The current law is:
 
 ```
-tScale = min(1, (PERSPECTIVE_K / worldZ) / roadHeight)
-scale  = 0.28 + sqrt(tScale) * 1.15
+scale = TRAFFIC_SCALE_A / (worldZ + TRAFFIC_SCALE_B)
 ```
 
-`roadHeight` is in the **denominator**, so a taller viewport makes distant vehicles *smaller*:
-
-| | 256 × 192 | 320 × 240 |
-|---|---|---|
-| `roadHeight` | 89 | 130 |
-| Car at 50 m | ~11 px | **~10 px** |
-| Car right beside you | 31 px | **31 px** — scale saturates at 1.43 |
-
-More pixels changes nothing up close and makes distance worse. Any real gain would need the
-projection redefined, the sources redrawn and collisions re-verified together — 10–20 h (nine
-pixel-tuned constants plus a truck redraw; see `iceroads-rozlisenie.md`).
+The hyperbola is anchored in world depth, not viewport height, and the canonical box—not the LOD
+source grid—turns it into pixels. Raising framebuffer resolution would still require redefining the
+anchors, road geometry, HUD and player truck together; merely supplying a larger source asset now
+proves that source resolution alone does not enlarge an object.
 
 Distant vehicles are also *supposed* to be blobs — that is what distance looks like. The fix there
 is silhouette and lights, not detail.
@@ -998,7 +1019,7 @@ not. The fix is largely reuse, not invention. *(It was correct in shape but not 
 |---|---|---|---|
 | 0 | Screenshot matrix, fixed seed from the catalogue above — so every later change is judged against the same frames | **DONE** #26. `?matrix=1` plus `scripts/traffic-matrix.mjs`. `?trafficRenderer=` was never built — there was never a second renderer to switch to. `?glow=` **built in #43**, and it takes a strength and a radius as well as an on/off. **#43 also found the sheet's one lie** — it drew no scanlines, so every brightness judgement made on it over-read by 1.54x; `?scanlines=1` and `?brake=1` close that | 2–4 h |
 | 1 | **One shared raster.** The same raster feeds draw, collision and emissive; cache it | **DONE** #28, and gone further in #34 — the raster now rides on the projection, so there is no size for two readers to re-derive it from | 4–8 h |
-| 2 | Far LOD by meaning, tier chosen by **projected height** with hysteresis | **DONE** #29, reshaped in #34 — the far tier now recolours the real silhouette instead of drawing its own. A middle tier is **closed, not deferred** | 1–2 days |
+| 2 | Far LOD by meaning, tier chosen by **projected height** with hysteresis | **DONE** #29/#34, then superseded by Fox's 2026-08-31 decision. `c3df343` ships three authored source grids selected after physical projection; far/mid/near share one box and one final raster | 1–2 days |
 | — | *(not in the original order)* Hyperbolic growth curve in world depth | **DONE** #30 | — |
 | — | *(not in the original order)* Area-weighted resample | **DONE** #33 | — |
 | — | *(not in the original order)* Fractional scale — growth a pixel at a time | **DONE** #34 | — |
@@ -1118,7 +1139,8 @@ the sheet:
 
 Two constraints on the core, both deliberate:
 
-- **Only above `GLOW_CORE_MIN_HEIGHT` (10 px, the far/detail LOD boundary, ~50 m for a car).** White
+- **Only above `GLOW_CORE_MIN_HEIGHT` (10 px, ~50 m for a car).** This is a light-core threshold,
+  independent of the later far/mid/near asset boundaries. White
   desaturates the halo it sits in, and far away that halo's *colour* is the only thing carrying
   which way the vehicle is going. Close up the shape already says it, so the light may blow out.
 - **The brake carries three changes at once** — brighter, bigger, and cored. A signal carried by one
@@ -1332,9 +1354,10 @@ with the player.
 
 Canisters and roadside objects still use their own scaling and were left alone.
 
-### What the far tier settled
+### What the far tier settled before authored LOD
 
-Two tiers exist: `far` and `detail`. What separates them is **colour in one row and nothing else**.
+Before the 2026-08-31 decision, two tiers existed: `far` and `detail`. What separated them was
+**colour in one row and nothing else**.
 The far tier takes the resampled sprite and writes lamp colour into the outermost body pixels of a
 row near the base, where an edge pixel survives and an interior one is swallowed.
 
@@ -1354,9 +1377,10 @@ Direction is carried by **lamp colour, never body colour**: a same-direction bus
 and yellow *inside* the bodywork, so a test looking for the lamps must look for the flanking pair at
 the ends of a row, not for the colour anywhere.
 
-Type is still not really distinguished at this size — the silhouettes exist now, but at six pixels of
-height they carry no more than the size difference already did. **A middle tier is closed**, not
-deferred: it existed to soften a handover that no longer costs anything.
+Type was not really distinguished at this size — the silhouettes existed, but at six pixels of
+height they carried no more than the size difference already did. The conclusion that a middle tier
+was closed was **reversed by Fox on 2026-08-31** after reviewing real prepared art. The current
+far/mid/near sources keep the same physical box at handover; see the 2026-09-01 record near the top.
 
 ### Rules that hold whatever gets built
 

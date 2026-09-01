@@ -11,9 +11,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_SELECTION, MATRIX_DEFAULTS, MATRIX_DIRS, MATRIX_DISTANCES_M, MATRIX_TYPES,
-  isMatrixRequested, matrixLayout, matrixLayoutFor, matrixOptionsFromSearch,
+  finishTrafficMatrixLayers, isMatrixRequested, matrixLayout, matrixLayoutFor, matrixOptionsFromSearch,
+  mapTrafficMatrixRow, trafficLodBoundaryDistances,
 } from '../debug/trafficMatrix.ts'
 import { GAME_WIDTH, VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
+import { projectTrafficVehicle } from '../road3d.ts'
 
 describe('isMatrixRequested', () => {
   it('only fires on an explicit matrix=1', () => {
@@ -126,6 +128,75 @@ describe('matrixOptionsFromSearch', () => {
     expect(matrixOptionsFromSearch('?dist=220,50,10').distances).toEqual([220, 50, 10])
     expect(matrixOptionsFromSearch('?dist=50,-5,abc').distances).toEqual([50])
     expect(matrixOptionsFromSearch('?dist=abc').distances).toBeUndefined()
+  })
+
+  it('asks the real projector for the LOD handover ladder', () => {
+    expect(matrixOptionsFromSearch('?lod=1').distances).toEqual(trafficLodBoundaryDistances())
+  })
+
+  it('lets an explicit distance ladder override the LOD handover ladder', () => {
+    expect(matrixOptionsFromSearch('?lod=1&dist=220,3').distances).toEqual([220, 3])
+  })
+})
+
+describe('trafficLodBoundaryDistances', () => {
+  it('returns a stable far-to-near pair around all six type boundaries', () => {
+    const distances = trafficLodBoundaryDistances()
+    expect(distances.length).toBeGreaterThanOrEqual(8)
+    expect(trafficLodBoundaryDistances()).toBe(distances)
+    for (let i = 1; i < distances.length; i++) {
+      expect(distances[i]!).toBeLessThan(distances[i - 1]!)
+    }
+    expect(Math.max(...distances)).toBeLessThanOrEqual(220)
+    expect(Math.min(...distances)).toBeGreaterThanOrEqual(2)
+  })
+
+  it('drives every rendered row through the real far → mid → near handovers', () => {
+    const distances = trafficLodBoundaryDistances()
+
+    for (const type of MATRIX_TYPES) {
+      const tiers = mapTrafficMatrixRow(
+        { ...MATRIX_DEFAULTS, distances }, type, 'same',
+        vehicle => projectTrafficVehicle(
+          VIEWPORT_TOP, VIEWPORT_BOTTOM, 0, 0, vehicle, () => 0,
+        )?.lod,
+      ).filter(tier => tier !== undefined)
+
+      const runs = tiers.filter((tier, index) => index === 0 || tier !== tiers[index - 1])
+      expect(runs, type).toEqual(['far', 'mid', 'near'])
+    }
+  })
+
+  it('reuses one hysteresis-bearing vehicle across every cell in a row', () => {
+    const vehicles = mapTrafficMatrixRow(
+      { ...MATRIX_DEFAULTS, distances: [100, 50, 25, 10] }, 'car', 'same',
+      vehicle => vehicle,
+    )
+
+    expect(vehicles).toHaveLength(4)
+    for (const vehicle of vehicles.slice(1)) expect(vehicle).toBe(vehicles[0])
+  })
+})
+
+describe('finishTrafficMatrixLayers', () => {
+  it('puts glow after scanlines, matching the production frame compositor', () => {
+    const order: string[] = []
+    finishTrafficMatrixLayers(
+      true,
+      () => order.push('scanlines'),
+      () => order.push('glow'),
+    )
+    expect(order).toEqual(['scanlines', 'glow'])
+  })
+
+  it('still composites glow when scanlines are disabled', () => {
+    const order: string[] = []
+    finishTrafficMatrixLayers(
+      false,
+      () => order.push('scanlines'),
+      () => order.push('glow'),
+    )
+    expect(order).toEqual(['glow'])
   })
 })
 
