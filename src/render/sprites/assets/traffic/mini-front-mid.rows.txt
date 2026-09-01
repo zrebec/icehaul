@@ -2,7 +2,7 @@
 ....WWWWWW....
 ...GCCKKCCG...
 ..GCCCKKCCCG..
-.GccccKKccccG.
+KGccccKKccccGK
 GGGGGGGGGGGGGG
 YGggggggggggGY
 GKKKgKKKKgKKKG

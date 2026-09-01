@@ -122,6 +122,57 @@ function silhouetteIou(a: readonly string[], b: readonly string[]): number {
   return union === 0 ? 1 : intersection / union
 }
 
+describe('a front view and a rear view are two drawings', () => {
+  /**
+   * The rule this holds is in `AGENTS.md`, and it was written because the
+   * catalogue once broke it everywhere: the two views of a vehicle differed by
+   * 2.5-4.5% of the grid at `mid` and `near`, all of it the lamp colour and one
+   * band. Direction was carried by four pixels of colour on a tier that covers
+   * most of an approach, on a game whose own record says brightness is
+   * exhausted as a carrier and anything left has to be said with shape.
+   *
+   * Two clauses, and the second is the one that matters. A share alone could be
+   * satisfied by making the lamps enormous, which would be the same mistake in
+   * a larger font. Requiring a difference **outside the rows the lamps occupy**
+   * is what forces the drawings to actually differ.
+   */
+  const MIN_VIEW_DIFFERENCE = 0.05
+
+  function lampRows(rows: readonly string[], lamp: string): Set<number> {
+    const hit = new Set<number>()
+    rows.forEach((row, index) => { if (row.includes(lamp)) hit.add(index) })
+    return hit
+  }
+
+  it.each(TYPES.flatMap(type => TIERS.map(lod => [type, lod] as const)))(
+    '%s/%s differs between front and rear, and not only at the lamps', (type, lod) => {
+      const rear = getTrafficSprite('same', type, lod).rows
+      const front = getTrafficSprite('oncoming', type, lod).rows
+      expect(front).toHaveLength(rear.length)
+
+      const skip = new Set([...lampRows(rear, 'R'), ...lampRows(front, 'Y')])
+      let differing = 0
+      let outsideLampRows = 0
+      let cells = 0
+
+      for (let y = 0; y < rear.length; y++) {
+        const a = rear[y]!, b = front[y]!
+        for (let x = 0; x < a.length; x++) {
+          cells++
+          if (a[x] === b[x]) continue
+          differing++
+          if (!skip.has(y)) outsideLampRows++
+        }
+      }
+
+      expect(differing / cells, `${type}/${lod} share of the grid that differs`)
+        .toBeGreaterThanOrEqual(MIN_VIEW_DIFFERENCE)
+      expect(outsideLampRows, `${type}/${lod} differences away from the lamp rows`)
+        .toBeGreaterThan(0)
+    },
+  )
+})
+
 describe('adjacent LOD drawings hand over the same outer vehicle', () => {
   it.each(DIRS.flatMap(dir => TYPES.map(type => [dir, type] as const)))(
     '%s/%s has normalized silhouette IoU of at least 0.85', (dir, type) => {

@@ -417,11 +417,48 @@ def vehicle_sprite(kind: str, view: str, lod: str) -> Sprite:
             if shoulder_bounds:
                 grid.hline(shoulder_y, shoulder_bounds[0] + 2, shoulder_bounds[1] - 2, "K")
 
+    # ── Wing mirrors, front only ──
+    #
+    # The one difference that reaches the *silhouette* rather than the colours
+    # inside it. Everything else separating a front from a rear here — lamp
+    # colour, plate against grille — is interior, and interior detail is what
+    # the resample eats first; an outline pixel survives where a body pixel is
+    # outvoted, which is the same reason lamps sit in the outermost columns.
+    #
+    # They hang off the shoulder row, just under the glass, where a real one is
+    # and where the body has margin to spare on every tier.
+    if view == "front":
+        reach = 1 if detail < 2 else 2
+
+        def has_room(y: int) -> bool:
+            edges = body_bounds(grid.pixels[y])
+            return edges is not None and edges[0] >= reach and edges[1] + reach < width
+
+        # The shoulder row if it has margin, otherwise the last glass row, which
+        # on a tapered body always does. A mirror clipped against the canvas edge
+        # is not a mirror, it is a missing pixel — and at `far` the shoulder is
+        # already full width, so without this the smallest tier, where most of
+        # the approach happens, would have kept no shape difference at all.
+        mirror_y = glass_bottom + 1 if has_room(glass_bottom + 1) else glass_bottom
+        mirror_bounds = body_bounds(grid.pixels[mirror_y]) if has_room(mirror_y) else None
+        if mirror_bounds:
+            for offset in range(1, reach + 1):
+                grid.put(mirror_bounds[0] - offset, mirror_y, body)
+                grid.put(mirror_bounds[1] + offset, mirror_y, body)
+            if detail >= 1:
+                grid.put(mirror_bounds[0] - reach, mirror_y, "K")
+                grid.put(mirror_bounds[1] + reach, mirror_y, "K")
+
     lamp_y = max(glass_bottom + 1, bumper_y - (3 if detail >= 2 else 2 if detail >= 1 else 1))
     bounds = body_bounds(grid.pixels[lamp_y])
     if bounds:
         lamp = "R" if view == "rear" else "Y"
+        # A headlight is bigger than a tail light on every car ever built, and at
+        # this size the extra column is also one more cell that has to be got
+        # wrong before the two views read alike.
         lamp_w = 1 if width < 20 else 2 if width < 48 else 3
+        if view == "front" and width >= 20:
+            lamp_w += 1
         for offset in range(lamp_w):
             grid.put(bounds[0] + offset, lamp_y, lamp)
             grid.put(bounds[1] - offset, lamp_y, lamp)
@@ -442,16 +479,32 @@ def vehicle_sprite(kind: str, view: str, lod: str) -> Sprite:
             plate_w = parity_width(width, max(2, round(width * 0.14)))
             left = (width - plate_w) // 2
             grid.hline(face_y, left, width - 1 - left, "W")
+            if detail >= 1:
+                # The boot lid's shut line. A rear has a horizontal seam across
+                # it and a front does not — the bonnet's is hidden under the
+                # glass from head-on — so this is a difference that exists in
+                # the real object rather than one invented to satisfy a test.
+                boot_y = lamp_y - 1
+                boot_bounds = body_bounds(grid.pixels[boot_y]) if boot_y > glass_bottom else None
+                if boot_bounds:
+                    grid.hline(boot_y, boot_bounds[0] + 2, boot_bounds[1] - 2, "K")
             if detail >= 2:
                 seam_top = max(glass_bottom + 2, face_y - 3)
                 grid.vline(centre - (0 if width % 2 else 1), seam_top, face_y - 1, "K")
                 grid.vline(centre, seam_top, face_y - 1, "K")
         else:
-            grille_w = parity_width(width, max(2, round(width * 0.32)))
+            # A grille is the most recognisable thing on the front of a car, and
+            # at `near` there is room to draw one rather than imply it: two dark
+            # rows with the plate as a bright bar through them, against the
+            # rear's single white plate on a plain panel.
+            grille_w = parity_width(width, max(2, round(width * (0.44 if detail >= 2 else 0.32))))
             left = (width - grille_w) // 2
             grid.hline(face_y, left, width - 1 - left, "K")
             if detail >= 2 and face_y - 1 > glass_bottom:
-                grid.hline(face_y - 1, left + 1, width - 2 - left, "w")
+                grid.hline(face_y - 1, left, width - 1 - left, "K")
+                plate_w = parity_width(width, max(2, round(width * 0.16)))
+                plate_left = (width - plate_w) // 2
+                grid.hline(face_y, plate_left, width - 1 - plate_left, "w")
 
     if detail >= 1:
         # Wheel arches and sill make the body sit on its tyres. These are inside
