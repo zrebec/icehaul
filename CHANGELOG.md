@@ -1,3 +1,10 @@
+# [0.21.0](https://github.com/zrebec/icehaul/compare/v0.20.0...v0.21.0) (2026-09-01)
+
+
+### Features
+
+* **render:** draw the bus as a box, not a stretched saloon ([#72](https://github.com/zrebec/icehaul/issues/72)) ([9aaffe1](https://github.com/zrebec/icehaul/commit/9aaffe18f4f42a1f049413399676a62e96d8a716)), closes [#71](https://github.com/zrebec/icehaul/issues/71)
+
 # [0.20.0](https://github.com/zrebec/icehaul/compare/v0.19.0...v0.20.0) (2026-08-25)
 
 
