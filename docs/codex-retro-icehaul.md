@@ -25,7 +25,9 @@ a export spriteov. Bez novej runtime závislosti.
 `1f4a03a373165cff57acbf3988aee24e4ea1b173`.
 
 **Stav 2026-09-01:** Úlohy 1–7 sú dokončené. Implementačné commity sú `1a817fb`, `f6067bd`,
-`c3df343`, `6f0e88c`, `a9031a0` a `69ff332`; posledný dokumentačný commit uzatvára vetvu.
+`c3df343`, `6f0e88c`, `a9031a0` a `69ff332`; dokumentácia je v `d84edce`. Nezávislý review
+nenašiel kritický runtime problém a jeho tri dôležité acceptance-harness nálezy opravuje
+`a1af000`.
 
 ## Globálne obmedzenia
 
@@ -189,7 +191,8 @@ Výtvarné invarianty:
 - [x] Všetkých 33 štvor-násobných PNG vytvorených.
 - [x] Kontaktné hárky vytvorené a skontrolované na rozmery, transparentnosť a zjavné poškodenie.
 
-Výtvarné schválenie vlastníkom ešte len nasleduje. Generátor a opakovateľný validačný postup sú v
+Vlastník výtvarný smer schválil 2026-09-01 a následne povolil celú implementáciu. Generátor a
+opakovateľný validačný postup sú v
 `scripts/author-lod-sprites.py`; súhrn výstupov je v
 `src/render/sprites/assets/validation.txt` a strojový zoznam v
 `src/render/sprites/assets/manifest.json`.
@@ -436,8 +439,8 @@ a 1443866.
 
 ### Výsledné benchmarky
 
-- `npm test`: **39 súborov, 811 testov, všetko PASS**.
-- `npm run build`: **136.18 kB**, 42.69 kB gzip; 119 modulov.
+- `npm test`: **39 súborov, 815 testov, všetko PASS**.
+- `npm run build`: **136.84 kB**, 42.93 kB gzip; 119 modulov.
 - Oficiálny sprite export: **33/33 PASS**; 18×4 traffic a 15×4 roadside súborov;
   opakovaný export nechal asset strom bez diffu.
 - Clash-check titulky, kurzor viditeľný aj skrytý: **0** off-palette pixelov, **0** buniek nad
@@ -445,6 +448,8 @@ a 1443866.
 - Vizuálna sada: **15 traffic + 7 scenery PNG**, vrátane reálnych placementov seedov 42 a
   1443866; jas kontrolovaný so `scanlines=1`.
 - Najhorší nový traffic cadence prípad je far oncoming mini **1.83 s**, pod stropom 2.0 s.
+- Post-review kontrola: boundary riadky zachovávajú hysteréziu z 220 m, glow sa kompozituje
+  až po scanlines a export test byte-exaktne overuje `.rows.txt → JSON → native → 4× PNG`.
 
 ---
 

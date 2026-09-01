@@ -7,7 +7,7 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State on `feat/three-tier-sprite-lod` at 0.20.0 (2026-09-01), **811 tests**. The three-tier
+State on `feat/three-tier-sprite-lod` at 0.20.0 (2026-09-01), **815 tests**. The three-tier
 graphics work is complete on the branch; older entries below remain the history that explains its
 constraints.
 
@@ -49,6 +49,7 @@ order and came out of a playtest:
 | — | Seeded roadside bands and clusters | `6f0e88c` |
 | — | Perspective `far / mid / near` roadside renderer | `a9031a0` |
 | — | Traffic/scenery LOD sheets and real placement captures | `69ff332` |
+| — | Review-hardening: hysteretic sheets, production glow order, exact PNG validation | `a1af000` |
 
 **The pipeline was done before the drawings were** — the story of why, and the one measurement the
 redraw turned up, are under "The sprites themselves are the bottleneck now" below.
@@ -139,7 +140,9 @@ extent. The extra boundary buys actual type information without buying a geometr
 - Roadside decoration is now part of the route identity: `(gameSeed + 3) >>> 0` produces stable
   clusters in verge/field/far bands, while paired lamps and signs remain close to the road. The
   renderer grows them through the whole 220 m approach and painter-sorts every type together.
-- `?matrix=1&lod=1` samples the real traffic handovers. `?sceneryMatrix=1` covers all five types and
+- `?matrix=1&lod=1` samples the real hysteretic traffic handovers from one continuous approach per
+  row. Traffic sheets apply scanlines before their deferred glow, matching `main.ts`.
+  `?sceneryMatrix=1` covers all five types and
   eight depths; `placement=42` and `placement=1443866` show the real generator rather than synthetic
   objects. Brightness acceptance is always done with `scanlines=1`.
 

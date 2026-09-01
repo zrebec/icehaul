@@ -57,7 +57,8 @@ node scripts/scenery-matrix.mjs .shots/scenery
 ```
 
 - `?matrix=1&lod=1` nájde snímku tesne pred a po každom LOD prechode cez reálny
-  traffic projektor. Explicitné `dist=` môže výber zúžiť.
+  traffic projektor. Každý riadok je jeden súvislý príchod od 220 m, takže sa zachová
+  aj produkčná LOD hysterézia. Explicitné `dist=` môže výber zúžiť.
 - `?sceneryMatrix=1` má riadok pre každý typ a stĺpce 220, 120, 80, 50, 25, 20,
   10 a 3 m. Podporuje `zoom`, `surface`, `curve`, `offset`, `types`, `dist` a
   `scanlines=1`.
@@ -65,7 +66,9 @@ node scripts/scenery-matrix.mjs .shots/scenery
   skutočné okná seedovanej cesty. Capture sada obsahuje seed 42 aj ľadový benchmark
   1443866.
 
-Jas sa hodnotí so `scanlines=1`; bez neho je hárok svetlejší než hra.
+Jas sa hodnotí so `scanlines=1`; bez neho je hárok svetlejší než hra. Traffic hárok
+rovnako ako `main.ts` najprv nanesie scanline masku a až potom deferred lamp glow — bloom
+sa preto maskou znovu nestlmí.
 
 ---
 
@@ -93,6 +96,10 @@ python3 scripts/author-lod-sprites.py
 Skript vyžaduje presne **33** položiek, zavolá oficiálny validátor pre každú z nich,
 obnoví `manifest.json`, `validation.txt` a rodinné kontaktné hárky. Úspešný druhý beh
 musí nechať `git diff` prázdny.
+
+`scripts/test-lod-sprites.py` potom byte-exaktne overí celý derivovaný reťazec: textové
+riadky sa musia rovnať JSON `rows`, natívny RGBA PNG sa znovu zostaví z JSON legendy a
+4× PNG musí byť presný nearest-neighbour resize. Porovnanie zahŕňa RGB aj alpha kanál.
 
 `sprites/catalog.ts` potom pri štarte kontroluje presný tvar `{w,h,rows,legend}`,
 rozmery, jednopísmenové symboly, úplnú legendu a uzavretý zoznam názvov ZX farieb.

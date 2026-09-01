@@ -237,11 +237,12 @@ that. Slowing down always works, which was not true before 0.4.0 — see `AGENTS
 
 Each phase is self-contained, ends with a runnable build, and leaves the previous scene playable. Time estimates assume part-time work with AI assistance.
 
-> **Recent (2026-09-01, 811 tests):** traffic and roadside scenery now use 33 validated authored
+> **Recent (2026-09-01, 815 tests):** traffic and roadside scenery now use 33 validated authored
 > JSON sprites across `far / mid / near`. Projection computes the physical box before choosing an
 > asset, so authored resolution cannot alter lane fit, anchor or collision. Roadside placement is a
 > pure seeded band/cluster generator and scenery grows through the full 220 m view. The traffic and
-> scenery contact sheets label the tier returned by the real projector; benchmark placement sheets
+> scenery contact sheets label the tier returned by the real projector; the traffic boundary rows
+> retain the same hysteretic vehicle state as a continuous approach. Benchmark placement sheets
 > cover seeds 42 and 1443866. The decision/measurement record lives in `AGENTS.md`; the reproducible
 > asset and capture pipeline lives in `docs/graphics.md`.
 >
