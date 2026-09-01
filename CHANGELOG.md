@@ -1,3 +1,10 @@
+# [0.23.0](https://github.com/zrebec/icehaul/compare/v0.22.0...v0.23.0) (2026-09-01)
+
+
+### Features
+
+* **render:** make a front view and a rear view two drawings ([#74](https://github.com/zrebec/icehaul/issues/74)) ([b0459f6](https://github.com/zrebec/icehaul/commit/b0459f6112ded44af95e26de2de0f8b4fe647581))
+
 # [0.22.0](https://github.com/zrebec/icehaul/compare/v0.21.0...v0.22.0) (2026-09-01)
 
 
