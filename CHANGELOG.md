@@ -1,3 +1,10 @@
+# [0.22.0](https://github.com/zrebec/icehaul/compare/v0.21.0...v0.22.0) (2026-09-01)
+
+
+### Features
+
+* **debug:** add the O overlay, with a collision page ([#73](https://github.com/zrebec/icehaul/issues/73)) ([ab6b7c1](https://github.com/zrebec/icehaul/commit/ab6b7c1203ce9b1b2db2b1943f94f39cb563db70))
+
 # [0.21.0](https://github.com/zrebec/icehaul/compare/v0.20.0...v0.21.0) (2026-09-01)
 
 
