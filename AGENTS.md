@@ -62,7 +62,7 @@ order and came out of a playtest:
 | — | A front view and a rear view made two drawings | #74 |
 | — | Four overlay corners, load statistics, AABB against pixel-perfect | #75 |
 | — | The JSON catalogue made the only source of objects | #76 |
-| — | Guards on the scenery approach, and the three artefacts they covered | *this branch* |
+| — | Guards on the scenery approach, and the three artefacts they covered | #77 |
 
 **The pipeline was done before the drawings were** — the story of why, and the one measurement the
 redraw turned up, are under "The sprites themselves are the bottleneck now" below.
