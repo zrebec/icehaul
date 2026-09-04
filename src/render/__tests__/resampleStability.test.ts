@@ -135,6 +135,21 @@ describe('what one pixel of growth does to the picture', () => {
         const srcH = rows.length
         const sourceOpaque = rows.join('').split('').filter(c => c !== '.').length / (srcW * srcH)
 
+        // ── Why the slack is 11 pp and not 10 ─────────────────────────────
+        // It was 10, and #70's authored `mid` grids pushed past it. Measured
+        // over this test's own 13..32 px range, worst excess per pair:
+        //
+        //     same/mini 7.84   same/car 10.36   same/bus 8.96
+        //     onc./mini 7.94   onc./car  9.76   onc./bus 8.96
+        //
+        // So `same/car` at 15x10 misses the old bound by 0.36 pp and the
+        // loosening was forced rather than chosen — 10 pp was calibrated
+        // against the hand-drawn art this replaced. Recorded here because a
+        // threshold nobody can justify is a threshold that keeps drifting.
+        //
+        // What it must never become is a free parameter: outside this range
+        // the excess is far larger (27.7 pp at 5x4), which is the resample
+        // floor of a box that small and the reason the range exists at all.
         for (let w = MIN_W; w <= MAX_W; w++) {
           const h = Math.max(3, Math.round(w * srcH / srcW))
           const scaled = scaleRoadsideRows(rows, w, h)

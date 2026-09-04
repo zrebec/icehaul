@@ -615,10 +615,15 @@ def deciduous_sprite(lod: str) -> Sprite:
         if detail >= 2 and x + 1 < width:
             grid.put(x + 1, y, ".")
 
+    # Branches inside the canopy are shadow, not bark. Drawn in the trunk's
+    # `R` they came out as red strokes scribbled across the foliage -- the only
+    # red in the frame that is not a tail lamp or a warning. Dark green is what
+    # a branch seen through leaves actually is, and it is already the crown's
+    # own shadow colour, so the structure survives and the scribble does not.
     if detail >= 1:
-        grid.line(round(cx), trunk_top + 2, round(width * 0.18), round(height * 0.39), "R")
-        grid.line(round(cx), trunk_top + 4, round(width * 0.82), round(height * 0.34), "R")
-        grid.line(round(cx), trunk_top + 1, round(width * 0.68), round(height * 0.20), "R")
+        grid.line(round(cx), trunk_top + 2, round(width * 0.18), round(height * 0.39), "g")
+        grid.line(round(cx), trunk_top + 4, round(width * 0.82), round(height * 0.34), "g")
+        grid.line(round(cx), trunk_top + 1, round(width * 0.68), round(height * 0.20), "g")
     if detail >= 2:
         for y in range(trunk_top + 3, trunk_bottom, 4):
             grid.put(math.floor(cx), y, "K")
@@ -664,7 +669,13 @@ def conifer_sprite(lod: str) -> Sprite:
                     grid.put(x, y, "g")
 
     if detail >= 2:
-        grid.vline(round(cx), round(height * 0.18), height - 5, "K")
+        # The trunk's shaded side, and only the trunk. This ran from 18% of the
+        # height, which put a black column straight down the middle of the
+        # crown -- the one thing a conifer's silhouette is, split in two. The
+        # trunk is not visible until the lowest branch tier ends, so that is
+        # where its shadow may start.
+        crown_bottom = round(height * (0.35 + (tiers - 1) * 0.105))
+        grid.vline(round(cx), crown_bottom, height - 2, "K")
         for y in range(round(height * 0.30), round(height * 0.76), 5):
             grid.put(round(cx) - 2, y, "g")
             grid.put(round(cx) + 2, y, "g")
@@ -681,18 +692,36 @@ def rocks_sprite(lod: str) -> Sprite:
         (0.52, 0.48, 0.25, 0.46),
         (0.79, 0.66, 0.20, 0.30),
     ]
+    # Stone is grey, never cyan. The middle boulder used to be filled `c`
+    # (CYAN) to separate it from its neighbours, and cyan is what this game
+    # dithers an ice surface out of -- so a pile of rocks beside the road read
+    # as a puddle. The palette offers exactly one grey, so the separation has
+    # to come from a black rim instead of a second colour.
     for index, (fx, fy, frx, fry) in enumerate(rocks):
-        fill = "w" if index != 1 else "c"
-        grid.ellipse(fx * (width - 1), fy * (height - 1), max(1, frx * width), max(1, fry * height), fill)
+        ox, oy = fx * (width - 1), fy * (height - 1)
+        rx, ry = max(1, frx * width), max(1, fry * height)
+        # Rim first, stone over it, so a later boulder cuts a dark edge into the
+        # one before it. Not at `far`, where the whole sprite is 8 x 5 and a rim
+        # would be most of the drawing.
+        if detail >= 1:
+            grid.ellipse(ox, oy, rx + 1, ry + 1, "K")
+        grid.ellipse(ox, oy, rx, ry, "w")
         cap_y = max(0, round((fy - fry * 0.55) * (height - 1)))
         cap_half = max(1, round(frx * width * 0.65))
-        grid.hline(cap_y, round(fx * (width - 1)) - cap_half, round(fx * (width - 1)) + cap_half, "W")
+        grid.hline(cap_y, round(ox) - cap_half, round(ox) + cap_half, "W")
+        # Where the cap ends, meltwater refreezes. Two pixels of ice per
+        # boulder, at `near` only -- this is the one place cyan belongs on
+        # stone, as a glint at an edge rather than as the fill it used to be.
+        if detail >= 2 and cap_y + 1 < height:
+            for edge in (round(ox) - cap_half, round(ox) + cap_half):
+                if 0 <= edge < width and grid.pixels[cap_y + 1][edge] == "w":
+                    grid.put(edge, cap_y + 1, "C")
     if detail >= 1:
         for x, y in [(3, height - 2), (width // 2, height // 2), (width - 4, height - 3)]:
             grid.put(x, y, "K")
     if detail >= 2:
         grid.line(width // 2 - 3, height // 2, width // 2 + 1, height - 3, "K")
-        grid.line(width - 9, height // 2 + 2, width - 5, height - 2, "C")
+        grid.line(width - 9, height // 2 + 2, width - 5, height - 2, "K")
     return Sprite(f"rocks-{lod}", "roadside", "rocks", lod, width, height, grid.rows(), ROADSIDE_LEGEND)
 
 
