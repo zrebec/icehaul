@@ -7,10 +7,10 @@ this file records decisions, benchmarks and open questions. Do not duplicate con
 
 ## Where to pick up
 
-State on `main` at `8642063` — #70 merged 2026-09-01, package `0.20.0`, **815 tests / 39 files**.
-The three-tier graphics work is landed. Older entries below remain the history that explains its
-constraints; where one has been overtaken by the code, it now says so on the spot rather than
-reading as current.
+State on `main` at `3012ce7` — #76 merged 2026-09-01, package `0.24.0`, **853 tests / 41 files**.
+The three-tier graphics work is landed, and so is everything the audit of it raised except the
+drawings themselves. Older entries below remain the history that explains its constraints; where
+one has been overtaken by the code, it now says so on the spot rather than reading as current.
 
 > **The sprite *pipeline* is finished. The drawings inside it are not.** There are 18 traffic and
 > 15 roadside `far / mid / near` JSON assets, all passed through the official ZX sprite validator.
@@ -57,6 +57,12 @@ order and came out of a playtest:
 | — | Perspective `far / mid / near` roadside renderer | `a9031a0` |
 | — | Traffic/scenery LOD sheets and real placement captures | `69ff332` |
 | — | Review-hardening: hysteretic sheets, production glow order, exact PNG validation | `a1af000` |
+| — | The bus drawn as a box, not a stretched saloon | #72 |
+| — | The `O` debug overlay, with a collision page | #73 |
+| — | A front view and a rear view made two drawings | #74 |
+| — | Four overlay corners, load statistics, AABB against pixel-perfect | #75 |
+| — | The JSON catalogue made the only source of objects | #76 |
+| — | Guards on the scenery approach, and the three artefacts they covered | *this branch* |
 
 **The pipeline was done before the drawings were** — the story of why, and the one measurement the
 redraw turned up, are under "The sprites themselves are the bottleneck now" below.
@@ -76,29 +82,73 @@ without needing a measurement to argue for it. Worth remembering when the next i
 > uses today, written down because they outlive a session. **Q-G4 is the cheap one and the one
 > that gates the rest** — it is paper, not code. None of them is scheduled; the queue below rules.
 
-**Next, in order:**
+**Next, in order.** Reviewed 2026-09-04, after the audit of the three-tier work closed eight of its
+twelve points. The renumbering is the finding rather than a tidy-up: **this is no longer mostly a
+graphics queue.** The renderer is measured and closed, its remainder is two art items and one
+decision — and meanwhile three *game* resources measurably do not bite.
 
-0. ~~**Vehicle detail — interior keylines.**~~ **Done 2026-09-01.** The near sources are authored at
-   2× the canonical grid and carry black internal structure; mid carries the silhouette/type; far
-   keeps direction in its paired lamps. The source grid never grows the projected box.
-1. **Traffic density scaling with distance** — Fox's, from the 0.8.2 playtest (§2½). `TRAFFIC_SPACING_M`
-   is the lever; a distance term goes in `game/traffic.ts` where spacing is drawn. **Now more valuable
-   than when it was written:** traffic has behaviour worth seeing more of, and a queue that forms
-   behind a braking vehicle is a decision the player has to make rather than scenery.
-1½. ~~**Snow grip**~~ — **done** in #44: `SURFACE_GRIP.snow` 0.55 → 0.45, exactly the experiment §3
-   below asked for, plus the controllability re-pin it warned about (the ordering test now derives
-   its expectation from `SURFACE_GRIP` instead of carrying a copy of it).
-2. **Distance fog**, then night per the open decision below. Glow is in (#43), so the cheap half of
-   the "daylight only" path in the night table below is already paid for.
-3. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
+Done, kept here because the reasons outlive them:
+
+- ~~**Vehicle detail — interior keylines.**~~ **Done 2026-09-01.** The near sources are authored at
+  2× the canonical grid and carry black internal structure; mid carries the silhouette/type; far
+  keeps direction in its paired lamps. The source grid never grows the projected box.
+- ~~**Snow grip.**~~ **Done in #44:** `SURFACE_GRIP.snow` 0.55 → 0.45, exactly the experiment §3
+  below asked for, plus the controllability re-pin it warned about (the ordering test now derives
+  its expectation from `SURFACE_GRIP` instead of carrying a copy of it).
+- ~~**Roadside artefacts, and the guards that should have caught them.**~~ **Done 2026-09-04.**
+  See "Scenery hands over for free" above.
+
+Open:
+
+1. **The player's truck has five poses across the whole steering range** (`PLAYER_TRUCK_ANGLES`),
+   and yaw is continuous. The only open item Fox reported as a *game* rather than as a picture —
+   *„animácie sú skákavé, aj pri zatočení kamióna."* Nine poses is authoring work and does not
+   touch the no-rotated-sprites rule, but **collision masks are cab × trailer combinations, so
+   nine poses is 81 masks** — check the cache and the module load time before drawing anything.
+   Note `docs/smerovanie.sk.md` says the opposite ("the problem is not the number of sprites but
+   what drives the joint"); that was written **before #63**, which put the joint on lateral
+   velocity, so pose count is genuinely the ceiling now.
+2. **Traffic density scaling with distance** — Fox's, from the 0.8.2 playtest (§2½).
+   `TRAFFIC_SPACING_M` is the lever; a distance term goes in `game/traffic.ts` where spacing is
+   drawn. **Now more valuable than when it was written:** traffic has behaviour worth seeing more
+   of, and a queue that forms behind a braking vehicle is a decision the player has to make rather
+   than scenery. The gate this sat behind — *"redraw first, then raise the density"* — is **open**:
+   the bus reads as a bus (#72) and the two views are two drawings (#74). What is still true is
+   that the drawings are generated rather than cut, which is a different objection from the one
+   that set the gate.
+3. **Local best-per-route.** Nothing stores a score against a seed, so a daily route cannot be
+   beaten — which is the whole point of a daily route. The results screen already names the route
+   (#61) and `game/prefs.ts` already owns a zx-kit save profile. Half of proposal 4 below, and the
+   half that never shipped.
+4. **Canisters that cost something to take.** §B is measured: below 87 km/h the road hands out more
+   fuel than the truck burns, by 2.1× at the speed Fox actually drives. Fuel is not a resource
+   today. Turning a constant is the dull answer; placing canisters where a detour costs something
+   is the one that matches what this game is about.
+5. **Draw the nine grids by hand.** The pipeline is finished and the drawings inside it are not —
+   `author-lod-sprites.py` is one parametric function per family, and a formula cannot make the
+   judgement *"this feature has to be wide enough to survive down to four pixels"* that the
+   hand-drawn pass made one feature at a time. Needs an eye, so it is a session rather than a task.
+   It blocks nothing, and **item 8 of the audit (the mini's cadence) is closed as FAILED, so it
+   cannot be used as the reason.**
+6. **Decide the fleet colours.** The bus lost `B_YELLOW` — chosen so the brake state existed at all
+   — and is `MAGENTA`, which carries the red channel. #72 halved the urgency by doubling the brake
+   signal in the framebuffer, but the decision has still never been made or measured. **One drive
+   behind a bus, not a task.**
+7. **Distance fog**, then night per the open decision below. Glow is in (#43), so the cheap half of
+   the "daylight only" path in the night table below is already paid for. After 2–4, though: it is
+   polish on a road whose difficulty is being retuned.
+8. **Parametric near vehicle** — the gated spike, and note it is *not* the same as 3D vector; see
    "Parametric, vector, and what each would actually buy".
-4. **The far field's remaining stillness** — the redraw took the worst case from 1.97 s to 1.28 s
-   (a mini at ~192 m) by widening its interior features, so this is smaller than it was but not
-   gone: a four-pixel-wide vehicle whose true size grows by a tenth of a pixel has nothing left to
-   draw differently. The remaining levers are still `TRAFFIC_SCALE_FAR` and
-   `TRAFFIC_VIEW_DISTANCE_M`, and both change how distance reads. **Fox's call, deliberately not
-   pulled.**
-5. **Resolution** — still rejected; revisit only for HUD space.
+9. **The far field's remaining stillness** — the redraw took the worst case from 1.97 s to 1.28 s
+   (a mini at ~192 m) by widening its interior features; the generated grids put it back to 1.83 s
+   and two measured attempts failed to move it. A four-pixel-wide vehicle whose true size grows by a
+   tenth of a pixel has nothing left to draw differently. The remaining levers are still
+   `TRAFFIC_SCALE_FAR` and `TRAFFIC_VIEW_DISTANCE_M`, and both change how distance reads.
+   **Fox's call, deliberately not pulled.**
+10. **Resolution** — still rejected; revisit only for HUD space. Phase 1 of
+    `retro/docs/sk/iceroads-rozlisenie.md` (normalise the constants, kill the three copies of the
+    magic `50`) is worth 3–4 h on its own merits and turns the decision into one number. Pairs with
+    **Q-G4**, which is paper rather than code and gates the whole "infinite resolution" direction.
 
 #### Five proposals off the 0.11.1 playtest — ideas, not decisions
 
@@ -277,20 +327,57 @@ approach and painter-sorts every type together.
   — functional furniture stays predictable, nature carries the identity — but it does mean lamps
   contribute nothing to telling two seeds apart.
 
+##### Scenery hands over for free — 2026-09-04
+
+Traffic had three guards on its approach and scenery had none, which is how a generated tree could
+carry a black line through its own crown for three days without a test noticing. It now walks
+through the same helper (`walkSceneryApproach` beside `walkApproach`), so the two can never
+disagree about what an approach was, and `freezeRuns`/`sameDrawing` needed no change — they work
+over `{w, h, raster}`, which `RoadsideProjection` already carries.
+
+Two findings, and the first is stronger than traffic manages:
+
+- **The box and the ground anchor move by exactly zero pixels at both handovers**, for all five
+  types, where traffic is only held to within one. The assertion is therefore `0`, not `<= 1`.
+  This is what "projection computes the physical box before choosing an asset" buys when the scale
+  law is also monotonic — and it is the same monotonicity that makes `chooseSceneryLod` right to
+  have no dead-band.
+- **`rocks` holds one drawing for 1.83 s**, the worst of the five and the same figure the mini
+  reaches. The cause is the same one, recorded above as the floor: its `far` grid is 8 × 5 and
+  projects to a **4 × 2** box, the flattest in the game. Nothing there can change while the true
+  size grows by a tenth of a pixel. **Not an art defect and not fixable by drawing** — do not
+  spend a redraw on it.
+
+| | deciduous | conifer | rocks | sign | lamp |
+|---|---:|---:|---:|---:|---:|
+| longest freeze | 0.88 s | 0.88 s | **1.83 s** | 1.25 s | 1.22 s |
+| changes / 782 frames | 120 | 106 | 87 | 85 | 74 |
+
+The budget is **2.0 s** — the same measured-worst-plus-headroom rule traffic uses, landing on the
+same number because both worst cases are the same floor rather than the same tuning. It is not
+borrowed from traffic's calibration and must not be re-derived from it.
+
+**One art call in that change is Fox's to veto on sight.** Removing cyan from the rocks left
+`rocks-near` with three palette names, and `spriteCatalog.test.ts` requires four of a `near` asset
+so that one cannot degenerate into what a two-colour flattener would produce. The test is right and
+was not weakened; the fourth colour is two pixels of `B_CYAN` per boulder where the snow cap ends —
+cyan as a glint at an edge, which is the one place it belongs on stone. **Also unexamined, and
+noticed on the same sheet:** `lamp-near` carries cyan dashes down its pole. Nobody has asked whether
+that reads as a metal highlight or as more ice.
+
 ##### Runtime consequences worth knowing
 
 - **The glow now measures the lamps off the raster that was drawn.** `pushTrafficLampSpots` calls
   `findLampPair(p.raster, dir)` per vehicle per frame instead of reading a per-sprite cache, so a
   lamp moved one target pixel by the resampler cannot leave its halo behind. Correct, and cheap at
-  this size. `lampPairFor` and its `lampCache` survive as **test-only** exports; the comment above
-  the cache still claims it is what the runtime measures, which is no longer true.
+  this size. *(`lampPairFor` and its cache survived for a while as test-only exports carrying a
+  comment that claimed they were what the runtime measured. Both were deleted in #76.)*
 - **Glow constants did not move.** `GLOW_CORE_MIN_HEIGHT` is still 8 px; it merely stopped being
   described in terms of the old `far/detail` boundary. The glow remains closed.
-- **Five modules are now orphaned**: `render/sprites/{vehicles,conifer,deciduous,rocks,signpost}.ts`
-  are imported by nothing. `vehicles.ts` in particular carries the seven authoring rules and the
-  measured tables behind the two hand-drawn passes — the reasoning summarised in "The second
-  redraw" below came from it. Migrate or delete deliberately; leaving it in `src/` means the next
-  reader takes an unreferenced file as current.
+- ~~**Five modules are now orphaned**~~ **Done in #76.** `render/sprites/{vehicles,conifer,
+  deciduous,rocks,signpost}.ts` are gone, and what `vehicles.ts` knew that was nowhere else is
+  migrated into this file under "What `sprites/vehicles.ts` knew". `lampPairFor` and its cache went
+  with them, so the stale comment noted above no longer exists either.
 
 ##### The bus became a box — 2026-09-01
 
@@ -389,17 +476,23 @@ cadence remains open on its own terms.
 
 ##### What this leaves open
 
-1. **Is 45 % at 60 m acceptable?** Only a playtest answers it. If yes, it closes as the honest price
-   of three tiers. If no, the lever is making `mid` a closer relative of `far` rather than moving a
-   constant.
+1. ~~**Is 45 % at 60 m acceptable?**~~ **Accepted 2026-09-01.** The playtest answered it and did
+   not reject it — Fox: *„je to plynulé, je to v poriadku."* Accepted is not solved: it means the
+   number is known, the reason is known, and we live with it. Three tiers are three drawings, so
+   the picture at a handover *must* change; three drawings were the brief. It reopens on one thing
+   only — a playtest saying it is visible at 60 m and it grates. The lever then is making `mid` a
+   closer relative of `far`, which is again a drawing rather than a constant.
 2. ~~**Front and rear need to differ in shape, not only in lamp colour.**~~ **Done 2026-09-01** for
    the whole fleet — the bus as a side effect of its reshape, then the mini and car deliberately.
    See "The front stopped being the rear" below; the rule now has a test.
 3. ~~**The bus does not read as a bus.**~~ **Done 2026-09-01** — it had the car's tapering
    trapezoid with a gentler ramp, and now has its own shape law. See "The bus became a box" below.
-4. **Two roadside types have visible artefacts** on `roadside-contact-sheet.png`: `conifer-near` has
-   a black keyline running the full height *through the crown*, `deciduous-near` has red branch
-   marks over green foliage, and `rocks-*` reads as a cyan puddle rather than stone.
+4. ~~**Two roadside types have visible artefacts**~~ **Done 2026-09-04** — three, in fact, and the
+   entry undercounted its own list. `conifer-near`'s black keyline started at 18 % of the grid and
+   split the crown; `deciduous-near` drew branches in the trunk's red over the foliage; `rocks-*`
+   filled its middle boulder with the cyan this game dithers ice out of. Each was one condition in
+   `author-lod-sprites.py`. The scenery approach got its first guards in the same change — see
+   "Scenery hands over for free" above.
 5. **The colour re-deal needs a decision, not an accident** — the bus especially, where yellow had a
    functional reason recorded below.
 

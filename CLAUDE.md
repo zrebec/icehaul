@@ -266,7 +266,7 @@ that. Slowing down always works, which was not true before 0.4.0 — see `AGENTS
 
 Each phase is self-contained, ends with a runnable build, and leaves the previous scene playable. Time estimates assume part-time work with AI assistance.
 
-> **Recent (2026-09-01, 815 tests):** traffic and roadside scenery now use 33 validated JSON
+> **Recent (2026-09-04, 853 tests):** traffic and roadside scenery now use 33 validated JSON
 > sprites across `far / mid / near`, produced by `scripts/author-lod-sprites.py`. Projection
 > computes the physical box before choosing an asset, so grid resolution cannot alter lane fit,
 > anchor or collision. Roadside placement is a pure seeded band/cluster generator and scenery grows
@@ -275,7 +275,9 @@ Each phase is self-contained, ends with a runnable build, and leaves the previou
 > approach. Benchmark placement sheets cover seeds 42 and 1443866. **The renderer side of this is
 > finished; the drawings are not** — what the three tiers cost, and the open items about what the
 > art still has to say, are in `AGENTS.md`. The reproducible asset and capture pipeline lives in
-> `docs/graphics.md`.
+> `docs/graphics.md`. Both approaches — traffic and scenery — are now guarded against a handover
+> that moves the box and against holding one drawing too long; scenery's handover moves it by
+> exactly zero pixels.
 >
 > **Mission timing lives in `src/game/mission.ts`, not in the drive scene.** A leg's time budget is
 > `length / MISSION_PACE_KMH`, so every leg asks the same average speed and the first leg still gets
