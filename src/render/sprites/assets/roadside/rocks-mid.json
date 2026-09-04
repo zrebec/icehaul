@@ -2,20 +2,19 @@
   "w": 16,
   "h": 10,
   "rows": [
-    ".......ccc......",
-    "......ccccc.....",
-    ".....WWWWWWW....",
-    ".wwwccccccccw...",
-    ".WWWccccccWWWWW.",
-    "wwwwccccKwwwwww.",
-    "wwwwwccccwwwwwww",
-    "wwwwwccccwwwKww.",
-    ".wwKwwccccwwwww.",
-    "................"
+    ".....KKwwwK.....",
+    "....KKwwwwwK....",
+    ".KKKKWWWWWWWK...",
+    "KwwKwwwwwwKKwKK.",
+    "KWWKwwwwwKWWWWWK",
+    "wwwKwwwwKwwwwwwK",
+    "wwwwKwwwKwwwwwww",
+    "wwwwKwwwKwwwKwwK",
+    "KwwKwKwwwKwwwwwK",
+    ".KKKKKKKKKKKKKK."
   ],
   "legend": {
     "K": "C.BLACK",
-    "c": "C.CYAN",
     "W": "C.B_WHITE",
     "w": "C.WHITE"
   }

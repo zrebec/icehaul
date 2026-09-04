@@ -7,11 +7,15 @@
  * disagree about what the approach actually was.
  */
 
-import { projectTrafficVehicle } from '../road3d.ts'
+import { projectRoadsideObjects, projectTrafficVehicle } from '../road3d.ts'
 import { resetVehicleRasterCache } from '../vehicleRaster.ts'
-import { VIEWPORT_BOTTOM, VIEWPORT_TOP } from '../../config.ts'
+import { resetRoadsideRasterCache } from '../roadsideRaster.ts'
+import {
+  SCENERY_SCALE_NEAR_Z_M, SCENERY_VIEW_DISTANCE_M, VIEWPORT_BOTTOM, VIEWPORT_TOP,
+} from '../../config.ts'
 import type { LodTier } from '../vehicleLod.ts'
 import type { TrafficDir, TrafficVehicle, VehicleType } from '../../game/traffic.ts'
+import type { RoadsideObject, RoadsideType } from '../../game/roadside.ts'
 
 /** One physics tick at 60 fps, closing at 60 km/h — an ordinary overtake. */
 export const CLOSING_KPH = 60
@@ -98,4 +102,52 @@ export function freezeRuns(frames: readonly ApproachFrame[]): number[] {
   }
   runs.push(run)
   return runs
+}
+
+/**
+ * The five roadside types, in the order the contact sheet draws them.
+ *
+ * Scenery is walked by the same machinery as traffic because the question is
+ * the same one — what changes between frames — and two helpers measuring one
+ * approach two ways is how two tests come to disagree about what the approach
+ * was.
+ */
+export const SCENERY_TYPES: readonly RoadsideType[] =
+  ['deciduous', 'conifer', 'rocks', 'sign', 'lamp']
+
+/**
+ * One roadside object, walked past at `CLOSING_KPH`.
+ *
+ * The object stands still and the camera drives, which is the real motion: a
+ * tree does not approach. That is also the whole reason `chooseSceneryLod`
+ * needs no dead-band — scale is monotonic here and cannot oscillate across a
+ * boundary the way braking traffic can.
+ *
+ * The walk runs between the two bounds `projectRoadsideObjects` itself honours,
+ * so every frame it yields is one the game would have drawn.
+ */
+export function walkSceneryApproach(
+  type: RoadsideType,
+  side: 1 | -1 = 1,
+  fromM = SCENERY_VIEW_DISTANCE_M,
+  toM = SCENERY_SCALE_NEAR_Z_M,
+): ApproachFrame[] {
+  resetRoadsideRasterCache()
+  const frames: ApproachFrame[] = []
+  const object: RoadsideObject =
+    { distM: fromM, side, type, band: 'verge', offsetRoadWidths: 0.15 }
+
+  for (let camera = 0; camera <= fromM - toM; camera += STEP_M) {
+    const [p] = projectRoadsideObjects(
+      VIEWPORT_TOP, VIEWPORT_BOTTOM, camera, 0, [object], noCurve,
+    )
+    if (!p) continue
+    frames.push({
+      distM: p.worldZ,
+      x: p.x, y: p.y, left: p.left, top: p.top, w: p.w, h: p.h, scale: p.scale,
+      lod: p.lod,
+      raster: p.raster,
+    })
+  }
+  return frames
 }
