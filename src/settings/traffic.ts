@@ -8,24 +8,101 @@
  */
 
 import type { Surface } from './surfaces.ts'
+import type { VehicleType } from '../game/traffic.ts'
 
 /**
- * Average spacing between traffic vehicles (metres).
+ * Spacing between traffic vehicles at the **start** of a run (metres).
  *
  * ── SK ────────────────────────────────────────────────────────────────────
- * Priemerný rozostup medzi vozidlami pri generovaní, v metroch.
+ * Rozostup medzi vozidlami na **začiatku** behu, v metroch. Odtiaľto klesá
+ * k `TRAFFIC_SPACING_FLOOR_M` — viď `trafficSpacingAt()` v `game/traffic.ts`.
  *
  * **Nie je to rozostup, ktorý uvidíš.** Zmerané: rozostup pri zrode neprežije drift
  * — súbežné autá idú 30–55 km/h, hráč ~45, takže pomalé zaostávajú a rýchle
  * uchádzajú. Skutočná priemerná medzera medzi dvoma súbežnými autami vyšla
  * **61–178 m** podľa seedu, nie 400, ako hovorí aritmetika.
  *
- * **↓ nižšie:** hustejšia doprava. Toto je páka pre hustotu rastúcu so
- * vzdialenosťou, ktorá čaká vo fronte.
+ * **↓ nižšie:** hustejšia doprava hneď od štartu.
  * **↑ vyššie:** prázdnejšia cesta. Nad ~400 m prestane byť doprava obtiažnosťou
  * a hra sa vráti k tomu, že prekážkou je len povrch.
  */
 export const TRAFFIC_SPACING_M = 220
+
+/**
+ * Spacing once the road is as busy as it ever gets (metres).
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * Rozostup, keď je cesta najrušnejšia. Foxova voľba: **trojnásobná hustota**
+ * proti štartu, teda skutočná medzera medzi súbežnými autami padne z 61–178 m
+ * približne na 20–60 m — kolóna, v ktorej sa predbiehanie stane rozhodnutím
+ * namiesto formality.
+ *
+ * **Nastav ho na `TRAFFIC_SPACING_M` a celá funkcia je vypnutá** — hustota
+ * ostane plochá ako pred 0.25.0. To je zámerná vlastnosť, nie vedľajší efekt:
+ * rovnaká disciplína ako `maxSpeedToShift: null` pri synchre.
+ *
+ * **↓ nižšie:** hustejší koniec dlhého behu. Pod ~50 m sa hra mení na slalom.
+ * **↑ vyššie:** miernejší rast. Rovné `TRAFFIC_SPACING_M` = žiadny.
+ */
+export const TRAFFIC_SPACING_FLOOR_M = 75
+
+/**
+ * Distance travelled at which the floor is reached (metres).
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * Vzdialenosť, po ktorej je rozostup na dne. Medzi 0 a týmto číslom klesá
+ * lineárne; za ním sa už nič nedeje.
+ *
+ * 15 km je zvolených proti reálnej dĺžke behu: prvá noha má 5 km a ďalšie
+ * 5–8 km, takže tri nohy sú ~16–20 km. Rampa teda pokrýva **celý realistický
+ * beh** a dno sa dosiahne až na jeho konci — hustota rastie po celý čas, čo je
+ * presne to zadanie. Kratšia rampa by znamenala, že druhá polovica behu je
+ * rovnako rušná ako jej koniec.
+ *
+ * **↓ nižšie:** cesta zhustne skôr a zvyšok behu je plochý.
+ * **↑ vyššie:** pomalší rast; nad ~25 km väčšina hráčov dno nikdy neuvidí.
+ */
+export const TRAFFIC_DENSITY_RAMP_M = 5000
+
+/**
+ * How much driving the road has already seen when a run begins (metres).
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * Koľko jazdy má cesta „za sebou" v okamihu, keď začneš. Pri resete sa doprava
+ * odsimuluje od `-TRAFFIC_WARMUP_M` po nulu, takže na štarte nestojíš na
+ * prázdnej ceste, ale vojdeš do premávky, ktorá už beží.
+ *
+ * **Prečo to nie je podvádzanie s kockami.** Počas jazdy je populácia okolo
+ * teba sama od seba pomalšia než ty — rýchle ti ušli, pomalé si dobehol. Na
+ * štarte žiadny taký výber neprebehol, takže autá pred tebou sú čerstvý
+ * rovnomerný los a väčšina z nich ti ujde. Rozjazd doplní presne ten výber,
+ * nie inú kocku.
+ *
+ * **Zmerané, prečo to vôbec je:** bez rozjazdu je prvé predbehnutie
+ * štrukturálne nemožné skôr než okolo 2,5–3 km. Auto sa rodí 500 m pred tebou
+ * a pri 45 proti 30 km/h ti dobehnutie zaberie 1,5 km jazdy.
+ *
+ * **↓ nižšie:** kratšia história, prázdnejší štart. Na 0 je funkcia vypnutá.
+ * **↑ vyššie:** dlhšia simulácia pri resete a nič navyše — nad ~4 km je cesta
+ * už v ustálenom stave a ďalší rozjazd nič nemení.
+ */
+export const TRAFFIC_WARMUP_M = 2500
+
+/**
+ * Player speed the warm-up assumes, in km/h.
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * Rýchlosť, ktorou „jazdil" virtuálny hráč počas rozjazdu. Rozhoduje o tom,
+ * ktoré autá ostanú v dosahu: pomalšie než toto číslo sa nazbierajú pred tebou,
+ * rýchlejšie odídu.
+ *
+ * 45 km/h nie je odhad — je to zmeraný priemer reálnej jazdy (42–46 km/h podľa
+ * seedu, `AGENTS.md` → playtest 0.11.1).
+ *
+ * **↓ nižšie:** prežije viac rýchlych áut, takže menej predbiehania.
+ * **↑ vyššie:** prísnejší výber, hustejšia kolóna pomalých hneď na štarte.
+ */
+export const TRAFFIC_WARMUP_KPH = 45
 
 /**
  * Random jitter on spacing (±fraction).
@@ -294,17 +371,34 @@ export const TRAFFIC_CORNER_COMFORT_PCT = 0.55
  * holom ľade. Zámerne to **nie je** `PLAN_SURFACE_VMAX` — to je aerodynamický strop
  * kamióna a ľad v ňom má 120, čo je pre túto otázku presne naopak.
  *
+ * ── Prečo je to tabuľka povrch × typ, a nie jedno číslo na povrch ─────────
+ * Foxovo zadanie: *„autobus na ľade bude pomalší, možno tak 15–20 km/h, ako
+ * osobné auto, ktoré pôjde 35–40, a mini bude niekde medzi tým. Rovnako na dust
+ * sa autobus bude mať väčšiu tendenciu zabárať."*
+ *
+ * Jeden násobič na typ by to nevyjadril, a to je celý dôvod pre dva rozmery:
+ * autobus netrpí na každom povrchu rovnako. Na ľade ho brzdí **hmotnosť** —
+ * dlhá brzdná dráha, vodič ide opatrne. Na piesku ho brzdí **zabáranie** —
+ * nápravové zaťaženie a motor to jednoducho neutiahne, takže tam padá najnižšie
+ * zo všetkého v hre. To sú dva rôzne fyzikálne dôvody a dávajú dve rôzne čísla.
+ *
+ * Poradie na zlom povrchu je zámerne **autobus < mini < auto**. Mini nie je
+ * mrštné: je ľahké, má menší kontakt s cestou a jeho vodič je nervóznejší.
+ *
+ * `asphalt` je `null` pre všetkých — na asfalte nikoho nebrzdí povrch, len
+ * zákruta a to, čo má pred sebou. Tá vlastnosť sa nesmie stratiť.
+ *
  * **↓ nižšie:** doprava na povrchu spomalí a začne ťa zdržiavať; na ľade sa z nej
  * stane zátka.
  * **↑ vyššie:** premávka sa povrchom netrápi. Pri vysokých hodnotách prestanú
  * brzdové svetlá pred prekážkou svietiť a stratíš varovný systém, ktorý ti dáva.
  */
-export const TRAFFIC_SURFACE_MAX_KPH: Record<Surface, number | null> = {
-  asphalt: null,
-  snow: 45,
-  ice: 30,
-  sand: 40,
-  mud: 38,
+export const TRAFFIC_SURFACE_MAX_KPH: Record<Surface, Record<VehicleType, number | null>> = {
+  asphalt: { mini: null, car: null, bus: null },
+  snow: { mini: 38, car: 45, bus: 26 },
+  ice: { mini: 26, car: 34, bus: 17 },
+  sand: { mini: 30, car: 38, bus: 12 },
+  mud: { mini: 28, car: 36, bus: 15 },
 }
 
 /**

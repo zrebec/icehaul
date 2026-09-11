@@ -7,6 +7,8 @@
  */
 import {
   TRAFFIC_SPACING_M, TRAFFIC_SPACING_JITTER,
+  TRAFFIC_SPACING_FLOOR_M, TRAFFIC_DENSITY_RAMP_M,
+  TRAFFIC_WARMUP_M, TRAFFIC_WARMUP_KPH,
   TRAFFIC_SAME_DIR_PCT, TRAFFIC_SAME_SPEED, TRAFFIC_ONCOMING_SPEED,
   TRAFFIC_START_M, TRAFFIC_MIN_SPAWN_GAP_M,
   TRAFFIC_FOLLOW_BRAKE_KMH_S,
@@ -88,6 +90,38 @@ function hash(n: number): number {
   return ((x ^ (x >>> 16)) >>> 0) / 0x100000000
 }
 
+/**
+ * Nominal spacing between spawns at a given distance along the run (metres).
+ *
+ * The road gets busier the further you have driven — Fox's, from the 0.8.2
+ * playtest, where the verdict was that the clock is not the difficulty and the
+ * traffic is: *"brzdou nebol čas, brzdou bolo, že som sa niekoľkokrát skoro
+ * zabil kvôli doprave — a to je v poriadku."* This is that, as one line.
+ *
+ * ── The shape lives here, on purpose ───────────────────────────────────────
+ * Linear from {@link TRAFFIC_SPACING_M} down to {@link TRAFFIC_SPACING_FLOOR_M}
+ * over {@link TRAFFIC_DENSITY_RAMP_M}, then flat. Every number is a config
+ * lever and the *curve* is this one function, so swapping linear for something
+ * asymptotic later is an edit here rather than a hunt through the spawner.
+ *
+ * **Setting the floor equal to the start turns the whole feature off** and
+ * restores flat density exactly. That is deliberate, and it is the same
+ * discipline `GEARS[].maxSpeedToShift: null` uses to drop the synchro.
+ *
+ * ── Why distance and not time, and why *this* distance ─────────────────────
+ * It reads the spawn point, which is absolute world distance and never resets
+ * at a delivery, so a long run keeps getting busier across legs — which is what
+ * was asked for. It is also what keeps the whole thing a pure function of the
+ * seed: the recurrence `d[n+1] = d[n] + spacingAt(d[n]) * jitter(n)` depends on
+ * nothing the player did except arrive, and the rolls behind `jitter(n)` are
+ * keyed on the spawn index rather than on the distance.
+ */
+export function trafficSpacingAt(distM: number): number {
+  const ramp = Math.max(1, TRAFFIC_DENSITY_RAMP_M)
+  const t = Math.min(1, Math.max(0, distM / ramp))
+  return TRAFFIC_SPACING_M + (TRAFFIC_SPACING_FLOOR_M - TRAFFIC_SPACING_M) * t
+}
+
 let _vehicles: DrivenVehicle[] = []
 let _nextSpawnDist = TRAFFIC_START_M
 let _seed = 0
@@ -95,7 +129,44 @@ let _seed = 0
 export function resetTraffic(seed: number): void {
   _seed = seed
   _vehicles = []
-  _nextSpawnDist = TRAFFIC_START_M
+  _nextSpawnDist = TRAFFIC_START_M - TRAFFIC_WARMUP_M
+  warmUpTraffic()
+}
+
+/**
+ * Give the road a history before the player's first frame.
+ *
+ * ── The hole this fills, measured ──────────────────────────────────────────
+ * Without it the first overtake is **structurally impossible before about
+ * 2.5-3 km**, on every seed and at any density. Traffic spawns 500 m ahead and
+ * a same-direction vehicle is only ever met if it is slower than you, so
+ * catching one at 45 against 30 km/h costs 1.5 km of driving — and
+ * `TRAFFIC_START_M` puts the first vehicle 800 m ahead before any of that
+ * starts. Fox drove 2.8 km of the daily route and passed nothing; the
+ * measurement said 0 overtakes in the first four kilometres on two of four
+ * seeds, and the flat-220 m spawner did exactly the same, so this was never
+ * about density.
+ *
+ * ── Why simulate rather than place vehicles ────────────────────────────────
+ * Hand-placing cars near the player would need a rule about how fast they are,
+ * and any such rule is loading the dice. Simulating needs no rule: during a run
+ * the population around the player is *already* biased slow, because the quick
+ * ones have driven away and the slow ones have been caught. At distance zero no
+ * such selection has happened yet, which is the whole defect. Driving the
+ * spawner from `-TRAFFIC_WARMUP_M` to zero performs the selection instead of
+ * imitating it, and it stays a pure function of the seed.
+ *
+ * The road sampler is deliberately not passed. Warm-up happens before
+ * `resetRoad` is guaranteed to have run, and anticipation braking only changes
+ * speeds a little; the selection this exists for is done by cruise speed.
+ */
+function warmUpTraffic(): void {
+  if (TRAFFIC_WARMUP_M <= 0) return
+  const stepMs = 200
+  const stepM = (TRAFFIC_WARMUP_KPH / 3.6) * (stepMs / 1000)
+  for (let d = -TRAFFIC_WARMUP_M; d < 0; d += stepM) {
+    tickTraffic(d, 0, TRAFFIC_WARMUP_KPH, stepMs)
+  }
 }
 
 /**
@@ -122,6 +193,14 @@ export function followPlayerSpeed(
 }
 
 function spawnVehicle(): void {
+  // `_vehicles` is **never pruned**, which is what makes this a monotonic spawn
+  // counter and every roll below reproducible. Denser traffic makes dropping
+  // `gone` vehicles look attractive — over 22 km the array now reaches a few
+  // hundred rather than about a hundred — and doing it would silently restart
+  // the roll sequence, so two runs of one seed would stop agreeing. It is not
+  // worth it either: three loops over a few hundred small objects is nothing
+  // against a game measured at under 4% of one core. `rollSequenceFor` in
+  // `traffic.test.ts` fails the day someone tries.
   const idx = _vehicles.length
   const h1 = hash(idx * 59 + 7 + _seed)
   const h2 = hash(idx * 73 + 13 + _seed)
@@ -191,8 +270,13 @@ function spawnVehicle(): void {
     brakeLampMs: 0,
   })
 
+  // Spacing is read at the point the *next* vehicle will stand, not at the
+  // player, so it stays a property of the route rather than of the frame this
+  // happened to be called on. `at` above may have been pushed forward by the
+  // overlap guard; `_nextSpawnDist` deliberately is not, because the roll
+  // sequence has to advance by the same amount whatever the guard did.
   const jitter = 1 + (hash(idx * 83 + 19 + _seed) * 2 - 1) * TRAFFIC_SPACING_JITTER
-  _nextSpawnDist += TRAFFIC_SPACING_M * jitter
+  _nextSpawnDist += trafficSpacingAt(_nextSpawnDist) * jitter
 }
 
 /**

@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { followPlayerSpeed, resetTraffic, tickTraffic, getVisibleTraffic } from '../traffic.ts'
+import {
+  followPlayerSpeed, resetTraffic, tickTraffic, getVisibleTraffic, trafficSpacingAt,
+} from '../traffic.ts'
 import { getTrafficSpriteRows, projectTrafficVehicle } from '../../render/road3d.ts'
 import { resetRoad, getSurfaceAt, getGripAt, getCurvatureAt } from '../road.ts'
 import { dailyRoadSeed } from '../seed.ts'
 import {
   VIEWPORT_TOP, VIEWPORT_BOTTOM, TRAFFIC_VIEW_DISTANCE_M,
   TRAFFIC_SPACING_M, TRAFFIC_SAME_DIR_PCT, TRAFFIC_COLLISION_DEPTH_M,
+  TRAFFIC_SPACING_FLOOR_M, TRAFFIC_DENSITY_RAMP_M, TRAFFIC_SPACING_JITTER,
   SURFACE_GRIP, type Surface,
 } from '../../config.ts'
 import type { TrafficVehicle } from '../traffic.ts'
@@ -516,6 +519,254 @@ describe('traffic density, measured', () => {
     console.log(`\nClosest two same-direction vehicles ever got: ${worst.toFixed(2)} m`
       + ` (a vehicle is ${TRAFFIC_COLLISION_DEPTH_M} m of road)`)
     expect(worst).toBeGreaterThan(TRAFFIC_COLLISION_DEPTH_M * 2)
+  })
+})
+
+
+// ─── Density that grows with the distance driven ─────────────────────────────
+
+describe('traffic density grows with the distance driven', () => {
+  /**
+   * Fox's, from the 0.8.2 playtest: the clock was never the difficulty, the
+   * traffic was, and there was not enough of it. The road now gets busier the
+   * further you have driven.
+   *
+   * The tests below are split deliberately. The **law** is a pure function and
+   * is pinned exactly; the **feature** is measured on a driven run, because a
+   * spawn gap is not what a player experiences — drift decides that, which is
+   * the finding the density table above already records.
+   */
+
+  describe('the law', () => {
+    it('starts at the start spacing and reaches the floor at the ramp', () => {
+      expect(trafficSpacingAt(0)).toBeCloseTo(TRAFFIC_SPACING_M, 10)
+      expect(trafficSpacingAt(TRAFFIC_DENSITY_RAMP_M)).toBeCloseTo(TRAFFIC_SPACING_FLOOR_M, 10)
+    })
+
+    it('is exactly the documented straight line between them', () => {
+      // Asserted as the interpolation rather than as sampled numbers, because
+      // this identity is also what makes the off-switch work: set the floor
+      // equal to the start and every point on the line collapses to one value.
+      for (const t of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
+        const expected = TRAFFIC_SPACING_M
+          + (TRAFFIC_SPACING_FLOOR_M - TRAFFIC_SPACING_M) * t
+        expect(trafficSpacingAt(TRAFFIC_DENSITY_RAMP_M * t), `t=${t}`)
+          .toBeCloseTo(expected, 10)
+      }
+    })
+
+    it('clamps at both ends rather than running off', () => {
+      // Below zero cannot happen from the spawner, but a negative would invert
+      // the ramp and make the road *emptier* the further you drove, which is a
+      // silent difficulty bug rather than a crash.
+      expect(trafficSpacingAt(-1)).toBeCloseTo(TRAFFIC_SPACING_M, 10)
+      expect(trafficSpacingAt(-999_999)).toBeCloseTo(TRAFFIC_SPACING_M, 10)
+      expect(trafficSpacingAt(TRAFFIC_DENSITY_RAMP_M * 10)).toBeCloseTo(TRAFFIC_SPACING_FLOOR_M, 10)
+      expect(trafficSpacingAt(Number.MAX_SAFE_INTEGER)).toBeCloseTo(TRAFFIC_SPACING_FLOOR_M, 10)
+    })
+
+    it('never rises with distance, and never leaves the two bounds', () => {
+      let previous = Infinity
+      for (let d = 0; d <= TRAFFIC_DENSITY_RAMP_M * 2; d += 250) {
+        const spacing = trafficSpacingAt(d)
+        expect(spacing, `${d} m must not be busier-then-emptier`).toBeLessThanOrEqual(previous)
+        expect(spacing, `${d} m below floor`).toBeGreaterThanOrEqual(TRAFFIC_SPACING_FLOOR_M)
+        expect(spacing, `${d} m above start`).toBeLessThanOrEqual(TRAFFIC_SPACING_M)
+        previous = spacing
+      }
+    })
+  })
+
+  describe('on a driven run', () => {
+    const PLAYER_KPH = 45
+    const STEP_MS = 100
+    const LONG_RUN_M = 20_000
+
+    /** Every spawn point the run produced, in road order. */
+    function spawnPoints(seed: number, runM: number): { at: number, dir: string }[] {
+      resetTraffic(seed)
+      const seen = new Map<number, string>()
+      let dist = 0
+      while (dist < runM) {
+        tickTraffic(dist, 0, PLAYER_KPH, STEP_MS)
+        dist += (PLAYER_KPH / 3.6) * (STEP_MS / 1000)
+        for (const v of getVisibleTraffic(dist, 600)) {
+          if (!seen.has(v.spawnDist)) seen.set(v.spawnDist, v.dir)
+        }
+      }
+      return [...seen.entries()].sort((a, b) => a[0] - b[0]).map(e => ({ at: e[0], dir: e[1]! }))
+    }
+
+    /** Mean gap between consecutive spawn points inside one band of the run. */
+    function meanGapIn(
+      points: readonly { at: number }[], fromM: number, toM: number,
+    ): number {
+      const band = points.filter(p => p.at >= fromM && p.at < toM)
+      if (band.length < 2) return 0
+      let sum = 0
+      for (let i = 1; i < band.length; i++) sum += band[i]!.at - band[i - 1]!.at
+      return sum / (band.length - 1)
+    }
+
+    it('prints how the road fills up over a long run', () => {
+      const points = spawnPoints(42, LONG_RUN_M)
+      const lines = ['  band        spawns   mean gap   law says']
+      for (let from = 0; from < LONG_RUN_M; from += 5000) {
+        const to = from + 5000
+        const band = points.filter(p => p.at >= from && p.at < to)
+        lines.push(
+          `  ${`${from / 1000}-${to / 1000} km`.padEnd(11)}`
+          + ` ${String(band.length).padStart(6)}`
+          + ` ${`${meanGapIn(points, from, to).toFixed(0)} m`.padStart(10)}`
+          + ` ${`${trafficSpacingAt((from + to) / 2).toFixed(0)} m`.padStart(10)}`,
+        )
+      }
+      console.log(`\n═══ Spawn density over ${LONG_RUN_M / 1000} km, seed 42 ═══\n${lines.join('\n')}`)
+      expect(points.length).toBeGreaterThan(0)
+    })
+
+    it('spawns markedly more often late in a run than at its start', () => {
+      // The feature, stated as the thing a player would notice. Compared over
+      // 5 km bands rather than at two points, because jitter is +-40% and two
+      // samples would be measuring the dice.
+      for (const seed of [42, 1_443_866, 7]) {
+        const points = spawnPoints(seed, LONG_RUN_M)
+        const early = meanGapIn(points, 0, 5000)
+        const late = meanGapIn(points, 15_000, 20_000)
+        expect(late, `seed ${seed}: late gap ${late.toFixed(0)} m vs early ${early.toFixed(0)} m`)
+          .toBeLessThan(early * 0.75)
+      }
+    })
+
+    it('holds the mean spawn gap at the floor once the ramp is spent', () => {
+      // The floor is a promise about **density**, not about any one pair, and
+      // the difference is not pedantry -- see the next test for what bounds an
+      // individual gap and why it is a different number.
+      const slack = 1 + TRAFFIC_SPACING_JITTER / 2
+      for (const seed of [42, 1_443_866, 534_501]) {
+        const mean = meanGapIn(spawnPoints(seed, LONG_RUN_M), TRAFFIC_DENSITY_RAMP_M, LONG_RUN_M)
+        expect(mean, `seed ${seed} mean gap past the ramp`)
+          .toBeLessThanOrEqual(TRAFFIC_SPACING_FLOOR_M * slack)
+        expect(mean, `seed ${seed} mean gap past the ramp`)
+          .toBeGreaterThan(TRAFFIC_SPACING_FLOOR_M * 0.5)
+      }
+    })
+
+    it('still never draws two same-direction vehicles through each other, at the floor', () => {
+      // The same guarantee `traffic density, measured` holds over 5 km, re-run
+      // where it is actually under pressure: past the ramp the spawner is
+      // asking for a vehicle every 75 m instead of every 220, so
+      // `TRAFFIC_MIN_SPAWN_GAP_M` fires far more often than it ever has.
+      //
+      // ── Measured on positions, never on spawn points ───────────────────────
+      // A first attempt asserted this on consecutive `spawnDist` values and was
+      // wrong twice over. Two same-direction spawn points came out 2.76 m apart
+      // on seed 534501, and nothing is broken: the guard compares a new spawn
+      // against where existing vehicles **are now**, and a same-direction car
+      // drives, so by the time the next one spawns the first has left the spot.
+      // Spawn-point proximity is not a fact about the road. What the player can
+      // see is where the vehicles are, which is what this measures.
+      let worst = Infinity
+      for (const seed of [42, 1_443_866, 534_501]) {
+        resetTraffic(seed)
+        let dist = 0
+        while (dist < LONG_RUN_M) {
+          tickTraffic(dist, 0, PLAYER_KPH, STEP_MS)
+          dist += (PLAYER_KPH / 3.6) * (STEP_MS / 1000)
+          const same = getVisibleTraffic(dist, 600)
+            .filter(v => v.dir === 'same')
+            .slice()
+            .sort((a, b) => a.distM - b.distM)
+          for (let i = 1; i < same.length; i++) {
+            const gap = same[i]!.distM - same[i - 1]!.distM
+            if (gap < worst) worst = gap
+          }
+        }
+      }
+      console.log(`\nClosest two same-direction vehicles over ${LONG_RUN_M / 1000} km`
+        + ` at the density floor: ${worst.toFixed(2)} m`
+        + ` (a vehicle is ${TRAFFIC_COLLISION_DEPTH_M} m of road)`)
+
+      // ── The bound is one vehicle length, not two, and that is a finding ────
+      // Over 5 km the closest pair is 20.3 m and the 5 km test asserts twice a
+      // vehicle length. At the floor it is **8.03 m** -- about two metres of
+      // clear road between two 6 m vehicles. They never draw through each
+      // other, which is the guarantee that matters and the defect
+      // `TRAFFIC_MIN_SPAWN_GAP_M` was added to fix. But it is tighter than
+      // `TRAFFIC_MIN_FOLLOW_GAP_M` (10 m), which is the following model's own
+      // idea of the closest a driver will ever get, so at the floor the spawner
+      // is handing the driver a gap it would not choose.
+      //
+      // Left as measured rather than tuned: it is a difficulty question about
+      // what a dense queue should look like, and the dial is
+      // `TRAFFIC_MIN_SPAWN_GAP_M`, already in config. Fox's after a playtest.
+      expect(worst).toBeGreaterThan(TRAFFIC_COLLISION_DEPTH_M)
+    })
+
+    it('is identical on two runs of the same seed, over the whole ramp', () => {
+      // The determinism rule, asserted on the longest run the game can produce
+      // rather than on the first few hundred metres. `trafficSpacingAt` reads
+      // the spawn point, so the spacing is itself part of the recurrence -- if
+      // anything in it ever reached for wall-clock time, a frame counter or a
+      // player input, this is what would catch it.
+      const signature = (seed: number): string => {
+        resetTraffic(seed)
+        let dist = 0
+        const out: string[] = []
+        while (dist < LONG_RUN_M) {
+          tickTraffic(dist, 0, PLAYER_KPH, STEP_MS)
+          dist += (PLAYER_KPH / 3.6) * (STEP_MS / 1000)
+          for (const v of getVisibleTraffic(dist, 600)) {
+            out.push(`${v.spawnDist.toFixed(3)}:${v.dir}:${v.type}:${v.speed.toFixed(3)}`)
+          }
+        }
+        return out.join('|')
+      }
+      expect(signature(1_443_866)).toBe(signature(1_443_866))
+      expect(signature(42)).not.toBe(signature(1_443_866))
+    })
+
+    it('keeps the roll sequence keyed on the spawn index, not on the distance', () => {
+      // The lock this feature makes tempting to break, in two ways at once.
+      //
+      // Every roll is `hash(idx * k + c + seed)` where `idx` is `_vehicles.length`
+      // and the array is **never pruned**. Denser traffic makes dropping `gone`
+      // vehicles look like an optimisation -- it would restart the counter and
+      // two runs of one seed would stop agreeing. And re-keying any roll off the
+      // spawn distance, which now moves, would reshuffle every vehicle on every
+      // seed. Either shows up here as a different sequence of types.
+      //
+      // A golden list rather than a recomputation: recomputing `hash()` in the
+      // test would only assert that the implementation equals itself.
+      //
+      // ── What this list is not ─────────────────────────────────────────────
+      // It is **not** the sequence the flat-220 m spawner produced. It was,
+      // while the spacing law was the only change — the rolls are keyed on the
+      // index, so moving the spawn points moved nothing about what a vehicle
+      // *is*. The warm-up then changed it for a different and legitimate
+      // reason: the player no longer meets vehicles in spawn order, because the
+      // road already has history and the oncoming ones from it have gone past
+      // before the first frame. Every entry here is same-direction for exactly
+      // that reason.
+      //
+      // What it still locks is the invariant that matters: pruning `_vehicles`
+      // would restart `idx`, and re-keying a roll off the spawn distance would
+      // reshuffle every seed. Either rewrites this line.
+      resetTraffic(42)
+      let dist = 0
+      const seen = new Map<number, string>()
+      while (dist < 4000) {
+        tickTraffic(dist, 0, PLAYER_KPH, STEP_MS)
+        dist += (PLAYER_KPH / 3.6) * (STEP_MS / 1000)
+        for (const v of getVisibleTraffic(dist, 600)) {
+          if (!seen.has(v.spawnDist)) seen.set(v.spawnDist, `${v.dir[0]}${v.type[0]}`)
+        }
+      }
+      const order = [...seen.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1])
+      expect(order.slice(0, 12).join(' ')).toBe(
+        'sc sm sm sc sc sm sc sc sb sm sm sc',
+      )
+    })
   })
 })
 

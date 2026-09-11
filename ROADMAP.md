@@ -37,6 +37,13 @@ holding one drawing too long.
 **Cab articulation and load** — the joint is driven by lateral velocity rather than by the arrow
 key, so the intermediate poses are real, and the three mass multipliers finally reach the steering.
 
+**Traffic density that grows with the run** — spacing falls linearly from its starting value to a
+floor as total distance travelled rises, across deliveries rather than resetting at each. The shape
+is one pure function and its numbers are config levers; setting the floor equal to the start
+switches the whole thing off. The road is also given a history before the first frame, because
+otherwise the first overtake was structurally impossible before about 3 km. Surface speed limits
+are per vehicle type, so a bus is held by its mass on ice and by its axle load on sand.
+
 **A debug overlay on `O`** — `off → stats → collision`, in four corners. The route corner leads
 with the seed, so a bug report is reproducible from one number; the load corner carries the worst
 one per cent over 600 frames rather than the frame you happened to sample; collision mode draws
@@ -48,8 +55,11 @@ one per cent over 600 frames rather than the frame you happened to sample; colli
   which is the "jumpy" the owner reported. Authoring work, and it does not touch the
   no-rotated-sprites rule — but collision masks are cab × trailer combinations, so nine poses is
   81 masks. Check the cache and the module load time first.
-- **Traffic density that scales with distance travelled.** Traffic is the difficulty, by the
-  owner's own verdict, and `TRAFFIC_SPACING_M` is a flat constant.
+- **A playtest of the density ramp and the per-type surface speeds.** The road now fills up as a
+  run goes on, starts with traffic already on it, and a bus is much slower than a car on ice and
+  slower still on sand. Two things want a verdict rather than a measurement: whether a car on ice
+  at 30 km/h should be nearer the 35-40 originally asked for, which trades against how early the
+  brake lights warn; and whether one run in three opening with an empty view is too many.
 - **A local best per route.** Nothing stores a score against a seed, so the daily route cannot be
   beaten. The save profile already exists.
 - **Canisters placed where a detour costs something.** Below 87 km/h the road hands out more fuel
