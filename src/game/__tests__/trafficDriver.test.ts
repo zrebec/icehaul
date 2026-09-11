@@ -15,13 +15,15 @@ import {
 import type { RoadSampler } from '../safespeed.ts'
 import {
   SURFACE_GRIP, type Surface,
-  TRAFFIC_SAME_SPEED, TRAFFIC_SURFACE_MAX_KPH, TRAFFIC_CAUTION_RANGE,
+  TRAFFIC_SAME_SPEED, TRAFFIC_SURFACE_MAX_KPH, TRAFFIC_SURFACE_PACE_PCT, TRAFFIC_CAUTION_RANGE,
   TRAFFIC_BRAKE_LAMP_MIN_KMH_S, TRAFFIC_MIN_FOLLOW_GAP_M,
 } from '../../config.ts'
+import type { VehicleType } from '../traffic.ts'
 
 const SURFACES: readonly Surface[] = ['asphalt', 'snow', 'ice', 'sand', 'mud']
+const TYPES: readonly VehicleType[] = ['mini', 'car', 'bus']
 const CRUISE = TRAFFIC_SAME_SPEED[1]          // 55 — the fleet's quickest
-const NORMAL: DriverTraits = { caution: 1, vigour: 1 }
+const NORMAL: DriverTraits = { caution: 1, vigour: 1, type: 'car' }
 
 /** A road with no surprises — every sample identical. */
 function flatRoad(surface: Surface, curvature = 0): RoadSampler {
@@ -47,7 +49,7 @@ function roadWithIce(iceFrom: number, iceTo: number): RoadSampler {
 describe('roadLimitKph', () => {
   it('asks for less speed the sharper the bend, on every surface', () => {
     for (const s of SURFACES) {
-      const limits = [0.4, 1.0, 1.5, 2.0].map(c => roadLimitKph(flatRoad(s, c), 0, CRUISE, 1))
+      const limits = [0.4, 1.0, 1.5, 2.0].map(c => roadLimitKph(flatRoad(s, c), 0, CRUISE, 1, 'car'))
       for (let i = 1; i < limits.length; i++) {
         expect(limits[i]!, `${s} at increasing curvature`).toBeLessThanOrEqual(limits[i - 1]!)
       }
@@ -55,7 +57,7 @@ describe('roadLimitKph', () => {
   })
 
   it('asks for less speed the worse the grip, at one bend', () => {
-    const at = (s: Surface) => roadLimitKph(flatRoad(s, 2.0), 0, CRUISE, 1)
+    const at = (s: Surface) => roadLimitKph(flatRoad(s, 2.0), 0, CRUISE, 1, 'car')
     expect(at('asphalt')).toBeGreaterThan(at('snow'))
     expect(at('snow')).toBeGreaterThan(at('ice'))
   })
@@ -64,24 +66,77 @@ describe('roadLimitKph', () => {
     // The whole reason TRAFFIC_CORNER_COMFORT_PCT exists is that the physics
     // limit is far above cruise. At curvature 1.0 even the comfort speed is, so
     // a bend that earns a chevron in the HUD is not automatically a brake light.
-    expect(roadLimitKph(flatRoad('asphalt', 1.0), 0, CRUISE, 1)).toBeGreaterThanOrEqual(CRUISE)
+    expect(roadLimitKph(flatRoad('asphalt', 1.0), 0, CRUISE, 1, 'car')).toBeGreaterThanOrEqual(CRUISE)
   })
 
   it('bites on the sharpest asphalt bend, and only for the quicker half of the fleet', () => {
-    const limit = roadLimitKph(flatRoad('asphalt', 2.0), 0, CRUISE, 1)
+    const limit = roadLimitKph(flatRoad('asphalt', 2.0), 0, CRUISE, 1, 'car')
     expect(limit).toBeLessThan(TRAFFIC_SAME_SPEED[1])   // the quick ones brake
     expect(limit).toBeGreaterThan(TRAFFIC_SAME_SPEED[0]) // the slow ones do not
   })
 
   it('caps a straight piece of ice, which the cornering law cannot', () => {
     // A straight has no lateral demand, so the friction circle happily allows
-    // 55 km/h on bare ice. This is the cap that says no.
-    expect(roadLimitKph(flatRoad('ice', 0), 0, CRUISE, 1)).toBe(TRAFFIC_SURFACE_MAX_KPH.ice)
+    // 55 km/h on bare ice. Two rules say no, and the test says which: the cap
+    // is per type, and a share of cruise applies to everyone. Whichever asks
+    // for less wins, so the assertion is the minimum rather than the cap —
+    // for a quick car the pace term is what actually binds.
+    for (const type of TYPES) {
+      const cap = TRAFFIC_SURFACE_MAX_KPH.ice[type]!
+      const paced = CRUISE * TRAFFIC_SURFACE_PACE_PCT.ice
+      expect(roadLimitKph(flatRoad('ice', 0), 0, CRUISE, 1, type), type)
+        .toBeCloseTo(Math.min(cap, paced), 6)
+    }
+  })
+
+  it('puts a bus below a mini below a car on every surface that bites', () => {
+    // Fox's brief, as a property rather than as six numbers: a bus on ice is
+    // held by its mass and on sand by its axle load, and neither is something a
+    // driver can be brave about. Asphalt is deliberately exempt — nothing there
+    // slows anyone but the bend and the vehicle in front.
+    for (const surface of SURFACES) {
+      const at = (type: VehicleType) => roadLimitKph(flatRoad(surface, 0), 0, CRUISE, 1, type)
+      if (surface === 'asphalt') {
+        expect(at('bus'), 'asphalt must not sort by type').toBe(at('car'))
+        continue
+      }
+      expect(at('bus'), `${surface}: bus under mini`).toBeLessThan(at('mini'))
+      expect(at('mini'), `${surface}: mini under car`).toBeLessThanOrEqual(at('car'))
+    }
+  })
+
+  it('holds the bus lowest of all on sand, because that is bogging not caution', () => {
+    // The one place the ordering is not merely "a bus is slower": sand is the
+    // worst surface in the game for a bus and worse for it than ice, which is
+    // not true of any other vehicle. Two different physical reasons, two
+    // different numbers — the whole argument for a two-dimensional table.
+    const busOn = (s: Surface) => roadLimitKph(flatRoad(s, 0), 0, CRUISE, 1, 'bus')
+    for (const s of SURFACES) {
+      if (s === 'sand') continue
+      expect(busOn('sand'), `sand must be the bus's worst, against ${s}`).toBeLessThan(busOn(s))
+    }
+    const carOn = (s: Surface) => roadLimitKph(flatRoad(s, 0), 0, CRUISE, 1, 'car')
+    expect(carOn('sand'), 'a car is not bogged the way a bus is').toBeGreaterThan(carOn('ice'))
+  })
+
+  it('prints what each type actually holds on each surface', () => {
+    // The cap is only half the rule and the pace share is the other half, so
+    // the table nobody can read off the config is the one that matters. These
+    // are the numbers to tune against Fox's brief.
+    const lines = [`  cruise ${CRUISE} km/h, straight, caution 1`]
+    lines.push(`  ${'surface'.padEnd(9)}${'mini'.padStart(7)}${'car'.padStart(7)}${'bus'.padStart(7)}`)
+    for (const surface of SURFACES) {
+      const cell = (t: VehicleType) =>
+        roadLimitKph(flatRoad(surface, 0), 0, CRUISE, 1, t).toFixed(1).padStart(7)
+      lines.push(`  ${surface.padEnd(9)}${cell('mini')}${cell('car')}${cell('bus')}`)
+    }
+    console.log(`\n${lines.join('\n')}`)
+    expect(true).toBe(true)
   })
 
   it('never returns more than the vehicle wanted in the first place', () => {
     for (const s of SURFACES) {
-      expect(roadLimitKph(flatRoad(s, 0), 0, 30, 1)).toBeLessThanOrEqual(30)
+      expect(roadLimitKph(flatRoad(s, 0), 0, 30, 1, 'car')).toBeLessThanOrEqual(30)
     }
   })
 })
@@ -92,7 +147,7 @@ describe('roadTargetKph', () => {
   it('is just the limit on a road that never changes', () => {
     const road = flatRoad('ice', 0)
     expect(roadTargetKph(road, 0, CRUISE, CRUISE, NORMAL))
-      .toBeCloseTo(roadLimitKph(road, 0, CRUISE, 1), 6)
+      .toBeCloseTo(roadLimitKph(road, 0, CRUISE, 1, 'car'), 6)
   })
 
   it('starts slowing BEFORE the ice, not on it', () => {
@@ -102,7 +157,7 @@ describe('roadTargetKph', () => {
     const at = (d: number) => roadTargetKph(road, d, CRUISE, CRUISE, NORMAL)
 
     expect(at(200), 'at the ice it is already down to the ice speed')
-      .toBeLessThanOrEqual(TRAFFIC_SURFACE_MAX_KPH.ice! + 0.01)
+      .toBeLessThanOrEqual(TRAFFIC_SURFACE_MAX_KPH.ice.car! + 0.01)
     expect(at(180), 'twenty metres out it is well into braking').toBeLessThan(CRUISE - 5)
     expect(at(100), 'a hundred metres out there is nothing to do yet').toBe(CRUISE)
   })
@@ -110,8 +165,8 @@ describe('roadTargetKph', () => {
   it('a cautious driver brakes earlier and to a lower speed than a bold one', () => {
     // Two cars meeting one hazard must not look like one decision.
     const road = roadWithIce(200, 400)
-    const bold = roadTargetKph(road, 175, CRUISE, CRUISE, { caution: TRAFFIC_CAUTION_RANGE[0], vigour: 1 })
-    const careful = roadTargetKph(road, 175, CRUISE, CRUISE, { caution: TRAFFIC_CAUTION_RANGE[1], vigour: 1 })
+    const bold = roadTargetKph(road, 175, CRUISE, CRUISE, { caution: TRAFFIC_CAUTION_RANGE[0], vigour: 1, type: 'car' })
+    const careful = roadTargetKph(road, 175, CRUISE, CRUISE, { caution: TRAFFIC_CAUTION_RANGE[1], vigour: 1, type: 'car' })
     expect(careful).toBeLessThan(bold)
   })
 
@@ -196,7 +251,7 @@ describe('chooseTargetKph', () => {
 
 describe('stepSpeed', () => {
   it('never undershoots the target', () => {
-    const step = stepSpeed(55, 30, 55, { caution: 1, vigour: 5 }, 5000)
+    const step = stepSpeed(55, 30, 55, { caution: 1, vigour: 5, type: 'car' }, 5000)
     expect(step.speedKph).toBe(30)
   })
 
@@ -223,8 +278,8 @@ describe('stepSpeed', () => {
   })
 
   it('a vigorous driver sheds more in the same tick than a timid one', () => {
-    const timid = stepSpeed(55, 30, 55, { caution: 1, vigour: 0.85 }, 100).speedKph
-    const keen = stepSpeed(55, 30, 55, { caution: 1, vigour: 1.2 }, 100).speedKph
+    const timid = stepSpeed(55, 30, 55, { caution: 1, vigour: 0.85, type: 'car' }, 100).speedKph
+    const keen = stepSpeed(55, 30, 55, { caution: 1, vigour: 1.2, type: 'car' }, 100).speedKph
     expect(keen).toBeLessThan(timid)
   })
 

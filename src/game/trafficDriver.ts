@@ -22,6 +22,7 @@
  */
 
 import { corneringSpeedKph, type RoadSampler } from './safespeed.ts'
+import type { VehicleType } from './traffic.ts'
 import {
   TRAFFIC_ACCEL_KMH_S,
   TRAFFIC_BRAKE_LAMP_MIN_KMH_S, TRAFFIC_BRAKE_MAX_KMH_S, TRAFFIC_BRAKE_MIN_KMH_S,
@@ -45,6 +46,15 @@ export interface DriverTraits {
   caution: number
   /** Above 1 leans harder on the pedal once the decision is made. */
   vigour: number
+  /**
+   * What is being driven, because half of this decision is the machine.
+   *
+   * A bus on sand is not a cautious driver, it is axle load — the engine will
+   * not pull it past a crawl however brave the person at the wheel is. Keeping
+   * the type here rather than as a fourth argument means `DrivenVehicle`
+   * already satisfies this interface and no call site has to thread it through.
+   */
+  type: VehicleType
 }
 
 /** Something in the way: another vehicle, or the player. Same problem twice. */
@@ -78,6 +88,7 @@ export function roadLimitKph(
   distM: number,
   cruiseKph: number,
   caution: number,
+  type: VehicleType,
 ): number {
   const c = Math.max(0.01, caution)
   const physical = corneringSpeedKph(road.curvatureAt(distM), road.gripAt(distM))
@@ -89,7 +100,7 @@ export function roadLimitKph(
   // pace") only slows them in proportion. Together they mean a 30 km/h car and a
   // 55 km/h car both brake for the same snow, by different amounts.
   const surface = road.surfaceAt(distM)
-  const surfaceCap = TRAFFIC_SURFACE_MAX_KPH[surface]
+  const surfaceCap = TRAFFIC_SURFACE_MAX_KPH[surface][type]
   if (surfaceCap !== null) limit = Math.min(limit, surfaceCap / c)
   limit = Math.min(limit, cruiseKph * TRAFFIC_SURFACE_PACE_PCT[surface] / c)
 
@@ -126,7 +137,7 @@ export function roadTargetKph(
 
   for (let i = 0; i <= steps; i++) {
     const d = horizonM * (i / steps)
-    const limitMs = roadLimitKph(road, distM + d, cruiseKph, traits.caution) * KPH_TO_MS
+    const limitMs = roadLimitKph(road, distM + d, cruiseKph, traits.caution, traits.type) * KPH_TO_MS
     // v² = u² + 2as, solved for what I may be doing now and still be down to
     // `limit` in `d` metres at the deceleration this driver plans with.
     const reachableKph = Math.sqrt(limitMs * limitMs + 2 * planDecelMs2 * d) / KPH_TO_MS
@@ -147,7 +158,18 @@ export function roadTargetKph(
  */
 export function followTargetKph(gapM: number, ownSpeed: number, leadSpeed: number): number {
   if (gapM <= 0) return Number.POSITIVE_INFINITY          // behind me; not my problem
-  if (ownSpeed <= leadSpeed) return Number.POSITIVE_INFINITY  // not closing
+
+  // "Not closing" is only a reason to stop caring while there is still a gap to
+  // keep. Inside `TRAFFIC_MIN_FOLLOW_GAP_M` it is the opposite: a follower that
+  // has just matched its leader's speed at four metres will hold four metres for
+  // ever, because nothing below is ever reached. That is the same defect the
+  // `room` term was added to fix, arriving through the door in front of it —
+  // and it stayed invisible while spacing was a flat 220 m, because gaps that
+  // tight did not occur. Denser traffic made it routine: at a 75 m floor the
+  // closest same-direction pair was 3.3 m, on a road where a vehicle is 6 m.
+  if (ownSpeed <= leadSpeed && gapM >= TRAFFIC_MIN_FOLLOW_GAP_M) {
+    return Number.POSITIVE_INFINITY
+  }
 
   const closingMs = (ownSpeed - leadSpeed) * KPH_TO_MS
   const desiredGapM = TRAFFIC_MIN_FOLLOW_GAP_M + ownSpeed * KPH_TO_MS * TRAFFIC_FOLLOW_TIME_S

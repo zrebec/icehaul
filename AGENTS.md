@@ -108,14 +108,13 @@ Open:
    Note `docs/smerovanie.sk.md` says the opposite ("the problem is not the number of sprites but
    what drives the joint"); that was written **before #63**, which put the joint on lateral
    velocity, so pose count is genuinely the ceiling now.
-2. **Traffic density scaling with distance** — Fox's, from the 0.8.2 playtest (§2½).
-   `TRAFFIC_SPACING_M` is the lever; a distance term goes in `game/traffic.ts` where spacing is
-   drawn. **Now more valuable than when it was written:** traffic has behaviour worth seeing more
-   of, and a queue that forms behind a braking vehicle is a decision the player has to make rather
-   than scenery. The gate this sat behind — *"redraw first, then raise the density"* — is **open**:
-   the bus reads as a bus (#72) and the two views are two drawings (#74). What is still true is
-   that the drawings are generated rather than cut, which is a different objection from the one
-   that set the gate.
+2. ~~**Traffic density scaling with distance**~~ **Done 2026-09-04**, ahead of the truck's poses at
+   Fox's request. Linear from 220 m to a 75 m floor over 15 km, measured on the whole run across
+   deliveries, density only. Numbers, the three things its tests found, and what it did to the
+   brake lights are under "What the density ramp landed as" below. **It wants a playtest before
+   anything else is tuned** — 8.03 m between two same-direction vehicles at the floor is the one
+   number that might be too tight, and follow-braking crowding out surface-braking is the one
+   behaviour nobody predicted.
 3. **Local best-per-route.** Nothing stores a score against a seed, so a daily route cannot be
    beaten — which is the whole point of a daily route. The results screen already names the route
    (#61) and `game/prefs.ts` already owns a zx-kit save profile. Half of proposal 4 below, and the
@@ -792,8 +791,156 @@ Two things follow, and both are decisions rather than observations:
   sprite-or-polygon decision) because more traffic means seeing the same six drawings more often,
   which raises the cost of them being wrong. So: **redraw first, then raise the density.**
 
-Recorded as a decision by Fox, not yet implemented. `TRAFFIC_SPACING_M` is the lever; a distance
-term would go in `game/traffic.ts` where spacing is drawn.
+**Implemented 2026-09-04** — see "What the density ramp landed as" below.
+
+#### 2¾ · What the density ramp landed as — 2026-09-04
+
+Fox's decisions, taken before any code: **linear** to a floor, floor at **75 m** (threefold),
+measured on the **whole run** across deliveries, **density only** — the direction split stays where
+it is. Then a playtest rejected the first attempt, and everything below the first table is what that
+rejection turned up.
+
+The law is `trafficSpacingAt()` in `game/traffic.ts`, and the shape lives in that one function on
+purpose: every number is a config lever, so swapping linear for something asymptotic later is an
+edit in one place. **Setting the floor equal to the start turns the feature off** and restores flat
+density exactly — the same discipline `GEARS[].maxSpeedToShift: null` uses to drop the synchro.
+
+    band        spawns   mean gap   law says          (seed 42, 20 km)
+    0-5 km          33      150 m      148 m
+    5-10 km         59       85 m       75 m
+    10-15 km        67       75 m       75 m
+    15-20 km        67       73 m       75 m
+
+##### The first attempt shipped a ramp that did nothing where the game is played
+
+Fox drove 2.8 km of the daily route and passed **no vehicle at all**. He was right, and the first
+thing to establish is that it was not a regression: run for run, the old flat-220 m spawner produces
+the same eight oncoming vehicles and the same zero same-direction ones over those 3 km.
+
+**The ramp was mis-scaled, and that was a plain mistake.** It was set to 15 km against legs of
+5-8 km, so over a first leg the spacing moved 220 → 191, a 13 % change. The justification written
+at the time — *"the ramp covers the whole realistic run"* — was an argument against itself. It is
+now **5 km, one leg**, so the floor is reached by the first drop-off.
+
+##### The empty opening was older, and no density constant could have fixed it
+
+Measuring spawns was measuring the wrong thing. What a driver calls traffic is **overtakes**:
+
+| | overtakes per 5 km | by km 0..4 | frames with a car ahead |
+|---|---:|---|---:|
+| daily, before | 2 | 0 0 0 0 2 | 19.1 % |
+| seed 42, before | 2 | 0 0 0 0 2 | 26.7 % |
+| daily, after | **9** | 0 0 4 0 5 | **53.8 %** |
+| seed 42, after | **11** | 0 1 1 5 4 | **65.1 %** |
+
+**The first overtake was structurally impossible before about 2.5-3 km**, on every seed and at any
+density. Traffic spawns 500 m ahead; a same-direction vehicle is only ever met if it is slower than
+you; catching one at 45 against 30 km/h costs 1.5 km of driving; and `TRAFFIC_START_M` puts the
+first vehicle 800 m out before any of that begins. The direction hash was checked and cleared —
+54.91 % against a configured 55 %, and the first-same-direction index matches the ideal geometric
+distribution to two decimals. Today's route is a genuine 0.83 % unlucky draw, but seed 42 has a
+same-direction car at index 0 and still shows nothing for four kilometres, so the draw was never it.
+
+**The fix is to give the road a history rather than to place cars.** `warmUpTraffic()` drives the
+spawner from `-TRAFFIC_WARMUP_M` to zero before the first frame. Hand-placing vehicles near the
+player would need a rule about how fast they are, and any such rule loads the dice; simulating needs
+no rule, because during a run the population around the player is *already* biased slow — the quick
+ones have driven away and the slow ones have been caught. At distance zero no such selection has
+happened, which is the entire defect. Over 30 seeds it is worth 3.03 overtakes in the first 2 km
+against none, and 11.03 over 5 km.
+
+**One number left on the table, deliberately.** 33 % of runs still open with nothing in view, which
+is what a 220 m starting spacing means — about one vehicle per 220 m of sight. `TRAFFIC_SPACING_M`
+160 would take it to 23 % and 130 to 20 %, but lowering the start also shrinks the threefold growth
+Fox chose, so it stays where it is and the number is recorded instead.
+
+##### Density found a real bug in car-following, and it had been there all along
+
+At the 75 m floor the closest two same-direction vehicles came within **3.33 m**, on a road where a
+vehicle is 6 m — the "traffic drawn through itself" defect this file records as closed, returning.
+It was not the warm-up: with the warm-up on and the ramp off the worst is 21.8 m, and with the
+ramp on and the warm-up off it is 3.6 m. Density alone.
+
+The cause is one line in `followTargetKph`:
+
+    if (ownSpeed <= leadSpeed) return Number.POSITIVE_INFINITY  // not closing
+
+**A follower stops keeping its distance the moment it is no longer faster than its leader.** So a
+pair that has closed to four metres and matched speeds holds four metres for ever — which is exactly
+the defect the `room` term three lines below was added to fix, arriving through the door in front of
+it, and whose own comment records an earlier measurement of 1.6 m. It stayed invisible while spacing
+was a flat 220 m because gaps that tight did not occur. The guard now yields only while there is
+still a gap to keep:
+
+    if (ownSpeed <= leadSpeed && gapM >= TRAFFIC_MIN_FOLLOW_GAP_M) return Infinity
+
+Worst same-direction gap over 20 km: **3.33 m → 9.81 m**. The change is a no-op wherever the gap is
+healthy, which is everywhere the old spacing put it.
+
+**An earlier version of this section called 8.03 m "tight but acceptable" and left it.** That was
+wrong twice: the number was already the same defect in a milder form, and it was rationalised rather
+than chased. A measurement trending toward something this file records as fixed is a lead, not a
+footnote.
+
+##### Speed is now a property of the vehicle, not only of the driver
+
+Fox's, after the same playtest: *"autobus na ľade bude pomalší, možno tak 15–20 km/h, ako osobné
+auto, ktoré pôjde 35–40, a mini bude niekde medzi tým. Rovnako na dust sa autobus bude mať väčšiu
+tendenciu zabárať."*
+
+`TRAFFIC_SURFACE_MAX_KPH` is now **surface × type** rather than one number per surface, and the two
+dimensions are not decoration: a bus is held on ice by its **mass** and on sand by its **axle
+load**, which are different physical reasons and give different numbers. Sand is the bus's worst
+surface in the game and worse for it than ice, which is true of no other vehicle — a single
+per-type multiplier could not have said that. `DriverTraits` gained the vehicle type, because half
+of this decision is the machine and `DrivenVehicle` already satisfies the wider interface, so no
+call site had to thread it through.
+
+What each type actually holds, straight road, cruise 55, caution 1:
+
+| | mini | car | bus |
+|---|---:|---:|---:|
+| asphalt | 55.0 | 55.0 | 55.0 |
+| snow | 38.0 | 42.9 | 26.0 |
+| ice | 26.0 | 30.3 | **17.0** |
+| sand | 30.0 | 38.0 | **12.0** |
+| mud | 28.0 | 36.0 | 15.0 |
+
+**One cell misses the brief and the reason is worth knowing before it gets "fixed".** A car on ice
+comes out at 30.3, not the 35-40 asked for, because the binding rule is not the cap — it is
+`TRAFFIC_SURFACE_PACE_PCT.ice = 0.55` against a cruise of 55. Reaching 35 would need that share at
+0.64, and for a *typical* car cruising 42 it would need about 0.85, which is close to switching ice
+braking off. That share exists because of a measurement recorded above: with an absolute cap alone
+only 40 % of the fleet had any reason to brake for snow, and the rest sailed on unchanged. So the
+ordering, the bus and the bogging are delivered; the absolute figure for cars on ice is a difficulty
+decision that trades against the warning the brake lights give, and it has not been taken.
+
+Anticipation was not touched and did not need to be: `roadTargetKph` already solves
+`v² = u² + 2as` backwards over its horizon, so a limit ahead reaches back as the braking distance it
+needs. Brake events over 5 km rose from 11-22 to **25-39**, with 10-17 of them tied to a surface
+change and lamps lit 14-52 m before it. Traffic cruise speeds now spread **20-55 km/h** against
+30-55, because the surface caps push the heavy types down — which is where most of the new
+overtaking comes from.
+
+##### Two things the tests found that were not the feature
+
+- **The overlap guard moves `at` but not `_nextSpawnDist`**, deliberately, so the rolls advance the
+  same amount whatever the guard did. Never written down before: a shoved vehicle can land *closer*
+  to the following spawn than the nominal spacing allows — 27.6 m against a 45 m floor. A bound on
+  consecutive `spawnDist` values is therefore not a fact about the road.
+- **Spawn-point proximity means nothing at all**, for a second reason: the guard compares against
+  where vehicles *are now*, and same-direction cars drive. Two spawn points came out 2.76 m apart on
+  534501 with nothing wrong. Measure positions, never spawn points.
+
+##### Determinism
+
+The rolls are keyed on the spawn index, never on the distance, so the spacing law alone moved no
+vehicle's identity — checked by running the golden sequence against both laws, which produced the
+same twelve entries. The warm-up then did change what the player meets, legitimately: the road has
+history, so the oncoming vehicles from it have gone past before the first frame. What the golden
+still locks is that pruning `_vehicles` would restart `idx` and re-keying a roll off the spawn
+distance would reshuffle every seed. Two runs of one seed are asserted identical over the full
+20 km ramp.
 
 #### 3 · Snow is too easy
 
