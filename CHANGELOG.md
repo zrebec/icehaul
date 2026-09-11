@@ -1,3 +1,10 @@
+# [0.25.0](https://github.com/zrebec/icehaul/compare/v0.24.0...v0.25.0) (2026-09-11)
+
+
+### Features
+
+* **traffic:** fill the road as the run goes on, and give it a history ([#79](https://github.com/zrebec/icehaul/issues/79)) ([c3ea2c0](https://github.com/zrebec/icehaul/commit/c3ea2c0fafbc47de16e3cd7c0da0d46c403fc82d))
+
 # [0.24.0](https://github.com/zrebec/icehaul/compare/v0.23.0...v0.24.0) (2026-09-01)
 
 
