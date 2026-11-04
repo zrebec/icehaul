@@ -505,8 +505,64 @@ export const DELIVERY_TIME_LIMIT_MS =
  * sekundu — to je zámer a to hovorí aj tá znelka pri odovzdaní.
  *
  * **Čo ale ostáva otvorené, je strop na banku:** nasporený čas sa kumuluje —
- * seed 42 dá 15,2 → 16,6 → 19,6 min do tretieho odovzdania. Zastropovať banku
+ * seed 42 dá víťaznej stratégii 2,7 → 6,9 → 9,0 min do tretieho odovzdania.
+ * (Staršie čísla 15,2 → 16,6 → 19,6 boli zle odmerané: zahŕňali aj celý
+ * rozpočet nasledujúcej etapy.) Zastropovať banku
  * necháva prenos štedrý a berie mu len to kumulovanie; znížiť tento podiel by trestalo
  * práve dobrého vodiča, čo je iná vec a Fox ju už raz zamietol.
  */
 export const DELIVERY_TIME_CARRY_PCT = 1.0
+
+// ── Leg by leg: each delivery asks a little more ─────────────────────────────
+
+/**
+ * How much {@link PLAN_SLACK} shrinks with each delivery.
+ *
+ * The first leg keeps the full slack; leg 2 is planned with 1.58, leg 3 with
+ * 1.56, and so on until {@link LEG_SLACK_MAX_CUT} stops it. One step takes
+ * about 1.25 % off a leg's budget — roughly eight seconds on a 6 km leg.
+ *
+ * Fox, 2026-11-04: fuel and time are both plentiful, and later legs should get
+ * harder in fine steps. Without this every leg was priced the same, so a run
+ * only ever got easier: the clock carries over in full and the bank grows.
+ *
+ * Measured over seven legs on the multi-leg seeds: 0.025 ended the reference
+ * `smart` driver on seed 42 after four deliveries and 0.015 after five, where
+ * without a ramp it finishes all seven (already 12 % over its own budget on
+ * leg 5). The fast drivers' results did not change at all — the clock is not
+ * what stops them.
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * O koľko sa {@link PLAN_SLACK} zmenší s každým odovzdaním.
+ *
+ * Prvá etapa má plnú rezervu, druhá 1,58, tretia 1,56 a tak ďalej, kým to
+ * nezastaví {@link LEG_SLACK_MAX_CUT}. Jeden krok zoberie etape asi 1,25 %
+ * času — zhruba osem sekúnd na 6 km.
+ *
+ * Rýchlym vodičom to nezmení nič, lebo ich nezastavujú hodiny. Pocíti to
+ * opatrný vodič, ktorý si dnes čas len šetrí.
+ *
+ * **↓ nižšie:** náročnosť rastie pomalšie; 0 vráti každú etapu na rezervu prvej.
+ * **↑ vyššie:** neskoršie etapy pritlačia skôr. Kalibračná tabuľka pri
+ * {@link PLAN_SLACK} hovorí, kde to prestane byť zábava.
+ */
+export const LEG_SLACK_STEP = 0.02
+
+/**
+ * The most {@link LEG_SLACK_STEP} may take off the slack in total.
+ *
+ * 0.15 stops the ramp at 1.45, reached on leg 9. The calibration table on
+ * `PLAN_SLACK` puts the edge for a careful driver near 1.4, so the floor stays
+ * above it: a late leg asks for a moderate driver, not for a perfect one.
+ *
+ * ── SK ────────────────────────────────────────────────────────────────────
+ * Koľko najviac smie {@link LEG_SLACK_STEP} z rezervy zobrať spolu.
+ *
+ * 0,15 zastaví rampu na 1,45, a to na 9. etape. Pod ~1,4 sa trasa stáva
+ * nedokončiteľnou pre opatrného vodiča, takže dno ostáva nad tým.
+ *
+ * **↓ nižšie:** rampa skončí skôr a ľahšie.
+ * **↑ vyššie:** rampa pokračuje dlhšie. Nad ~0,2 už neskoré etapy žiadajú viac,
+ * než opatrná jazda zvládne.
+ */
+export const LEG_SLACK_MAX_CUT = 0.15

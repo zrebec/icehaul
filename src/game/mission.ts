@@ -16,8 +16,9 @@
 
 import {
   FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE, DELIVERY_TIME_CARRY_PCT,
+  PLAN_SLACK, LEG_SLACK_STEP, LEG_SLACK_MAX_CUT,
 } from '../config.ts'
-import { planLeg, type RoadSampler } from './routeplan.ts'
+import { planLeg, type LegPlanOptions, type RoadSampler } from './routeplan.ts'
 
 function hash(n: number): number {
   let x = (n + 0x9E3779B9) | 0
@@ -55,8 +56,25 @@ export interface MissionState {
  * slow, and a route-aware one punishes being **cautious**. Ice legs get calmer,
  * asphalt legs get tense.
  */
-export function legBudgetMs(startM: number, endM: number, road: RoadSampler, firstLeg = false): number {
-  return Math.round(planLeg(startM, endM, road, { firstLeg }).budgetS * 1000)
+export function legBudgetMs(
+  startM: number,
+  endM: number,
+  road: RoadSampler,
+  opts: LegPlanOptions = {},
+): number {
+  return Math.round(planLeg(startM, endM, road, opts).budgetS * 1000)
+}
+
+/**
+ * The slack leg number `legIndex` is planned with (0 is the first leg).
+ *
+ * Each delivery takes {@link LEG_SLACK_STEP} off, until {@link LEG_SLACK_MAX_CUT}
+ * is used up. Written as a cut rather than as a floor so that lowering
+ * `PLAN_SLACK` can never make a later leg *easier* than the first.
+ */
+export function legSlack(legIndex: number): number {
+  const cut = Math.min(LEG_SLACK_MAX_CUT, LEG_SLACK_STEP * Math.max(0, legIndex))
+  return PLAN_SLACK - cut
 }
 
 /**
@@ -82,9 +100,9 @@ export function createMission(seed: number, road: RoadSampler): MissionState {
     seed,
     targetDist: FIRST_TARGET_DIST_M,
     legStartDist: 0,
-    timerMs: legBudgetMs(0, FIRST_TARGET_DIST_M, road, true),
+    timerMs: legBudgetMs(0, FIRST_TARGET_DIST_M, road, { firstLeg: true }),
     deliveryCount: 0,
-    lastBudgetMs: legBudgetMs(0, FIRST_TARGET_DIST_M, road, true),
+    lastBudgetMs: legBudgetMs(0, FIRST_TARGET_DIST_M, road, { firstLeg: true }),
   }
 }
 
@@ -117,7 +135,8 @@ export function deliverIfArrived(m: MissionState, distanceM: number, road: RoadS
   m.targetDist = m.targetDist + legLength
   // Planned once, here, and never again: the road ahead does not change under
   // the player, so a per-frame recomputation would be the same answer at a cost.
-  m.lastBudgetMs = legBudgetMs(m.legStartDist, m.targetDist, road)
+  // Each leg is planned a little tighter than the one before (`legSlack`).
+  m.lastBudgetMs = legBudgetMs(m.legStartDist, m.targetDist, road, { slack: legSlack(m.deliveryCount) })
   m.timerMs = carried + m.lastBudgetMs
   return true
 }

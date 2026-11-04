@@ -121,6 +121,15 @@ function profileTimeS(v: readonly number[], span: number): number {
   return t
 }
 
+/** What a leg is planned as, beyond the road itself. */
+export interface LegPlanOptions {
+  /** The first leg gets {@link PLAN_FIRST_LEG_BONUS_S} on top. */
+  firstLeg?: boolean
+  /** Multiplier on the ideal time; {@link PLAN_SLACK} unless the mission says
+   *  otherwise (later legs are planned tighter — see `legSlack`). */
+  slack?: number
+}
+
 /**
  * The budget for one leg.
  *
@@ -138,7 +147,7 @@ export function planLeg(
   startM: number,
   endM: number,
   road: RoadSampler,
-  opts: { firstLeg?: boolean } = {},
+  opts: LegPlanOptions = {},
 ): LegPlan {
   const lengthM = Math.max(0, endM - startM)
   const km = lengthM / 1000
@@ -147,7 +156,7 @@ export function planLeg(
   const expectedCanisters = lengthM / CANISTER_SPACING_M
   const canisterCreditS = expectedCanisters * CANISTER_TIME_BONUS_S * PLAN_EXPECTED_CANISTER_PCT
 
-  const raw = idealTimeS * PLAN_SLACK
+  const raw = idealTimeS * (opts.slack ?? PLAN_SLACK)
     + PLAN_START_ALLOWANCE_S
     + (opts.firstLeg ? PLAN_FIRST_LEG_BONUS_S : 0)
     + km * PLAN_TRAFFIC_ALLOWANCE_S_PER_KM

@@ -49,6 +49,18 @@ export function dailyRoadSeed(date: Date = new Date()): number {
 const MAX_SEED = 0xffff_ffff
 
 /**
+ * True for a value the road accepts as a seed: a whole number from 0 to the
+ * 32-bit ceiling. Shared by the URL parser and by anything read back from
+ * storage, which is the other place a seed arrives from outside the game.
+ */
+export function isRouteSeed(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isSafeInteger(value)
+    && value >= 0
+    && value <= MAX_SEED
+}
+
+/**
  * Resolve an optional decimal `?seed=` override, otherwise today's route.
  * Anything malformed — empty, negative, fractional, exponent notation, or past
  * the 32-bit ceiling — falls back to the daily seed rather than failing.
@@ -58,9 +70,7 @@ export function roadSeedFromSearch(search: string, date: Date = new Date()): num
   if (!raw || !/^\d+$/.test(raw)) return dailyRoadSeed(date)
 
   const parsed = Number(raw)
-  return Number.isSafeInteger(parsed) && parsed <= MAX_SEED
-    ? parsed
-    : dailyRoadSeed(date)
+  return isRouteSeed(parsed) ? parsed : dailyRoadSeed(date)
 }
 
 /** ROM-font-safe month names: the font is ASCII 32-127 and has no glyph above it. */

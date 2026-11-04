@@ -8,6 +8,17 @@ import {
 import { COLS, GAME_HEIGHT, GAME_WIDTH } from '../config.ts'
 import { averageSpeedKph, formatClock, type RunSummary } from '../game/runStats.ts'
 import { formatSeedRoute } from '../game/seed.ts'
+import type { RecordOutcome } from '../game/hiscore.ts'
+
+/**
+ * The line between the reason and the run's numbers: a new best, the best this
+ * run did not beat, or nothing at all before anything has been stored.
+ */
+export function bestLine(outcome: RecordOutcome): string | null {
+  if (outcome.newBest) return 'NEW BEST SCORE!'
+  if (!outcome.best) return null
+  return `BEST: ${outcome.best.score}  SEED ${outcome.best.seed}`
+}
 
 /**
  * The results screen.
@@ -16,11 +27,19 @@ import { formatSeedRoute } from '../game/seed.ts'
  * keydown and nothing else in the game ever consumes it, so the flag left over
  * from the last gear change would dismiss this screen the instant the guard
  * below expires — which is exactly what it used to do.
+ *
+ * @param onContinue - Called once, by the first key after the guard. It used to
+ *   reload the page, which was the only way to start a second run.
  */
-export function createGameOverScene(stats: RunSummary): Scene {
+export function createGameOverScene(
+  stats: RunSummary,
+  outcome: RecordOutcome,
+  onContinue: () => void,
+): Scene {
   resetInput()
   let ready = false
   let readyTimer = 0
+  let continued = false
 
   return {
     name: 'gameover',
@@ -28,9 +47,9 @@ export function createGameOverScene(stats: RunSummary): Scene {
     update(dt) {
       readyTimer += dt
       if (readyTimer > 1500) ready = true
-      if (ready && consumeAnyKey()) {
-        // Reload page to restart — simple for phase 2
-        window.location.reload()
+      if (ready && !continued && consumeAnyKey()) {
+        continued = true
+        onContinue()
       }
     },
 
@@ -42,8 +61,14 @@ export function createGameOverScene(stats: RunSummary): Scene {
 
       const reasonText = stats.reason === 'fuel' ? 'OUT OF FUEL'
         : stats.reason === 'timeout' ? 'TIME IS UP'
-          : stats.reason === 'crash' ? 'COLLISION' : 'LOST CONTROL'
+          : stats.reason === 'crash' ? 'COLLISION'
+            : stats.reason === 'quit' ? 'RUN ENDED' : 'LOST CONTROL'
       drawTextCentered(ctx, reasonText, 52, COLS, C.B_YELLOW)
+
+      // The run was already offered to the table before this screen was built
+      // (`main.ts`), so the screen only reports what happened.
+      const best = bestLine(outcome)
+      if (best) drawTextCentered(ctx, best, 64, COLS, outcome.newBest ? C.B_GREEN : C.YELLOW)
 
       // Five lines on a 12 px pitch, so the block reads as one table rather than
       // as a list of unrelated facts. Distance and time say what happened;

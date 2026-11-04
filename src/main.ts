@@ -20,6 +20,7 @@ import { createGameOverScene } from './scenes/gameover.ts'
 import { createIntroScene } from './scenes/intro.ts'
 import { roadSeedFromSearch } from './game/seed.ts'
 import { loadPrefs } from './game/prefs.ts'
+import { recordRun } from './game/hiscore.ts'
 import {
   contourEnabledFromSearch, glowSettingsFromSearch,
   drawTrafficMatrix, isMatrixRequested, matrixLayoutFor, matrixOptionsFromSearch,
@@ -115,9 +116,19 @@ function bootGame(): void {
   // Read once at boot: the route must not change under the player at midnight.
   const gameSeed = roadSeedFromSearch(window.location.search)
 
+  // Menu → drive → results → menu, without reloading the page. Every run is
+  // offered to the hiscore table however it ended, ESC included: a run the
+  // player stopped still drove the kilometres it scored.
+  function showMenu(): void {
+    replaceScene(scenes, createIntroScene(startDrive))
+  }
+
   function startDrive(): void {
     const drive = createDriveScene((stats) => {
-      replaceScene(scenes, createGameOverScene(stats))
+      const outcome = recordRun(stats.score, stats.seed)
+      // ESC asked to go back to the menu, and the menu shows the best run.
+      if (stats.reason === 'quit') showMenu()
+      else replaceScene(scenes, createGameOverScene(stats, outcome, showMenu))
     }, gameSeed)
     replaceScene(scenes, drive)
   }

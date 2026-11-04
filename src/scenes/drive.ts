@@ -106,10 +106,17 @@ function state(angle: number): string {
   return `${angle > 0 ? '+' : ''}${angle}/${PLAYER_TRUCK_ANGLES.length}`
 }
 
-type DriveState = 'waiting' | 'playing' | 'paused' | 'crashing'
+type DriveState = 'waiting' | 'playing' | 'paused' | 'crashing' | 'confirmQuit'
 
+/** The key that ends a run early. Asked twice, so one stray press costs nothing. */
+export const QUIT_KEY = 'Escape'
+
+/**
+ * @param onRunEnd - Called once, when the run is over: by a game over, or by
+ *   the player ending it with {@link QUIT_KEY} (`reason: 'quit'`).
+ */
 export function createDriveScene(
-  onGameOver: (stats: RunSummary) => void,
+  onRunEnd: (stats: RunSummary) => void,
   gameSeed: number,
 ): Scene {
   const v: Vehicle = createVehicle()
@@ -143,6 +150,12 @@ export function createDriveScene(
   resetCanisters((gameSeed + 2) >>> 0)
 
   let driveState: DriveState = 'waiting'
+  // Where to go back to when the player answers no to "end this run?".
+  let stateBeforeQuit: 'playing' | 'paused' = 'playing'
+  // Set by the key listener, acted on in update(), so a scene change never
+  // happens in the middle of a DOM event.
+  let quitKeyPressed = false
+  let quitCancelPressed = false
   // Manual gearbox — D = shift up, A = shift down. Edge-triggered (ignore key-repeat).
   // Both are inert unless the clutch (SHIFT) is held; see game/vehicle.ts.
   let shiftUpQueued = false
@@ -167,9 +180,25 @@ export function createDriveScene(
   // before the cargo system exists. 20 t = default = today's tuned feel.
   let weightT: number = TRUCK_WEIGHT_T
 
+  // Every listener below is removed in onExit. Before the game could return to
+  // the menu the page was reloaded after each run, so they never had to be; now
+  // a second run would otherwise still hear the first one's keys.
+  const listeners = new AbortController()
+  const { signal } = listeners
+
   // Only Enter or S starts the game — not Command, not any random key.
   // While playing, A/D queue a gear shift; ENTER cranks a stalled engine.
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    // Checked first: the quit question has to be answerable in every state.
+    if (e.key === QUIT_KEY) {
+      if (!e.repeat) quitKeyPressed = true
+      return
+    }
+    if (driveState === 'confirmQuit') {
+      // Any other key means no. Nothing it would normally do happens.
+      if (!e.repeat) quitCancelPressed = true
+      return
+    }
     if (driveState === 'waiting') {
       if (e.key === 'Enter' || e.key === 's' || e.key === 'S') isCranking = true
       return
@@ -190,19 +219,19 @@ export function createDriveScene(
       const i = TRUCK_WEIGHTS_T.indexOf(weightT as typeof TRUCK_WEIGHTS_T[number])
       weightT = TRUCK_WEIGHTS_T[(i + 1) % TRUCK_WEIGHTS_T.length]!
     }
-  })
+  }, { signal })
 
   window.addEventListener('keyup', (e: KeyboardEvent) => {
     if (e.key === 'Shift') clutchHeld = false
     if (e.key === 'Enter' || e.key === 's' || e.key === 'S') {
       if (crankMs < CRANK_NEEDED_MS) { isCranking = false; crankMs = 0; lastCrankBeepMs = 0 }
     }
-  })
+  }, { signal })
 
   // Alt-tabbing away with SHIFT down would otherwise leave the clutch held for
   // ever — the browser never sends the keyup. Coasting in neutral until the
   // player notices is a nasty way to lose a delivery.
-  window.addEventListener('blur', () => { clutchHeld = false })
+  window.addEventListener('blur', () => { clutchHeld = false }, { signal })
 
   /**
    * The road, as the mission planner asks about it. The clock is built from what
@@ -216,6 +245,23 @@ export function createDriveScene(
   }
   const mission = createMission(gameSeed, road)
 
+  /** What the run was worth so far — the same numbers however it ends. */
+  const summarize = (reason: RunSummary['reason']): RunSummary => ({
+    distance: v.distance,
+    elapsedMs,
+    canisters: canistersCollected,
+    score: score.points,
+    reason,
+    seed: gameSeed,
+  })
+
+  /** Ends the run on the player's word. The score counts as for any other end. */
+  const quitRun = (): void => {
+    gameOverFired = true
+    stopEngine()
+    onRunEnd(summarize('quit'))
+  }
+
   /** Centre-screen note with its own life, in ms: NEW LOAD, +10s and the like. */
   let flashText: string | null = null
   let flashMs = 0
@@ -228,6 +274,38 @@ export function createDriveScene(
       // Blink always ticks (for PRESS ENTER / PAUSED overlay)
       blinkAccum += dt
       while (blinkAccum >= BLINK_MS) { blinkAccum -= BLINK_MS; blinkPhase = !blinkPhase }
+
+      // ── Ending the run early: ESC asks, a second ESC confirms ──
+      if (gameOverFired) return
+      if (driveState === 'confirmQuit') {
+        if (quitKeyPressed) {
+          quitKeyPressed = false
+          quitRun()
+        } else if (quitCancelPressed) {
+          quitCancelPressed = false
+          driveState = stateBeforeQuit
+          // A P that answered no must not also pause or unpause the game.
+          consumePause()
+          if (driveState === 'playing') unmuteEngine()
+        }
+        return
+      }
+      if (quitKeyPressed) {
+        quitKeyPressed = false
+        if (driveState === 'waiting') {
+          // Nothing driven yet, so nothing to lose and nothing to ask.
+          quitRun()
+          return
+        }
+        if (driveState === 'playing' || driveState === 'paused') {
+          stateBeforeQuit = driveState
+          driveState = 'confirmQuit'
+          quitCancelPressed = false
+          muteEngine()
+          return
+        }
+        // Crashing: the run is already ending, the results screen follows.
+      }
 
       // ── Waiting state: hold Enter/S to crank the engine ──
       if (driveState === 'waiting') {
@@ -714,15 +792,14 @@ export function createDriveScene(
       function triggerGameOver(reason: 'fuel' | 'offroad' | 'timeout' | 'crash') {
         gameOverFired = true
         stopEngine()
-        onGameOver({
-          distance: v.distance,
-          elapsedMs,
-          canisters: canistersCollected,
-          score: score.points,
-          reason,
-          seed: gameSeed,
-        })
+        onRunEnd(summarize(reason))
       }
+    },
+
+    onExit() {
+      listeners.abort()
+      // Already silent after a game over or a quit; this covers any other exit.
+      stopEngine()
     },
 
     render(ctx) {
@@ -840,8 +917,13 @@ export function createDriveScene(
         drawTextCentered(ctx, 'ENGINE REDLINE', 44, COLS, C.B_RED, C.BLACK)
         drawTextCentered(ctx, 'SHIFT UP  D', 60, COLS, C.B_YELLOW, C.BLACK)
       }
-      if (driveState === 'paused' && blinkPhase) {
-        drawTextCentered(ctx, 'PAUSED', 56, COLS, C.B_RED, C.B_YELLOW)
+      if (driveState === 'paused') {
+        if (blinkPhase) drawTextCentered(ctx, 'PAUSED', 56, COLS, C.B_RED, C.B_YELLOW)
+        drawTextCentered(ctx, 'ESC - END RUN', 72, COLS, C.B_WHITE, C.BLACK)
+      }
+      if (driveState === 'confirmQuit') {
+        drawTextCentered(ctx, 'END THIS RUN?', 44, COLS, C.B_YELLOW, C.BLACK)
+        drawTextCentered(ctx, 'ESC = YES   OTHER KEY = NO', 60, COLS, C.B_WHITE, C.BLACK)
       }
     },
   }

@@ -15,6 +15,7 @@ import {
 import { ICEHAUL_LOADING_SCR } from '../assets/icehaul-loading.ts'
 import { COLS, GAME_WIDTH } from '../config.ts'
 import { getPrefs, updatePrefs, VOLUME_STEP, type Prefs } from '../game/prefs.ts'
+import { bestRun, type RunRecord } from '../game/hiscore.ts'
 
 /**
  * The loading screen, decoded once at import.
@@ -30,7 +31,7 @@ import { getPrefs, updatePrefs, VOLUME_STEP, type Prefs } from '../game/prefs.ts
 const SCREEN = parseSCR(ICEHAUL_LOADING_SCR)
 
 /**
- * Cell rows 0–5 — the night sky.
+ * Cell rows 0–6 — the night sky.
  *
  * Measured, not guessed: the truck's own colours (yellow marker lamps, red grille)
  * appear only on cell rows 8–18, so the sky above and the ice below are the two
@@ -38,8 +39,11 @@ const SCREEN = parseSCR(ICEHAUL_LOADING_SCR)
  * reflections, and those are what make the picture read as *a truck on ice at
  * night* rather than a truck on a grey field. The aurora is atmosphere; the
  * reflections are the subject.
+ *
+ * Seven rows since the best run got a line of its own (row 5); the hint moved
+ * down to row 6, still a row clear of the truck.
  */
-const PANEL_ROWS = 6
+const PANEL_ROWS = 7
 
 /** Items start on row 1, leaving row 0 as the panel's top margin. */
 const MENU_TOP = CELL
@@ -56,6 +60,22 @@ type ItemId = 'start' | 'glow' | 'contour' | 'volume'
 const ITEMS: readonly ItemId[] = ['start', 'glow', 'contour', 'volume']
 
 export const INTRO_HINT = 'CURSOR KEYS - ENTER'
+
+/** The menu row under the four items, where the best run is shown. */
+const BEST_ROW_Y = MENU_TOP + 4 * CELL
+
+/** The panel's bottom row, where the hint sits. */
+const HINT_ROW_Y = MENU_TOP + 5 * CELL
+
+/**
+ * `BEST 2350  SEED 20261104`, or `null` before the first stored run.
+ *
+ * The seed is shown as the number rather than as a date because it is what
+ * `?seed=` takes, and a custom route has no date to show.
+ */
+export function bestRunLine(best: RunRecord | null): string | null {
+  return best ? `BEST ${best.score}  SEED ${best.seed}` : null
+}
 
 /**
  * The ROM font is ASCII 32–127 and nothing else: `getCharRow` returns an empty row
@@ -113,6 +133,9 @@ export function createIntroScene(onStart: () => void): Scene {
   // menu honours it too. Edge-detected against zx-kit's held state rather than a
   // second listener: holding Enter must select once, not once per frame.
   let enterWasHeld = false
+  // Read once: storage is parsed on every read, and the table cannot change
+  // while the menu is open. Each return to the menu builds a new scene.
+  const bestLine = bestRunLine(bestRun())
 
   const activate = (): void => {
     const id = ITEMS[index]!
@@ -130,6 +153,15 @@ export function createIntroScene(onStart: () => void): Scene {
 
   return {
     name: 'intro',
+
+    onEnter(prev) {
+      // Coming back from a run, not from boot. The key that left the results
+      // screen may still be down, and its pending flag is still set: without
+      // this, an Enter or an F would pick START again before the player has
+      // seen the menu. zx-kit ignores auto-repeat, so a key cleared here stays
+      // released until it is pressed again.
+      if (prev) resetInput()
+    },
 
     update(dt) {
       if (started) return
@@ -182,10 +214,12 @@ export function createIntroScene(onStart: () => void): Scene {
         },
       )
 
+      if (bestLine) drawText(ctx, bestLine, MENU_X, BEST_ROW_Y, C.B_YELLOW, C.BLACK)
+
       // Bottom row of the panel, right-aligned so it reads as a footnote. One
       // cell of right margin keeps it off the screen edge.
       const hintX = (COLS - INTRO_HINT.length - 1) * CELL
-      drawText(ctx, INTRO_HINT, hintX, MENU_TOP + 4 * CELL, C.CYAN, C.BLACK)
+      drawText(ctx, INTRO_HINT, hintX, HINT_ROW_Y, C.CYAN, C.BLACK)
     },
   }
 }

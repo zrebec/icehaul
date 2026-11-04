@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dailyRoadSeed, formatSeedRoute, roadSeedFromSearch, seedToDate } from '../seed.ts'
+import { dailyRoadSeed, formatSeedRoute, isRouteSeed, roadSeedFromSearch, seedToDate } from '../seed.ts'
 
 // Local noon, so no timezone can push this across a day boundary in either
 // direction — which is the whole point of reading calendar components.
@@ -17,6 +17,23 @@ describe('dailyRoadSeed', () => {
   it('does not roll over for a player just before local midnight', () => {
     expect(dailyRoadSeed(new Date(2026, 7, 9, 23, 59, 59))).toBe(20_260_809)
     expect(dailyRoadSeed(new Date(2026, 7, 10, 0, 0, 1))).toBe(20_260_810)
+  })
+})
+
+describe('isRouteSeed', () => {
+  it('accepts whole numbers from 0 to the 32-bit ceiling', () => {
+    expect(isRouteSeed(0)).toBe(true)
+    expect(isRouteSeed(20_261_104)).toBe(true)
+    expect(isRouteSeed(0xffff_ffff)).toBe(true)
+  })
+
+  it('rejects anything the road could not be built from', () => {
+    expect(isRouteSeed(-1)).toBe(false)
+    expect(isRouteSeed(1.5)).toBe(false)
+    expect(isRouteSeed(0x1_0000_0000)).toBe(false)
+    expect(isRouteSeed(Number.NaN)).toBe(false)
+    expect(isRouteSeed('20261104')).toBe(false)
+    expect(isRouteSeed(null)).toBe(false)
   })
 })
 
