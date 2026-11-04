@@ -1,3 +1,10 @@
+# [0.26.0](https://github.com/zrebec/icehaul/compare/v0.25.0...v0.26.0) (2026-11-04)
+
+
+### Features
+
+* hiscore with seed, ESC back to the menu, gentler per-leg difficulty ramp ([#84](https://github.com/zrebec/icehaul/issues/84)) ([50dd6ee](https://github.com/zrebec/icehaul/commit/50dd6ee11a631c6517c79e4a0d88d0bb8f5eb0f8))
+
 # [0.25.0](https://github.com/zrebec/icehaul/compare/v0.24.0...v0.25.0) (2026-09-11)
 
 
