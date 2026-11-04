@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createIntroScene, INTRO_HINT } from '../intro.ts'
+import { bestRunLine, createIntroScene, INTRO_HINT } from '../intro.ts'
 import { DEFAULT_PREFS, getPrefs, loadPrefs } from '../../game/prefs.ts'
 
 /**
@@ -196,8 +196,8 @@ describe('intro scene — rendering', () => {
 
     const fills = (ctx.fillRect as ReturnType<typeof vi.fn>).mock.calls
     // The picture itself is drawn cell by cell, so the panel is one wide fill
-    // across the full 256px width and exactly six cell rows tall.
-    expect(fills.some(([x, y, w, h]) => x === 0 && y === 0 && w === 256 && h === 48)).toBe(true)
+    // across the full 256px width and exactly seven cell rows tall.
+    expect(fills.some(([x, y, w, h]) => x === 0 && y === 0 && w === 256 && h === 56)).toBe(true)
     // Every menu cell is a filled 8x8 paper block, so the panel is far from the
     // only fill: the picture and the four labels are all in there too.
     expect(fills.length).toBeGreaterThan(100)
@@ -207,6 +207,23 @@ describe('intro scene — rendering', () => {
     expect(INTRO_HINT.length).toBeLessThanOrEqual(31)
     // ASCII only: the ROM font has no glyph above code 127.
     expect([...INTRO_HINT].every((c) => c.charCodeAt(0) >= 32 && c.charCodeAt(0) <= 127)).toBe(true)
+  })
+
+  it('names the best run and the seed it was driven on', () => {
+    expect(bestRunLine({ name: 'DRIVER', score: 2350, seed: 20_261_104 }))
+      .toBe('BEST 2350  SEED 20261104')
+  })
+
+  it('shows no best-run line before anything is stored', () => {
+    expect(bestRunLine(null)).toBeNull()
+  })
+
+  it('fits the longest best-run line into the panel in ROM-font characters', () => {
+    // Six-digit score and the largest seed the road accepts.
+    const line = bestRunLine({ name: 'DRIVER', score: 999_999, seed: 0xffff_ffff })!
+    // Starts one cell in, so 31 columns are left on the 32-column screen.
+    expect(line.length).toBeLessThanOrEqual(31)
+    expect([...line].every((c) => c.charCodeAt(0) >= 32 && c.charCodeAt(0) <= 127)).toBe(true)
   })
 
   it('renders without touching an image element at all', () => {

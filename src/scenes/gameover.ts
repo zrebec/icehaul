@@ -8,6 +8,17 @@ import {
 import { COLS, GAME_HEIGHT, GAME_WIDTH } from '../config.ts'
 import { averageSpeedKph, formatClock, type RunSummary } from '../game/runStats.ts'
 import { formatSeedRoute } from '../game/seed.ts'
+import type { RecordOutcome } from '../game/hiscore.ts'
+
+/**
+ * The line between the reason and the run's numbers: a new best, the best this
+ * run did not beat, or nothing at all before anything has been stored.
+ */
+export function bestLine(outcome: RecordOutcome): string | null {
+  if (outcome.newBest) return 'NEW BEST SCORE!'
+  if (!outcome.best) return null
+  return `BEST: ${outcome.best.score}  SEED ${outcome.best.seed}`
+}
 
 /**
  * The results screen.
@@ -17,7 +28,7 @@ import { formatSeedRoute } from '../game/seed.ts'
  * from the last gear change would dismiss this screen the instant the guard
  * below expires — which is exactly what it used to do.
  */
-export function createGameOverScene(stats: RunSummary): Scene {
+export function createGameOverScene(stats: RunSummary, outcome: RecordOutcome): Scene {
   resetInput()
   let ready = false
   let readyTimer = 0
@@ -44,6 +55,11 @@ export function createGameOverScene(stats: RunSummary): Scene {
         : stats.reason === 'timeout' ? 'TIME IS UP'
           : stats.reason === 'crash' ? 'COLLISION' : 'LOST CONTROL'
       drawTextCentered(ctx, reasonText, 52, COLS, C.B_YELLOW)
+
+      // The run was already offered to the table before this screen was built
+      // (`main.ts`), so the screen only reports what happened.
+      const best = bestLine(outcome)
+      if (best) drawTextCentered(ctx, best, 64, COLS, outcome.newBest ? C.B_GREEN : C.YELLOW)
 
       // Five lines on a 12 px pitch, so the block reads as one table rather than
       // as a list of unrelated facts. Distance and time say what happened;

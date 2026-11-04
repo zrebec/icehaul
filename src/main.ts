@@ -20,6 +20,7 @@ import { createGameOverScene } from './scenes/gameover.ts'
 import { createIntroScene } from './scenes/intro.ts'
 import { roadSeedFromSearch } from './game/seed.ts'
 import { loadPrefs } from './game/prefs.ts'
+import { recordRun } from './game/hiscore.ts'
 import {
   contourEnabledFromSearch, glowSettingsFromSearch,
   drawTrafficMatrix, isMatrixRequested, matrixLayoutFor, matrixOptionsFromSearch,
@@ -117,7 +118,7 @@ function bootGame(): void {
 
   function startDrive(): void {
     const drive = createDriveScene((stats) => {
-      replaceScene(scenes, createGameOverScene(stats))
+      replaceScene(scenes, createGameOverScene(stats, recordRun(stats.score, stats.seed)))
     }, gameSeed)
     replaceScene(scenes, drive)
   }
