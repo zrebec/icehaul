@@ -91,6 +91,24 @@ describe('intro scene — starting', () => {
     scene.onExit?.(null)
     expect(resetInput).toHaveBeenCalled()
   })
+
+  it('clears input when a run returns to it, so the key that got here cannot start a new one', async () => {
+    const { resetInput } = await import('zx-kit')
+    vi.mocked(resetInput).mockClear()
+    const scene = createIntroScene(() => undefined)
+
+    scene.onEnter?.({ name: 'gameover', update: () => undefined, render: () => undefined })
+    expect(resetInput).toHaveBeenCalledOnce()
+  })
+
+  it('leaves input alone at boot, where nothing came before it', async () => {
+    const { resetInput } = await import('zx-kit')
+    vi.mocked(resetInput).mockClear()
+    const scene = createIntroScene(() => undefined)
+
+    scene.onEnter?.(null)
+    expect(resetInput).not.toHaveBeenCalled()
+  })
 })
 
 describe('intro scene — navigation', () => {

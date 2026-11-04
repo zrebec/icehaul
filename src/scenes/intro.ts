@@ -154,6 +154,15 @@ export function createIntroScene(onStart: () => void): Scene {
   return {
     name: 'intro',
 
+    onEnter(prev) {
+      // Coming back from a run, not from boot. The key that left the results
+      // screen may still be down, and its pending flag is still set: without
+      // this, an Enter or an F would pick START again before the player has
+      // seen the menu. zx-kit ignores auto-repeat, so a key cleared here stays
+      // released until it is pressed again.
+      if (prev) resetInput()
+    },
+
     update(dt) {
       if (started) return
       elapsedMs += dt

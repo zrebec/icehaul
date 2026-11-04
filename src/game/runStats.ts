@@ -23,7 +23,8 @@ export interface RunSummary {
   /** Fuel canisters picked up across the whole run. */
   canisters: number
   score: number
-  reason: 'fuel' | 'offroad' | 'timeout' | 'crash'
+  /** How the run ended. `'quit'` is the player ending it with ESC. */
+  reason: 'fuel' | 'offroad' | 'timeout' | 'crash' | 'quit'
   /**
    * Which route this was. Carried here rather than read from the URL on the
    * results screen: the URL is not guaranteed to exist — it will not at all if

@@ -27,11 +27,19 @@ export function bestLine(outcome: RecordOutcome): string | null {
  * keydown and nothing else in the game ever consumes it, so the flag left over
  * from the last gear change would dismiss this screen the instant the guard
  * below expires — which is exactly what it used to do.
+ *
+ * @param onContinue - Called once, by the first key after the guard. It used to
+ *   reload the page, which was the only way to start a second run.
  */
-export function createGameOverScene(stats: RunSummary, outcome: RecordOutcome): Scene {
+export function createGameOverScene(
+  stats: RunSummary,
+  outcome: RecordOutcome,
+  onContinue: () => void,
+): Scene {
   resetInput()
   let ready = false
   let readyTimer = 0
+  let continued = false
 
   return {
     name: 'gameover',
@@ -39,9 +47,9 @@ export function createGameOverScene(stats: RunSummary, outcome: RecordOutcome): 
     update(dt) {
       readyTimer += dt
       if (readyTimer > 1500) ready = true
-      if (ready && consumeAnyKey()) {
-        // Reload page to restart — simple for phase 2
-        window.location.reload()
+      if (ready && !continued && consumeAnyKey()) {
+        continued = true
+        onContinue()
       }
     },
 
@@ -53,7 +61,8 @@ export function createGameOverScene(stats: RunSummary, outcome: RecordOutcome): 
 
       const reasonText = stats.reason === 'fuel' ? 'OUT OF FUEL'
         : stats.reason === 'timeout' ? 'TIME IS UP'
-          : stats.reason === 'crash' ? 'COLLISION' : 'LOST CONTROL'
+          : stats.reason === 'crash' ? 'COLLISION'
+            : stats.reason === 'quit' ? 'RUN ENDED' : 'LOST CONTROL'
       drawTextCentered(ctx, reasonText, 52, COLS, C.B_YELLOW)
 
       // The run was already offered to the table before this screen was built

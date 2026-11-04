@@ -32,6 +32,7 @@ npm run dev       # http://localhost:5174
 | D / A | Shift up / down (only while the clutch is held) |
 | Enter | Confirm on the title screen · crank the engine · restart after a stall |
 | P | Pause / unpause |
+| ESC | End the run and go back to the title screen. While driving it asks first: ESC again ends, any other key carries on. The score is kept like any other run's |
 | W | Debug: cycle gross weight 10 → 20 → 30 t |
 
 ### Title screen

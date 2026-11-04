@@ -228,6 +228,10 @@ deploy fails like that, check these two action versions FIRST.
 - **ArrowLeft / ArrowRight** — steer
 - **D** — shift up · **A** — shift down (manual 5-speed gearbox)
 - **ENTER (hold ~1.8 s)** — crank the engine to start / restart a stalled engine; releasing early resets the crank. `STARTING...` overlay while cranking (`CRANK_NEEDED_MS = 1800` in `config.ts`).
+- **ESC** — end the run and return to the title menu (`QUIT_KEY` in `scenes/drive.ts`). Before the
+  engine starts it ends at once; while driving or paused it asks `END THIS RUN?` — ESC again ends,
+  any other key carries on. The run is offered to the hiscore table like any other, and the results
+  screen also leads back to the menu now, so a second run no longer needs a page reload.
 - **O** — cycle the debug overlay: `off → stats → collision → off`. Same key as minefield.
   `?debug=stats` / `?debug=collision` open it without a keypress; off draws nothing at all
   (`render/debug/overlay.ts`). Four corners, because they are four different questions and a single
