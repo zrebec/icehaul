@@ -12,13 +12,14 @@
 import { describe, it, expect } from 'vitest'
 import {
   addMissionTime, createMission, legBudgetMs, nextTargetLengthM, tickMission,
-  deliverIfArrived, isMissionExpired, remainingM,
+  deliverIfArrived, isMissionExpired, remainingM, legSlack,
 } from '../mission.ts'
 import type { RoadSampler } from '../routeplan.ts'
 import {
   FIRST_TARGET_DIST_M, NEXT_TARGET_RANGE,
   DELIVERY_TIME_CARRY_PCT, MAX_SPEED, SURFACE_GRIP,
   PLAN_PACE_MAX_KMH, PLAN_PACE_MIN_KMH,
+  PLAN_SLACK, LEG_SLACK_MAX_CUT,
 } from '../../config.ts'
 
 const SEED = 1_443_866
@@ -53,7 +54,7 @@ describe('leg budget', () => {
   it('gives the first leg a beginner allowance the others do not get', () => {
     // The planner reads the route from the seed; a player on their first run of
     // it cannot, and the first leg also starts from a cold standstill.
-    expect(legBudgetMs(0, 5000, ROAD, true)).toBeGreaterThan(legBudgetMs(0, 5000, ROAD))
+    expect(legBudgetMs(0, 5000, ROAD, { firstLeg: true })).toBeGreaterThan(legBudgetMs(0, 5000, ROAD))
   })
 
   it('still grows with the length of the leg', () => {
@@ -130,7 +131,7 @@ describe('delivery', () => {
     expect(leftover).toBeCloseTo(granted / 2, 6)
 
     deliverIfArrived(m, FIRST_TARGET_DIST_M, ROAD)
-    const legBudget = legBudgetMs(m.legStartDist, m.targetDist, ROAD)
+    const legBudget = legBudgetMs(m.legStartDist, m.targetDist, ROAD, { slack: legSlack(1) })
     expect(m.timerMs).toBeCloseTo(leftover * DELIVERY_TIME_CARRY_PCT + legBudget, 6)
     expect(m.timerMs).toBeGreaterThan(legBudget)
   })
@@ -151,12 +152,57 @@ describe('delivery', () => {
     for (let leg = 0; leg < 20; leg++) {
       const onTheClock = m.timerMs
       // Each leg's own budget, ignoring anything banked, must be on the clock.
-      expect(legBudgetMs(m.legStartDist, m.targetDist, ROAD))
+      const slack = legSlack(m.deliveryCount)
+      expect(legBudgetMs(m.legStartDist, m.targetDist, ROAD, { slack }))
         .toBeLessThanOrEqual(onTheClock + 0.01)
       dist = m.targetDist
       expect(deliverIfArrived(m, dist, ROAD)).toBe(true)
     }
     expect(m.deliveryCount).toBe(20)
+  })
+})
+
+/** A road the planner cannot finish inside its pace clamp, so the slack shows. */
+const ICE = flatRoad('ice')
+
+describe('leg by leg — later legs ask a little more', () => {
+  it('leaves the first leg exactly as it was', () => {
+    expect(legSlack(0)).toBe(PLAN_SLACK)
+    const m = createMission(SEED, ICE)
+    expect(m.lastBudgetMs).toBe(legBudgetMs(0, FIRST_TARGET_DIST_M, ICE, { firstLeg: true, slack: PLAN_SLACK }))
+  })
+
+  it('tightens the slack in small steps, then stops', () => {
+    const slacks = Array.from({ length: 12 }, (_, leg) => legSlack(leg))
+    for (let leg = 1; leg < slacks.length; leg++) {
+      expect(slacks[leg]!).toBeLessThanOrEqual(slacks[leg - 1]!)
+      // Small steps: no delivery takes more than a few hundredths off.
+      expect(slacks[leg - 1]! - slacks[leg]!).toBeLessThanOrEqual(0.05)
+    }
+    expect(slacks[1]!).toBeLessThan(slacks[0]!)
+    expect(Math.min(...slacks)).toBeCloseTo(PLAN_SLACK - LEG_SLACK_MAX_CUT, 10)
+    expect(legSlack(1000)).toBeCloseTo(PLAN_SLACK - LEG_SLACK_MAX_CUT, 10)
+  })
+
+  it('grants a later leg less time than the same road would get on the first slack', () => {
+    const m = createMission(SEED, ICE)
+    for (let leg = 1; leg <= 8; leg++) {
+      deliverIfArrived(m, m.targetDist, ICE)
+      const untightened = legBudgetMs(m.legStartDist, m.targetDist, ICE)
+      expect(m.lastBudgetMs).toBeLessThan(untightened)
+      // ...but never by more than the cap allows.
+      const floor = legBudgetMs(m.legStartDist, m.targetDist, ICE, { slack: PLAN_SLACK - LEG_SLACK_MAX_CUT })
+      expect(m.lastBudgetMs).toBeGreaterThanOrEqual(floor)
+    }
+  })
+
+  it('still never asks more than the pace clamp allows', () => {
+    const m = createMission(SEED, ROAD)
+    for (let leg = 1; leg <= 10; leg++) {
+      deliverIfArrived(m, m.targetDist, ROAD)
+      const lengthM = m.targetDist - m.legStartDist
+      expect(requiredKph(lengthM, m.lastBudgetMs)).toBeLessThanOrEqual(PLAN_PACE_MAX_KMH + 0.01)
+    }
   })
 })
 

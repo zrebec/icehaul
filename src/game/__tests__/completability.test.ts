@@ -517,6 +517,10 @@ function runSim(
   let legStartTime = 0
   let legStartFuel = v.fuel
   let legCanisters = 0
+  // What the mission granted the leg being driven — read from the mission, not
+  // re-planned here, so the report shows the first-leg bonus and each later
+  // leg's tighter slack exactly as the drive scene would.
+  let legBudgetGrantedMs = mission.lastBudgetMs
 
   function flushSegment(currentSurface: Surface, nowDist: number, nowTime: number, nowFuel: number) {
     const lengthM = nowDist - segStartDist
@@ -663,7 +667,7 @@ function runSim(
         index: mission.deliveryCount,
         lengthM: Math.round(lengthM),
         timeS: Math.round((elapsedMs - legStartTime) / 100) / 10,
-        budgetS: Math.round(legBudgetMs(legStartDist, mission.legStartDist, road) / 100) / 10,
+        budgetS: Math.round(legBudgetGrantedMs / 100) / 10,
         // What carried over, not what is on the clock now: by this point
         // deliverIfArrived has already added the next leg's whole budget.
         timeLeftS: Math.round((mission.timerMs - mission.lastBudgetMs) / 100) / 10,
@@ -672,6 +676,7 @@ function runSim(
         canisters: legCanisters,
       })
       v.fuel = Math.min(1, v.fuel + DELIVERY_FUEL_REFILL)
+      legBudgetGrantedMs = mission.lastBudgetMs
       legStartDist = mission.legStartDist
       legStartTime = elapsedMs
       legStartFuel = v.fuel
@@ -808,7 +813,7 @@ describe('completability — first 5 km (first delivery)', () => {
     console.log(`\nSurfaces in first 5km (seed ${SEED}):`, [...surfaces].sort().join(', '))
     // The first leg's demand is no longer a constant — it is read off this
     // seed's road. Printed, because it is now the most interesting number here.
-    const firstLegMs = legBudgetMs(0, FIRST_TARGET_DIST_M, roadFor(SEED), true)
+    const firstLegMs = legBudgetMs(0, FIRST_TARGET_DIST_M, roadFor(SEED), { firstLeg: true })
     console.log(`Required min avg speed: ${((FIRST_TARGET_DIST_M / 1000) / (firstLegMs / 3600000)).toFixed(1)} km/h`)
     expect(nonAsphalt.length).toBeGreaterThanOrEqual(0) // informational
   })
@@ -854,7 +859,7 @@ describe('completability — multi-seed sweep (20 seeds)', () => {
     for (const { seed, allResults } of sweep) {
       resetRoad(seed)
       const pace = (FIRST_TARGET_DIST_M / 1000)
-        / (legBudgetMs(0, FIRST_TARGET_DIST_M, roadFor(seed), true) / 3_600_000)
+        / (legBudgetMs(0, FIRST_TARGET_DIST_M, roadFor(seed), { firstLeg: true }) / 3_600_000)
       const cell = (name: string) => {
         const r = allResults.find(x => x.strategy === name)!
         if (r.completed) tally[name as keyof typeof tally]++

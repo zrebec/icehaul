@@ -162,6 +162,14 @@ Written down so they stop living in a chat window. None is scheduled; the queue 
 2. **`feat(mission)`: make the clock bite again** *(2-4 h, but a decision first)*. See §A above for
    the arithmetic and the three levers. Recommendation: pace to 42 and a cap on the bank; leave
    `DELIVERY_TIME_CARRY_PCT` alone, because Fox already decided that once.
+   **Part done 2026-11-04:** every leg after the first is planned a little tighter —
+   `LEG_SLACK_STEP` takes 0.02 off `PLAN_SLACK` per delivery, `LEG_SLACK_MAX_CUT` stops it at 1.45
+   (leg 9). Over seven legs it changes nothing for the fast bots, whom the clock never stops; it
+   ends the reference `smart` driver on seed 42 during leg 6, where it used to finish all seven.
+   The bank still grows for a fast driver (seed 42, winning bot: 11.7 min carried at drop-off 7,
+   14.2 without the ramp), so **the cap on the bank is still open and still Fox's call.** Note that
+   the banked figure the sweep prints is now the carried time only; until then it included the
+   next leg's whole budget, which is where the old 15-20 min readings came from.
 3. **`feat(fuel)`: canisters that cost something to take** *(~0.5 day)*. §B shows fuel cannot bite
    below 87 km/h. Turning a constant is the dull answer; the interesting one is to stop scattering
    canisters uniformly and place them where a detour costs something — road edge, mid-bend, on the
