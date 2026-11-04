@@ -505,7 +505,9 @@ export const DELIVERY_TIME_LIMIT_MS =
  * sekundu — to je zámer a to hovorí aj tá znelka pri odovzdaní.
  *
  * **Čo ale ostáva otvorené, je strop na banku:** nasporený čas sa kumuluje —
- * seed 42 dá 15,2 → 16,6 → 19,6 min do tretieho odovzdania. Zastropovať banku
+ * seed 42 dá víťaznej stratégii 2,7 → 6,9 → 9,0 min do tretieho odovzdania.
+ * (Staršie čísla 15,2 → 16,6 → 19,6 boli zle odmerané: zahŕňali aj celý
+ * rozpočet nasledujúcej etapy.) Zastropovať banku
  * necháva prenos štedrý a berie mu len to kumulovanie; znížiť tento podiel by trestalo
  * práve dobrého vodiča, čo je iná vec a Fox ju už raz zamietol.
  */

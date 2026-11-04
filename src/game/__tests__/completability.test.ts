@@ -664,7 +664,9 @@ function runSim(
         lengthM: Math.round(lengthM),
         timeS: Math.round((elapsedMs - legStartTime) / 100) / 10,
         budgetS: Math.round(legBudgetMs(legStartDist, mission.legStartDist, road) / 100) / 10,
-        timeLeftS: Math.round(mission.timerMs / 100) / 10,
+        // What carried over, not what is on the clock now: by this point
+        // deliverIfArrived has already added the next leg's whole budget.
+        timeLeftS: Math.round((mission.timerMs - mission.lastBudgetMs) / 100) / 10,
         fuelStart: Math.round(legStartFuel * 1000) / 1000,
         fuelEnd: Math.round(v.fuel * 1000) / 1000,
         canisters: legCanisters,
